@@ -1,0 +1,49 @@
+name: Load FB15k Dataset
+description: Loads the FB15k dataset and saves it as a Dataset type.
+outputs:
+  - {name: fb15k_data, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision torchaudio torch_geometric pandas || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision torchaudio torch_geometric pandas --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        import torch
+        from torch_geometric.datasets import FB15k_237
+        
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--fb15k_data', type=str, required=True)
+        
+        args = parser.parse_args()
+        
+        print(f"[INFO] Loading FB15k dataset...")
+        dataset = FB15k_237(root='/tmp/fb15k')
+        data = dataset[0]
+        
+        print(f"[INFO] Dataset loaded successfully")
+        print(f"[INFO] Number of nodes: {data.num_nodes}")
+        print(f"[INFO] Number of edges: {data.edge_index.shape[1]}")
+        print(f"[INFO] Number of relations: {data.edge_type.max().item() + 1 if hasattr(data, 'edge_type') else 'N/A'}")
+        print(f"[INFO] Unique entities: {torch.unique(data.edge_index)}")
+        
+        # Ensure output directory
+        os.makedirs(os.path.dirname(args.fb15k_data), exist_ok=True)
+        
+        # Save the entire data object using pickle
+        with open(args.fb15k_data, "wb") as f: pickle.dump(data, f)
+        
+        print(f"[SUCCESS] Saved FB15k dataset to {args.fb15k_data}")
+    args:
+      - --fb15k_data
+      - {outputPath: fb15k_data}
