@@ -1,0 +1,190 @@
+name: Katib CNN Tuner
+description: Launches a Katib experiment to hypertune a CNN model using the MNIST dataset.
+
+inputs:
+  - name: model_name
+    type: String
+    default: cnn
+    description: Name of the CNN model to train.
+
+  - name: dataset_url
+    type: String
+    description: URL to fetch the MNIST dataset (optional if using torchvision.datasets.MNIST directly).
+
+  - name: parameters_to_tune
+    type: String
+    description: List of parameter specs to tune (Katib V1beta1ParameterSpec format).
+
+  - name: objective_metric_name
+    type: String
+    description: Metric Katib will optimize (e.g., accuracy).
+
+  - name: objective_type
+    type: String
+    description: Optimization type (maximize or minimize).
+
+  - name: objective_goal
+    type: String
+    description: Target metric value (e.g., 0.98).
+
+  - name: algorithm_name
+    type: String
+    default: tpe
+    description: Search algorithm (e.g., random, tpe, grid, bayesianoptimization).
+
+  - name: early_stopping_algorithm
+    type: String
+    default: medianstop
+    description: Early stopping algorithm (e.g., none, medianstop, truncation).
+
+  - name: max_trial_count
+    type: Integer
+    default: '4'
+    description: Maximum number of trials.
+
+  - name: parallel_trial_count
+    type: String
+    default: '2'
+    description: Number of trials to run in parallel.
+
+  - name: max_failed_trial_count
+    type: String
+    default: '2'
+    description: Maximum number of failed trials.
+
+  - name: experiment_name
+    type: String
+    default: katib-cnn-experiment
+    description: Name of the Katib experiment.
+
+outputs:
+  - name: best_hyperparams
+    type: JsonArray
+    description: Best parameter set found by Katib.
+
+  - name: payload
+    type: String
+    description: All trial results and metrics.
+
+implementation:
+  container:
+    image: tensorflow/tensorflow:2.17.0
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        from kubernetes import client, config
+        import kubeflow.katib as katib
+        from kubeflow.katib import (
+            V1beta1AlgorithmSpec,
+            V1beta1Experiment,
+            V1beta1ExperimentSpec,
+            V1beta1ObjectiveSpec,
+            V1beta1ParameterSpec,
+            V1beta1EarlyStoppingSpec,
+            V1beta1TrialTemplate,
+            V1beta1MetricsCollectorSpec,
+            V1beta1FileSystemPath,
+        )
+
+        try:
+            config.load_incluster_config()
+        except:
+            config.load_kube_config()
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--best_hyperparams", type=str, required=True)
+        parser.add_argument("--parameters_to_tune", type=str, required=True)
+        parser.add_argument("--objective_metric_name", type=str, required=True)
+        parser.add_argument("--objective_type", type=str, required=True)
+        parser.add_argument("--objective_goal", type=float, required=True)
+        parser.add_argument("--algorithm_name", type=str, required=True)
+        parser.add_argument("--early_stopping_algorithm", type=str, required=True)
+        parser.add_argument("--max_trial_count", type=int, required=True)
+        parser.add_argument("--parallel_trial_count", type=int, required=True)
+        parser.add_argument("--max_failed_trial_count", type=int, required=True)
+        parser.add_argument("--experiment_name", type=str, required=True)
+        parser.add_argument("--model_name", type=str, required=True)
+        parser.add_argument("--payload", type=str, required=True)
+        parser.add_argument("--dataset_url", type=str, required=False)
+
+        args = parser.parse_args()
+
+        # Parse Katib parameters
+        params_input = json.loads(args.parameters_to_tune)
+
+        parameters = [
+            V1beta1ParameterSpec(
+                name=p["name"],
+                parameter_type=p["parameter_type"],
+                feasible_space=p["feasible_space"]
+            )
+            for p in params_input
+        ]
+
+        metrics_collector = V1beta1MetricsCollectorSpec(
+            source={
+                "fileSystemPath": V1beta1FileSystemPath(
+                    path="/katib/mnist-metrics.json",
+                    kind="File",
+                    format="JSON"
+                )
+            },
+            collector={"kind": "File"}
+        )
+
+        experiment_name = args.experiment_name
+        namespace = "kubeflow"
+
+        objective_spec = V1beta1ObjectiveSpec(
+            type=args.objective_type,
+            goal=args.objective_goal,
+            objective_metric_name=args.objective_metric_name
+        )
+
+        algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
+        early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
+
+        trial_template = V1beta1TrialTemplate(
+            retain=True,
+            primary_container_name="training-container",
+            trial_parameters=[
+                {"name": p["name"], "description": p["name"], "reference": p["name"]}
+                for p in params_input
+            ],
+            trial_spec={
+                "apiVersion": "batch/v1",
+                "kind": "Job",
+                "spec": {
+                    "ttlSecondsAfterFinished": 86400,
+                    "template": {
+                        "metadata": {"annotations": {"sidecar.istio.io/inject": "false"}},
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "training-container",
+                                    "image": "your-dockerhub-user/cnn_mnist_image:latest",
+                                    "command": ["python", "train_cnn.py"],
+                                    "args": sum([
+                                        ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
+                                        for p in params_input
+                                    ], []),
+                                    "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
+                                }
+                            ],
+                            "restartPolicy": "Never"
+                        }
+                    }
+                }
+            }
+        )
+
+        experiment_spec = V1beta1ExperimentSpec(
+            objective=objective_spec,
+            algorithm=algorithm_spec,
+            parameters=parameters,
+            trial_template=trial_temp
