@@ -112,7 +112,7 @@ implementation:
         parser.add_argument("--parameters_to_tune", type=str, required=True)
         parser.add_argument("--objective_metric_name", type=str, required=True)
         parser.add_argument("--objective_type", type=str, required=True)
-        parser.add_argument("--objective_goal", type=float, required=True)
+        parser.add_argument("--objective_goal", type=str, required=True)
         parser.add_argument("--algorithm_name", type=str, required=True)
         parser.add_argument("--early_stopping_algorithm", type=str, required=True)
         parser.add_argument("--max_trial_count", type=int, required=True)
