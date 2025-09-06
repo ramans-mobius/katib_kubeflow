@@ -1,0 +1,49 @@
+name: Load IMDB Dataset
+description: Loads the IMDB dataset (Hugging Face: stanfordnlp/imdb) and saves it as a Dataset type.
+outputs:
+  - {name: imdb_data, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        from datasets import load_dataset
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--imdb_data', type=str, required=True)
+        args = parser.parse_args()
+
+        print(f"[INFO] Downloading IMDB dataset (first 1000 samples)...")
+        dataset = load_dataset("stanfordnlp/imdb", split="train[:1000]")
+
+        print(f"[INFO] Dataset loaded successfully")
+        print(f"[INFO] Total samples: {len(dataset)}")
+        print(f"[INFO] Columns: {dataset.column_names}")
+
+        imdb_dict = {
+            "text": dataset["text"],
+            "label": dataset["label"]
+        }
+
+        os.makedirs(os.path.dirname(args.imdb_data), exist_ok=True)
+
+        with open(args.imdb_data, "wb") as f:
+            pickle.dump(imdb_dict, f)
+
+        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_data}")
+
+    args:
+      - --imdb_data
+      - {outputPath: imdb_data}
