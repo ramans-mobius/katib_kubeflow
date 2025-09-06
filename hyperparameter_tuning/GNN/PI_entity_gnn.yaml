@@ -1,0 +1,83 @@
+name: PI Entity Instances Service
+description: Creates a new instance in the PI Entity Instances Service using schemaId, domain, payload, and jwt token.
+
+inputs:
+  - {name: schemaId, type: string}
+  - {name: domine, type: string}        # Base URL like https://ig.gov-cloud.ai
+  - {name: payload, type: string}       # JSON payload for entity creation
+  - {name: jwtToken, type: string}      # Bearer token
+
+outputs:
+  - {name: response, type: string}      # Full API response
+  - {name: statusCode, type: string}    # HTTP status code
+
+implementation:
+  container:
+    image: python:3.8
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet requests || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet requests --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import requests
+        import json
+        import argparse
+        import os
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--schemaId", type=str, required=True)
+        parser.add_argument("--domine", type=str, required=True)
+        parser.add_argument("--payload", type=str, required=True)
+        parser.add_argument("--jwtToken", type=str, required=True)
+        parser.add_argument("--response", type=str, required=True)
+        parser.add_argument("--statusCode", type=str, required=True)
+        args = parser.parse_args()
+
+        url = f"{args.domine}/pi-entity-instances-service/v2.0/schemas/{args.schemaId}/instances"
+        headers = {
+            "Authorization": f"Bearer {args.jwtToken}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            data = json.loads(args.payload)
+        except Exception as e:
+            print("Invalid JSON payload:", e)
+            data = {}
+
+        print(data)
+
+        print(f"Sending POST to {url}")
+        response = requests.post(url, headers=headers, json=data)
+        print("Status Code:", response.status_code)
+
+        result_text = response.text
+        print(result_text)
+
+        def write_output(path, value):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(str(value))
+
+        write_output(args.response, result_text)
+        write_output(args.statusCode, response.status_code)
+
+    args:
+      - --schemaId
+      - {inputValue: schemaId}
+      - --domine
+      - {inputValue: domine}
+      - --payload
+      - {inputValue: payload}
+      - --jwtToken
+      - {inputValue: jwtToken}
+      - --response
+      - {outputPath: response}
+      - --statusCode
+      - {outputPath: statusCode}
