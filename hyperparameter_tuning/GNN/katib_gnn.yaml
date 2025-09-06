@@ -34,6 +34,7 @@ inputs:
 
   - name: objective_goal
     type: String
+    default: "0.95"
     description: Target goal value for the metric (e.g., 0.99)
     
   - name: algorithm_name
@@ -153,6 +154,8 @@ implementation:
 
         experiment_name = args.experiment_name
         namespace = "admin"
+        
+        objective_goal = float(args.objective_goal)
 
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
