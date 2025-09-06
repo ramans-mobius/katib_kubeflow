@@ -1,0 +1,49 @@
+name: Load MNIST Dataset
+description: Loads the MNIST dataset and saves it as a Dataset type.
+outputs:
+  - {name: mnist_data, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision pandas || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision pandas --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        from torchvision import datasets, transforms
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--mnist_data', type=str, required=True)
+        args = parser.parse_args()
+
+        print(f"[INFO] Downloading MNIST dataset...")
+        transform = transforms.Compose([transforms.ToTensor()])
+        train_dataset = datasets.MNIST(root='/tmp/mnist', train=True, download=True, transform=transform)
+
+        print(f"[INFO] Dataset loaded successfully")
+        print(f"[INFO] Total samples: {len(train_dataset)}")
+
+        mnist_dict = {
+            "images": [img.numpy() for img, _ in train_dataset],
+            "labels": [label for _, label in train_dataset]
+        }
+
+        os.makedirs(os.path.dirname(args.mnist_data), exist_ok=True)
+
+        with open(args.mnist_data, "wb") as f:
+            pickle.dump(mnist_dict, f)
+
+        print(f"[SUCCESS] Saved MNIST dataset to {args.mnist_data}")
+
+    args:
+      - --mnist_data
+      - {outputPath: mnist_data}
