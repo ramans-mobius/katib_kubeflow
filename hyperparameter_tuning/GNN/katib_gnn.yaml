@@ -34,7 +34,6 @@ inputs:
 
   - name: objective_goal
     type: String
-    default: "0.95"
     description: Target goal value for the metric (e.g., 0.99)
     
   - name: algorithm_name
@@ -113,7 +112,7 @@ implementation:
         parser.add_argument("--parameters_to_tune", type=str, required=True)
         parser.add_argument("--objective_metric_name", type=str, required=True)
         parser.add_argument("--objective_type", type=str, required=True)
-        parser.add_argument("--objective_goal", type=str, required=True)
+        parser.add_argument("--objective_goal", type=float, required=True)
         parser.add_argument("--algorithm_name", type=str, required=True)
         parser.add_argument("--early_stopping_algorithm", type=str, required=True)
         parser.add_argument("--max_trial_count", type=int, required=True)
@@ -154,8 +153,7 @@ implementation:
 
         experiment_name = args.experiment_name
         namespace = "admin"
-        
-  
+
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
             goal=args.objective_goal,
