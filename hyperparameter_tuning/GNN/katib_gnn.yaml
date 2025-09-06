@@ -155,8 +155,7 @@ implementation:
         experiment_name = args.experiment_name
         namespace = "admin"
         
-        objective_goal = float(args.objective_goal)
-
+  
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
             goal=args.objective_goal,
