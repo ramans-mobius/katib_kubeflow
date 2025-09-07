@@ -1,23 +1,8 @@
-apiVersion: v1
-kind: ComponentSpec
-metadata:
-  name: SLM Dataset Loader
-  description: Loads IMDB dataset using SLM Docker image, splits into train/validation/test, and outputs metadata as JSON.
-
-inputs:
-  - name: validation_split
-    type: Float
-    default: 0.1
-    description: Fraction of dataset for validation
-  - name: test_split
-    type: Float
-    default: 0.1
-    description: Fraction of dataset for test
+name: Load and Split IMDB Dataset
+description: Downloads IMDB dataset, splits into train/val/test, and saves metadata as JSON.
 
 outputs:
-  - name: output_metadata
-    type: String
-    description: Path to JSON file with dataset info
+  - {name: imdb_data, type: Dataset}
 
 implementation:
   container:
@@ -26,39 +11,40 @@ implementation:
       - sh
       - -c
       - |
-        python - << 'EOF'
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import os
         import json
         from datasets import load_dataset
-        import argparse
-        import os
+        from sklearn.model_selection import train_test_split
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--validation_split', type=float, default={{inputs.validation_split}})
-        parser.add_argument('--test_split', type=float, default={{inputs.test_split}})
-        parser.add_argument('--output_metadata', type=str, default='{{outputs.output_metadata}}')
-        args = parser.parse_args()
+        # Output path for Elyra/KFP
+        output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+        # Download IMDB dataset from Hugging Face
         dataset = load_dataset("imdb")
 
-        total = len(dataset['train'])
-        val_size = int(total * args.validation_split)
-        test_size = int(total * args.test_split)
-        train_size = total - val_size - test_size
+        texts = dataset['train']['text'] + dataset['test']['text']
+        labels = dataset['train']['label'] + dataset['test']['label']
 
-        train_data = dataset['train'].select(range(train_size))
-        val_data = dataset['train'].select(range(train_size, train_size + val_size))
-        test_data = dataset['test']
+        # Split: 70% train, 15% val, 15% test
+        X_train, X_temp, y_train, y_temp = train_test_split(texts, labels, test_size=0.3, random_state=42, stratify=labels)
+        X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp)
 
-        metadata = {
-            "train_samples": len(train_data),
-            "validation_samples": len(val_data),
-            "test_samples": len(test_data),
-            "dataset_name": "imdb"
+        data = {
+            "train": {"text": X_train, "labels": y_train},
+            "val": {"text": X_val, "labels": y_val},
+            "test": {"text": X_test, "labels": y_test}
         }
 
-        os.makedirs(os.path.dirname(args.output_metadata), exist_ok=True)
-        with open(args.output_metadata, "w") as f:
-            json.dump(metadata, f)
+        with open(output_path, "w") as f:
+            json.dump(data, f)
 
-        print(f"Saved dataset metadata to {args.output_metadata}")
-        EOF
+        print(f"[SUCCESS] IMDB dataset split saved to {output_path}")
+
