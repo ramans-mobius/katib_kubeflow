@@ -1,49 +1,74 @@
-name: Load IMDB Dataset
-description: Loads the IMDB dataset (Hugging Face: stanfordnlp/imdb) and saves it as a Dataset type.
+name: SLM IMDB Dataset Loader
+description: Downloads the IMDB dataset, splits it into train/validation/test, and outputs metadata JSON.
+
+inputs:
+  - name: dataset_name
+    type: String
+    default: "imdb"
+    description: Name of the dataset (Hugging Face)
+
+  - name: validation_split
+    type: Float
+    default: 0.1
+    description: Fraction of training set to use as validation (0.1 = 10%)
+
 outputs:
-  - {name: imdb_data, type: Dataset}
+  - name: dataset_metadata
+    type: String
+    description: JSON file containing paths to train, validation, and test datasets
+
 implementation:
   container:
-    image: python:3.9
+    image: sanram00/slm_katib_image:latest
     command:
-      - sh
-      - -c
-      - |
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas || \
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas --user
-        exec "$0" "$@"
-      - python3
+      - python
       - -u
       - -c
       - |
-        import argparse
         import os
-        import pickle
+        import json
         from datasets import load_dataset
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--imdb_data', type=str, required=True)
-        args = parser.parse_args()
+        dataset_name = "{{inputs.parameters.dataset_name}}"
+        val_split = float("{{inputs.parameters.validation_split}}")
+        output_json = "{{outputs.parameters.dataset_metadata}}"
 
-        print(f"[INFO] Downloading IMDB dataset (first 1000 samples)...")
-        dataset = load_dataset("stanfordnlp/imdb", split="train[:1000]")
+        print(f"[INFO] Downloading {dataset_name} dataset...")
+        ds = load_dataset(dataset_name)
 
-        print(f"[INFO] Dataset loaded successfully")
-        print(f"[INFO] Total samples: {len(dataset)}")
-        print(f"[INFO] Columns: {dataset.column_names}")
+        # Hugging Face IMDB has train/test only, so we create validation split
+        print("[INFO] Splitting validation set...")
+        train_valid = ds["train"].train_test_split(test_size=val_split)
+        train_dataset = train_valid["train"]
+        val_dataset = train_valid["test"]
+        test_dataset = ds["test"]
 
-        imdb_dict = {
-            "text": dataset["text"],
-            "label": dataset["label"]
+        save_dir = "/workspace/datasets"
+        os.makedirs(save_dir, exist_ok=True)
+
+        print("[INFO] Saving datasets...")
+        train_dataset.save_to_disk(os.path.join(save_dir, "train"))
+        val_dataset.save_to_disk(os.path.join(save_dir, "validation"))
+        test_dataset.save_to_disk(os.path.join(save_dir, "test"))
+
+        metadata = {
+            "dataset_name": dataset_name,
+            "train_path": os.path.join(save_dir, "train"),
+            "validation_path": os.path.join(save_dir, "validation"),
+            "test_path": os.path.join(save_dir, "test")
         }
 
-        os.makedirs(os.path.dirname(args.imdb_data), exist_ok=True)
+        os.makedirs(os.path.dirname(output_json), exist_ok=True)
+        with open(output_json, "w") as f:
+            json.dump(metadata, f, indent=2)
 
-        with open(args.imdb_data, "wb") as f:
-            pickle.dump(imdb_dict, f)
-
-        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_data}")
-
+        print(f"[INFO] Dataset prepared and saved to: {save_dir}")
+        print(f"[INFO] Metadata JSON: {output_json}")
     args:
-      - --imdb_data
-      - {outputPath: imdb_data}
+      - --dataset_name
+      - {inputValue: dataset_name}
+      - --validation_split
+      - {inputValue: validation_split}
+      - --dataset_metadata
+      - {outputPath: dataset_metadata}
+
