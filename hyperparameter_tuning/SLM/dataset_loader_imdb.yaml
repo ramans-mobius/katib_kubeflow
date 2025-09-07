@@ -11,7 +11,6 @@ implementation:
       - sh
       - -c
       - |
-        # Install dependencies if not already in the image
         PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn || \
         PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn --user
         exec "$0" "$@"
@@ -24,17 +23,20 @@ implementation:
         from datasets import load_dataset
         from sklearn.model_selection import train_test_split
 
-        # Get the Kubeflow output artifact path
         output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
         output_dir = os.path.dirname(output_path) or "/tmp/outputs/imdb_data"
         os.makedirs(output_dir, exist_ok=True)
 
-        # Download IMDB dataset
         dataset = load_dataset("imdb")
-        texts = dataset["train"]["text"] + dataset["test"]["text"]
-        labels = dataset["train"]["label"] + dataset["test"]["label"]
 
-        # Split: 70% train, 15% validation, 15% test
+        train_texts = dataset["train"]["text"]
+        train_labels = dataset["train"]["label"]
+        test_texts = dataset["test"]["text"]
+        test_labels = dataset["test"]["label"]
+
+        texts = list(train_texts) + list(test_texts)
+        labels = list(train_labels) + list(test_labels)
+
         X_train, X_temp, y_train, y_temp = train_test_split(
             texts, labels, test_size=0.3, random_state=42, stratify=labels
         )
@@ -52,4 +54,5 @@ implementation:
             json.dump(data, f)
 
         print(f"[SUCCESS] IMDB dataset split and saved at: {output_path}")
+
 
