@@ -1,12 +1,23 @@
-name: SLM Dataset Loader
-description: Loads IMDB dataset using SLM Docker image, splits into train/validation/test, and outputs metadata as JSON.
+apiVersion: v1
+kind: ComponentSpec
+metadata:
+  name: SLM Dataset Loader
+  description: Loads IMDB dataset using SLM Docker image, splits into train/validation/test, and outputs metadata as JSON.
 
 inputs:
-  - {name: validation_split, type: Float, default: 0.1, description: "Fraction of dataset for validation"}
-  - {name: test_split, type: Float, default: 0.1, description: "Fraction of dataset for test"}
+  - name: validation_split
+    type: Float
+    default: 0.1
+    description: Fraction of dataset for validation
+  - name: test_split
+    type: Float
+    default: 0.1
+    description: Fraction of dataset for test
 
 outputs:
-  - {name: output_metadata, type: String, description: "Path to JSON file with dataset info"}
+  - name: output_metadata
+    type: String
+    description: Path to JSON file with dataset info
 
 implementation:
   container:
@@ -27,10 +38,8 @@ implementation:
         parser.add_argument('--output_metadata', type=str, default='{{outputs.output_metadata}}')
         args = parser.parse_args()
 
-        # Load IMDB dataset
         dataset = load_dataset("imdb")
 
-        # Calculate splits
         total = len(dataset['train'])
         val_size = int(total * args.validation_split)
         test_size = int(total * args.test_split)
@@ -53,5 +62,3 @@ implementation:
 
         print(f"Saved dataset metadata to {args.output_metadata}")
         EOF
-
-
