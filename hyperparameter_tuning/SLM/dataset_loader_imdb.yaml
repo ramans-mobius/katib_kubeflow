@@ -23,10 +23,14 @@ implementation:
         from datasets import load_dataset
         from sklearn.model_selection import train_test_split
 
-        output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
-        output_dir = os.path.dirname(output_path) or "/tmp/outputs/imdb_data"
-        
-        os.makedirs(output_dir, exist_ok=True)
+        # Always set a filename for artifact
+        artifact_path = "{{$.outputs.artifacts['imdb_data'].path}}"
+        if os.path.isdir(artifact_path) or artifact_path.endswith("/"):
+            output_path = os.path.join(artifact_path, "data.json")
+        else:
+            output_path = artifact_path
+
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         dataset = load_dataset("imdb")
 
@@ -38,6 +42,7 @@ implementation:
         texts = list(train_texts) + list(test_texts)
         labels = list(train_labels) + list(test_labels)
 
+        from sklearn.model_selection import train_test_split
         X_train, X_temp, y_train, y_temp = train_test_split(
             texts, labels, test_size=0.3, random_state=42, stratify=labels
         )
@@ -55,6 +60,7 @@ implementation:
             json.dump(data, f)
 
         print(f"[SUCCESS] IMDB dataset split and saved at: {output_path}")
+
 
 
 
