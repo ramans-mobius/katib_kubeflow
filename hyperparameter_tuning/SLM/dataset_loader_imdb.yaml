@@ -1,5 +1,5 @@
 name: Load and Split IMDB Dataset
-description: Downloads IMDB dataset, splits into train/val/test, and saves metadata as JSON.
+description: Downloads the IMDB dataset, splits into train/val/test, and outputs as JSON for downstream Katib experiments.
 
 outputs:
   - {name: imdb_data, type: Dataset}
@@ -11,6 +11,7 @@ implementation:
       - sh
       - -c
       - |
+        # Install dependencies if not already in the image
         PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn || \
         PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets scikit-learn --user
         exec "$0" "$@"
@@ -23,19 +24,23 @@ implementation:
         from datasets import load_dataset
         from sklearn.model_selection import train_test_split
 
+        # Get the Kubeflow output artifact path
         output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
-        if not output_path or output_path.startswith("{{"):
-            output_path = "/tmp/imdb_data.json"
+        output_dir = os.path.dirname(output_path) or "/tmp/outputs/imdb_data"
+        os.makedirs(output_dir, exist_ok=True)
 
-        os.makedirs(os.path.dirname(output_path) or "/tmp", exist_ok=True)
-
+        # Download IMDB dataset
         dataset = load_dataset("imdb")
-        texts = dataset['train']['text'] + dataset['test']['text']
-        labels = dataset['train']['label'] + dataset['test']['label']
+        texts = dataset["train"]["text"] + dataset["test"]["text"]
+        labels = dataset["train"]["label"] + dataset["test"]["label"]
 
-        from sklearn.model_selection import train_test_split
-        X_train, X_temp, y_train, y_temp = train_test_split(texts, labels, test_size=0.3, random_state=42, stratify=labels)
-        X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp)
+        # Split: 70% train, 15% validation, 15% test
+        X_train, X_temp, y_train, y_temp = train_test_split(
+            texts, labels, test_size=0.3, random_state=42, stratify=labels
+        )
+        X_val, X_test, y_val, y_test = train_test_split(
+            X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
+        )
 
         data = {
             "train": {"text": X_train, "labels": y_train},
@@ -46,5 +51,5 @@ implementation:
         with open(output_path, "w") as f:
             json.dump(data, f)
 
-        print(f"[SUCCESS] IMDB dataset split saved to {output_path}")
+        print(f"[SUCCESS] IMDB dataset split and saved at: {output_path}")
 
