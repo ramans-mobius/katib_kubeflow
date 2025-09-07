@@ -1,3 +1,6 @@
+name: Load and Split IMDB Dataset
+description: Downloads the IMDB dataset, splits into train/val/test, and outputs as JSON for downstream Katib experiments.
+
 outputs:
   - {name: imdb_data, type: Dataset}
 
@@ -15,18 +18,25 @@ implementation:
       - -u
       - -c
       - |
-        import os, json
+        import os
+        import json
         from datasets import load_dataset
         from sklearn.model_selection import train_test_split
 
-        output_path = "/tmp/outputs/imdb_data/data"
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
+        output_dir = os.path.dirname(output_path) or "/tmp/outputs/imdb_data"
+        os.makedirs(output_dir, exist_ok=True)
 
         dataset = load_dataset("imdb")
-        texts = list(dataset["train"]["text"]) + list(dataset["test"]["text"])
-        labels = list(dataset["train"]["label"]) + list(dataset["test"]["label"])
 
-        from sklearn.model_selection import train_test_split
+        train_texts = dataset["train"]["text"]
+        train_labels = dataset["train"]["label"]
+        test_texts = dataset["test"]["text"]
+        test_labels = dataset["test"]["label"]
+
+        texts = list(train_texts) + list(test_texts)
+        labels = list(train_labels) + list(test_labels)
+
         X_train, X_temp, y_train, y_temp = train_test_split(
             texts, labels, test_size=0.3, random_state=42, stratify=labels
         )
