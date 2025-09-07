@@ -23,17 +23,17 @@ implementation:
         from datasets import load_dataset
         from sklearn.model_selection import train_test_split
 
-        # Output path for Elyra/KFP
         output_path = "{{$.outputs.artifacts['imdb_data'].path}}"
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        if not output_path or output_path.startswith("{{"):
+            output_path = "/tmp/imdb_data.json"
 
-        # Download IMDB dataset from Hugging Face
+        os.makedirs(os.path.dirname(output_path) or "/tmp", exist_ok=True)
+
         dataset = load_dataset("imdb")
-
         texts = dataset['train']['text'] + dataset['test']['text']
         labels = dataset['train']['label'] + dataset['test']['label']
 
-        # Split: 70% train, 15% val, 15% test
+        from sklearn.model_selection import train_test_split
         X_train, X_temp, y_train, y_temp = train_test_split(texts, labels, test_size=0.3, random_state=42, stratify=labels)
         X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp)
 
