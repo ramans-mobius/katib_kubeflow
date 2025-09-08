@@ -1,10 +1,8 @@
 name: 2 Load IMDB Dataset
-description: Downloads and saves the IMDB dataset for preprocessing.
-
+description: Downloads and saves a balanced IMDB dataset with both classes present.
 outputs:
   - name: imdb_raw_data
     type: Dataset
-
 implementation:
   container:
     image: python:3.9
@@ -19,21 +17,37 @@ implementation:
       - -u
       - -c
       - |
-        import argparse, os
         from datasets import load_dataset
+        import os
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--imdb_raw_data', type=str, required=True)
-        args = parser.parse_args()
-
-        print(f"[INFO] Downloading IMDB dataset...")
+        # Load IMDB dataset
         dataset = load_dataset("imdb")
+        train_data = dataset["train"]
 
-        os.makedirs(os.path.dirname(args.imdb_raw_data), exist_ok=True)
-        dataset.save_to_disk(args.imdb_raw_data)
-        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_raw_data}")
+        # Ensure both classes are present in the sampled subset
+        # Sample more than needed first, then filter
+        sample_size = 2000
+        subset = train_data.select(range(sample_size))
 
-    args:
-      - --imdb_raw_data
-      - {outputPath: imdb_raw_data}
+        # Count class distribution
+        labels = subset["label"]
+        if 0 not in labels or 1 not in labels:
+            print("[WARN] One of the classes missing, selecting full dataset temporarily.")
+            subset = train_data  # fallback to full dataset if needed
+
+        # Downsample to 1000 but ensure both classes remain
+        pos = [i for i, l in enumerate(subset["label"]) if l == 1]
+        neg = [i for i, l in enumerate(subset["label"]) if l == 0]
+
+        min_class = min(len(pos), len(neg))
+        balanced_indices = pos[:min_class] + neg[:min_class]
+        balanced_subset = subset.select(balanced_indices)
+
+        print(f"[INFO] Final balanced subset: {len(balanced_subset)} samples")
+        print(f"[INFO] Class distribution: {balanced_subset['label'].count(0)} negatives, {balanced_subset['label'].count(1)} positives")
+
+        os.makedirs(os.path.dirname("{outputPath: imdb_raw_data}"), exist_ok=True)
+        balanced_subset.save_to_disk("{outputPath: imdb_raw_data}")
+        print(f"[SUCCESS] Saved IMDB dataset to {outputPath: imdb_raw_data}")
+
 
