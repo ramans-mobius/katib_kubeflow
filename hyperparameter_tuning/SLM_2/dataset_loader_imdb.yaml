@@ -1,8 +1,10 @@
 name: 2 Load IMDB Dataset
 description: Downloads and saves the IMDB dataset for preprocessing.
+
 outputs:
   - name: imdb_raw_data
     type: Dataset
+
 implementation:
   container:
     image: python:3.9
@@ -17,9 +19,21 @@ implementation:
       - -u
       - -c
       - |
+        import argparse, os
         from datasets import load_dataset
-        import os
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--imdb_raw_data', type=str, required=True)
+        args = parser.parse_args()
+
+        print(f"[INFO] Downloading IMDB dataset...")
         dataset = load_dataset("imdb")
-        os.makedirs(os.path.dirname("{outputPath: imdb_raw_data}"), exist_ok=True)
-        dataset.save_to_disk("{outputPath: imdb_raw_data}")
-        print(f"[SUCCESS] Saved IMDB dataset to {outputPath: imdb_raw_data}")
+
+        os.makedirs(os.path.dirname(args.imdb_raw_data), exist_ok=True)
+        dataset.save_to_disk(args.imdb_raw_data)
+        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_raw_data}")
+
+    args:
+      - --imdb_raw_data
+      - {outputPath: imdb_raw_data}
+
