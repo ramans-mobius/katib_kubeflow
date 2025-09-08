@@ -1,0 +1,36 @@
+name: Preprocess IMDB Dataset
+description: Loads the IMDB split artifact and applies preprocessing (tokenization etc.).
+inputs:
+  - { name: imdb_dataset, type: string }
+outputs:
+  - { name: imdb_preprocessed, type: string }
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v2
+    command:
+      - python
+      - -u
+      - -c
+      - |
+        import json, os
+
+        input_path = "{{inputs.imdb_dataset}}"
+        with open(input_path, "r") as f:
+            data = json.load(f)
+
+        # Example: lowercase text
+        for split in data:
+            for i, text in enumerate(data[split]["text"]):
+                data[split]["text"][i] = text.lower()
+
+        output_path = "/tmp/outputs/imdb_preprocessed/data.json"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(data, f)
+
+    args:
+      - --imdb_dataset
+      - { inputValue: imdb_dataset }
+      - --imdb_preprocessed
+      - { outputPath: imdb_preprocessed }
