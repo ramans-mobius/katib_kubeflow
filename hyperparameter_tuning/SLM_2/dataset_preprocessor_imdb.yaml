@@ -1,4 +1,4 @@
-name: Preprocess IMDB Dataset 2
+name: 2 Preprocess IMDB Dataset 
 description: Preprocesses the IMDB dataset and outputs processed data and weights.
 inputs:
   - name: imdb_raw_data
