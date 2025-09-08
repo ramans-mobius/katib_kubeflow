@@ -1,5 +1,5 @@
 name: Katib HuggingFace LLaMA Tuner
-description: Launches a Katib hyperparameter tuning experiment for fine-tuning LLaMA on IMDB using LoRA.
+description: Runs a standalone Katib hyperparameter tuning experiment for fine-tuning LLaMA on IMDB using LoRA. Saves best hyperparameters as JSON.
 
 inputs:
   - name: model_uri
@@ -50,7 +50,7 @@ inputs:
 outputs:
   - name: best_hyperparams
     type: JsonArray
-    description: Best hyperparameters found by Katib
+    description: JSON file containing the best hyperparameters found by Katib
 
 implementation:
   container:
@@ -64,12 +64,6 @@ implementation:
         from kubeflow.katib import KatibClient
         from transformers import AutoModelForSequenceClassification, TrainingArguments
         from peft import LoraConfig
-        from kubeflow.storage_initializer.hugging_face import (
-            HuggingFaceModelParams,
-            HuggingFaceDatasetParams,
-            HuggingFaceTrainerParams,
-        )
-        from types import SimpleNamespace
         import argparse, json, os
 
         parser = argparse.ArgumentParser()
@@ -85,59 +79,39 @@ implementation:
         parser.add_argument("--best_hyperparams", type=str, required=True)
         args = parser.parse_args()
 
-        class KatibLoraConfig(SimpleNamespace):
-            def __init__(self, **kwargs):
-                super().__init__(**kwargs)
+        # Define search space
+        lora_cfg = {
+            "r": katib.search.int(min=2, max=4),
+            "lora_alpha": katib.search.int(min=8, max=32),
+            "lora_dropout": 0.1,
+            "bias": "none",
+        }
 
-        lora_cfg = KatibLoraConfig(
-            r = katib.search.int(min=2, max=4),
-            lora_alpha = 2,
-            lora_dropout = 0.1,
-            bias = "none",
-        )
-
-        hf_model = HuggingFaceModelParams(
-            model_uri = args.model_uri,
-            transformer_type = AutoModelForSequenceClassification,
-        )
-
-        hf_dataset = HuggingFaceDatasetParams(
-            repo_id = args.dataset_repo,
-            split = args.dataset_split,
-        )
-
-        hf_tuning_parameters = HuggingFaceTrainerParams(
-            training_parameters = TrainingArguments(
-                output_dir = "results",
-                save_strategy = "no",
-                learning_rate = katib.search.double(min=1e-05, max=5e-05),
-                num_train_epochs = 3,
-            ),
-            lora_config = lora_cfg,
-        )
-
+        # Katib client
         cl = KatibClient(namespace="kubeflow")
 
+        # Launch tuning
         cl.tune(
-            name = args.experiment_name,
-            model_provider_parameters = hf_model,
-            dataset_provider_parameters = hf_dataset,
-            trainer_parameters = hf_tuning_parameters,
-            objective_metric_name = args.objective_metric_name,
-            objective_type = args.objective_type,
-            algorithm_name = args.algorithm_name,
-            max_trial_count = args.max_trial_count,
-            parallel_trial_count = args.parallel_trial_count,
-            resources_per_trial = katib.TrainerResources(
+            name=args.experiment_name,
+            objective_metric_name=args.objective_metric_name,
+            objective_type=args.objective_type,
+            algorithm_name=args.algorithm_name,
+            max_trial_count=args.max_trial_count,
+            parallel_trial_count=args.parallel_trial_count,
+            resources_per_trial=katib.TrainerResources(
                 num_workers=1,
                 num_procs_per_worker=1,
                 resources_per_worker={"gpu": 2, "cpu": 2, "memory": "4G"},
             ),
         )
 
+        # Wait for Katib to finish
         cl.wait_for_experiment_condition(name=args.experiment_name)
 
+        # Fetch best hyperparameters
         best = cl.get_optimal_hyperparameters(args.experiment_name)
+
+        # Save best hyperparameters
         os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
         with open(args.best_hyperparams, "w") as f:
             json.dump(best, f, indent=2)
@@ -163,3 +137,4 @@ implementation:
       - {inputValue: algorithm_name}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
+
