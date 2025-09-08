@@ -23,7 +23,7 @@ implementation:
         # Load IMDB dataset
         dataset = load_dataset("imdb")
         train_data = dataset["train"]
-
+        
         # Ensure both classes are present in the sampled subset
         # Sample more than needed first, then filter
         sample_size = 2000
@@ -49,5 +49,9 @@ implementation:
         os.makedirs(os.path.dirname("{outputPath: imdb_raw_data}"), exist_ok=True)
         balanced_subset.save_to_disk("{outputPath: imdb_raw_data}")
         print(f"[SUCCESS] Saved IMDB dataset to {outputPath: imdb_raw_data}")
+
+    args:
+  - --imdb_raw_data
+  - {outputPath: imdb_raw_data}
 
 
