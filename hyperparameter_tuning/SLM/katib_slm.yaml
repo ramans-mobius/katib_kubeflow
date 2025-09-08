@@ -24,7 +24,7 @@ inputs:
 outputs:
   - name: best_hyperparams
     type: String
-    description: Path to store the best hyperparameters JSON file
+    description: File path to store the best hyperparameters (JSON)
 
 implementation:
   container:
@@ -50,7 +50,7 @@ implementation:
 
         cl = KatibClient(namespace="kubeflow")
 
-        # Example: run a dummy tuning (replace with real search space)
+        # Launch Katib tuning experiment
         cl.tune(
             name=args.experiment_name,
             objective_metric_name=args.objective_metric_name,
@@ -61,18 +61,19 @@ implementation:
             resources_per_trial=katib.TrainerResources(
                 num_workers=1,
                 num_procs_per_worker=1,
-                resources_per_worker={"cpu": 1, "memory": "2Gi"},
+                resources_per_worker={"cpu": 1, "memory": "2Gi"}
             ),
         )
 
         cl.wait_for_experiment_condition(name=args.experiment_name)
 
+        # Fetch best hyperparameters
         best = cl.get_optimal_hyperparameters(args.experiment_name)
 
         os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
         with open(args.best_hyperparams, "w") as f:
             json.dump(best, f, indent=2)
-        print(f"Best hyperparameters saved at: {args.best_hyperparams}")
+        print(f"[SUCCESS] Best hyperparameters saved at: {args.best_hyperparams}")
 
     args:
       - --experiment_name
@@ -89,5 +90,3 @@ implementation:
       - {inputValue: algorithm_name}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
-
-
