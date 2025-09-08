@@ -1,92 +1,112 @@
-name: Katib Hyperparameter Tuning
-description: Runs a Katib hyperparameter tuning experiment for LLaMA fine-tuning and saves the best hyperparameters.
+name: Katib LLaMA Tuner
+description: Runs Katib hyperparameter tuning on a LLaMA model using Hugging Face.
 
 inputs:
-  - name: experiment_name
-    type: String
-    default: llama-katib-exp
-  - name: max_trial_count
-    type: Integer
-    default: 2
-  - name: parallel_trial_count
-    type: Integer
-    default: 1
-  - name: objective_metric_name
-    type: String
-    default: train_loss
-  - name: objective_type
-    type: String
-    default: minimize
-  - name: algorithm_name
-    type: String
-    default: random
+  - {name: exp_name, type: String, default: llama, description: "Name of the experiment"}
+  - {name: model_uri, type: String, default: "hf://meta-llama/Llama-3.2-1B", description: "Hugging Face model"}
+  - {name: dataset_repo, type: String, default: "imdb", description: "Dataset repository"}
+  - {name: dataset_split, type: String, default: "train[:1000]", description: "Dataset split"}
+  - {name: max_trials, type: Integer, default: "10", description: "Maximum number of trials"}
+  - {name: parallel_trials, type: Integer, default: "2", description: "Parallel trials"}
 
 outputs:
   - name: best_hyperparams
+    type: JsonArray
+    description: Best parameter set found by Katib
+  - name: payload
     type: String
-    description: File path to store the best hyperparameters (JSON)
+    description: Parameters tuning summary
 
 implementation:
   container:
-    image: sanram00/slm_katib_image:latest
+    image: docker.io/nikhilv215/nesy-factory:v2
     command:
-      - python3
-      - -u
+      - sh
       - -c
       - |
-        import json, os, argparse
-        from kubeflow.katib import KatibClient
-        import kubeflow.katib as katib
+        set -e
+        python3 -u - <<'PYTHON_CODE'
+from kubeflow.katib import KatibClient, search, TrainerResources
+from kubeflow.storage_initializer.hugging_face import (
+    HuggingFaceModelParams,
+    HuggingFaceDatasetParams,
+    HuggingFaceTrainerParams,
+)
+from transformers import AutoModelForSequenceClassification, TrainingArguments
+from peft import LoraConfig
+import json
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--experiment_name", type=str, required=True)
-        parser.add_argument("--max_trial_count", type=int, required=True)
-        parser.add_argument("--parallel_trial_count", type=int, required=True)
-        parser.add_argument("--objective_metric_name", type=str, required=True)
-        parser.add_argument("--objective_type", type=str, required=True)
-        parser.add_argument("--algorithm_name", type=str, required=True)
-        parser.add_argument("--best_hyperparams", type=str, required=True)
-        args = parser.parse_args()
+# Parameters from pipeline inputs
+exp_name = "{{inputs.parameters.exp_name}}"
+model_uri = "{{inputs.parameters.model_uri}}"
+dataset_repo = "{{inputs.parameters.dataset_repo}}"
+dataset_split = "{{inputs.parameters.dataset_split}}"
+max_trials = int("{{inputs.parameters.max_trials}}")
+parallel_trials = int("{{inputs.parameters.parallel_trials}}")
 
-        cl = KatibClient(namespace="kubeflow")
+# Hugging Face model
+hf_model = HuggingFaceModelParams(
+    model_uri=model_uri,
+    transformer_type=AutoModelForSequenceClassification,
+)
 
-        # Launch Katib tuning experiment
-        cl.tune(
-            name=args.experiment_name,
-            objective_metric_name=args.objective_metric_name,
-            objective_type=args.objective_type,
-            algorithm_name=args.algorithm_name,
-            max_trial_count=args.max_trial_count,
-            parallel_trial_count=args.parallel_trial_count,
-            resources_per_trial=katib.TrainerResources(
-                num_workers=1,
-                num_procs_per_worker=1,
-                resources_per_worker={"cpu": 1, "memory": "2Gi"}
-            ),
-        )
+# Dataset
+hf_dataset = HuggingFaceDatasetParams(
+    repo_id=dataset_repo,
+    split=dataset_split,
+)
 
-        cl.wait_for_experiment_condition(name=args.experiment_name)
+# Trainer parameters with Katib search space
+hf_tuning_parameters = HuggingFaceTrainerParams(
+    training_parameters=TrainingArguments(
+        output_dir="results",
+        save_strategy="no",
+        learning_rate=search.double(min=1e-05, max=5e-05),
+        num_train_epochs=3,
+    ),
+    lora_config=LoraConfig(
+        r=search.int(min=8, max=32),
+        lora_alpha=8,
+        lora_dropout=0.1,
+        bias="none",
+    ),
+)
 
-        # Fetch best hyperparameters
-        best = cl.get_optimal_hyperparameters(args.experiment_name)
+# Katib client
+cl = KatibClient(namespace="kubeflow")
 
-        os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
-        with open(args.best_hyperparams, "w") as f:
-            json.dump(best, f, indent=2)
-        print(f"[SUCCESS] Best hyperparameters saved at: {args.best_hyperparams}")
+# Run Katib tuning
+cl.tune(
+    name=exp_name,
+    model_provider_parameters=hf_model,
+    dataset_provider_parameters=hf_dataset,
+    trainer_parameters=hf_tuning_parameters,
+    objective_metric_name="train_loss",
+    objective_type="minimize",
+    algorithm_name="random",
+    max_trial_count=max_trials,
+    parallel_trial_count=parallel_trials,
+    resources_per_trial=TrainerResources(
+        num_workers=2,
+        num_procs_per_worker=2,
+        resources_per_worker={"gpu": 2, "cpu": 4, "memory": "10G"},
+    ),
+)
 
+# Wait for completion
+cl.wait_for_experiment_condition(name=exp_name)
+
+# Get best hyperparameters
+best = cl.get_optimal_hyperparameters(exp_name)
+print("Best Hyperparameters:", best)
+
+# Save best hyperparameters
+with open("/tmp/best.json", "w") as f:
+    json.dump(best, f)
+PYTHON_CODE
     args:
-      - --experiment_name
-      - {inputValue: experiment_name}
-      - --max_trial_count
-      - {inputValue: max_trial_count}
-      - --parallel_trial_count
-      - {inputValue: parallel_trial_count}
-      - --objective_metric_name
-      - {inputValue: objective_metric_name}
-      - --objective_type
-      - {inputValue: objective_type}
-      - --algorithm_name
-      - {inputValue: algorithm_name}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
+      - --payload
+      - {outputPath: payload}
+
