@@ -2,17 +2,65 @@ name: Katib LLaMA Tuner
 description: Runs Katib hyperparameter tuning on a LLaMA model using Hugging Face.
 
 inputs:
-  - {name: exp_name, type: String, default: llama, description: "Name of the experiment"}
-  - {name: model_uri, type: String, default: "hf://meta-llama/Llama-3.2-1B", description: "Hugging Face model"}
-  - {name: dataset_repo, type: String, default: "imdb", description: "Dataset repository"}
-  - {name: dataset_split, type: String, default: "train[:1000]", description: "Dataset split"}
-  - {name: max_trials, type: Integer, default: "10", description: "Maximum number of trials"}
-  - {name: parallel_trials, type: Integer, default: "2", description: "Parallel trials"}
+  - name: exp_name
+    type: String
+    default: llama
+    description: Name of the experiment
+    
+  - name: model_uri
+    type: String
+    default: "hf://meta-llama/Llama-3.2-1B"
+    description: "Hugging Face model"
+    
+  - name: dataset_repo
+    type: String
+    default: "imdb"
+    description: "Dataset repository"
+
+  - name: trainer_parameter
+    type: 
+    default:
+    description: "Parameters for the Hugging Face trainer. including LoRA settings"
+
+  - name: objective_metric_name
+    type: String
+    default: "train_loss"
+    description: "The objective metric to minimize"
+
+  - name: objective_type
+    type: String
+    description: Objective type for Katib optimization (e.g., maximize, minimize)
+
+  - name: objective_goal
+    type: String
+    description: Target goal value for the metric (e.g., 0.99)
+    
+  - name: max_trial_count
+    type: Integer
+    default: "10"
+    description: "Maximum number of trials"
+    
+  - name: parallel_trial_count
+    type: Integer
+    default: "2"
+    description: "Parallel trials"
+
+  - name: resources_per_trial
+    type: Integer
+    default: "0"
+    description: "Parallel trials"
+
+  - name: max_failed_trial_count
+    type: String
+    default: '2'
+    description: Maximum number of failed trials
+
 
 outputs:
   - name: best_hyperparams
     type: JsonArray
     description: Best parameter set found by Katib
+    
   - name: payload
     type: String
     description: Parameters tuning summary
@@ -21,77 +69,77 @@ implementation:
   container:
     image: docker.io/nikhilv215/nesy-factory:v2
     command:
-      - sh
+      - python3
+      - -u
       - -c
       - |
-        set -e
-        python3 -u - <<'PYTHON_CODE'
-from kubeflow.katib import KatibClient, search, TrainerResources
-from kubeflow.storage_initializer.hugging_face import (
-    HuggingFaceModelParams,
-    HuggingFaceDatasetParams,
-    HuggingFaceTrainerParams,
-)
-from transformers import AutoModelForSequenceClassification, TrainingArguments
-from peft import LoraConfig
-import json
+      
+        from kubeflow.katib import KatibClient, search, TrainerResources
+        from kubeflow.storage_initializer.hugging_face import (
+            HuggingFaceModelParams,
+            HuggingFaceDatasetParams,
+            HuggingFaceTrainerParams,
+        )
+        from transformers import AutoModelForSequenceClassification, TrainingArguments
+        from peft import LoraConfig
+        import json
 
-# Parameters from pipeline inputs
-exp_name = "{{inputs.parameters.exp_name}}"
-model_uri = "{{inputs.parameters.model_uri}}"
-dataset_repo = "{{inputs.parameters.dataset_repo}}"
-dataset_split = "{{inputs.parameters.dataset_split}}"
-max_trials = int("{{inputs.parameters.max_trials}}")
-parallel_trials = int("{{inputs.parameters.parallel_trials}}")
+        # Parameters from pipeline inputs
+        exp_name = "{{inputs.parameters.exp_name}}"
+        model_uri = "{{inputs.parameters.model_uri}}"
+        dataset_repo = "{{inputs.parameters.dataset_repo}}"
+        dataset_split = "{{inputs.parameters.dataset_split}}"
+        max_trials = int("{{inputs.parameters.max_trials}}")
+        parallel_trials = int("{{inputs.parameters.parallel_trials}}")
+        
+        # Hugging Face model
+        hf_model = HuggingFaceModelParams(
+            model_uri=model_uri,
+            transformer_type=AutoModelForSequenceClassification,
+        )
+        
+        # Dataset
+        hf_dataset = HuggingFaceDatasetParams(
+            repo_id=dataset_repo,
+            split=dataset_split,
+        )
 
-# Hugging Face model
-hf_model = HuggingFaceModelParams(
-    model_uri=model_uri,
-    transformer_type=AutoModelForSequenceClassification,
-)
+        # Trainer parameters with Katib search space
+        hf_tuning_parameters = HuggingFaceTrainerParams(
+            training_parameters=TrainingArguments(
+                output_dir="results",
+                save_strategy="no",
+                learning_rate=search.double(min=1e-05, max=5e-05),
+                num_train_epochs=3,
+            ),
+            lora_config=LoraConfig(
+                r=search.int(min=8, max=32),
+                lora_alpha=8,
+                lora_dropout=0.1,
+                bias="none",
+            ),
+        )
 
-# Dataset
-hf_dataset = HuggingFaceDatasetParams(
-    repo_id=dataset_repo,
-    split=dataset_split,
-)
-
-# Trainer parameters with Katib search space
-hf_tuning_parameters = HuggingFaceTrainerParams(
-    training_parameters=TrainingArguments(
-        output_dir="results",
-        save_strategy="no",
-        learning_rate=search.double(min=1e-05, max=5e-05),
-        num_train_epochs=3,
-    ),
-    lora_config=LoraConfig(
-        r=search.int(min=8, max=32),
-        lora_alpha=8,
-        lora_dropout=0.1,
-        bias="none",
-    ),
-)
-
-# Katib client
-cl = KatibClient(namespace="kubeflow")
-
-# Run Katib tuning
-cl.tune(
-    name=exp_name,
-    model_provider_parameters=hf_model,
-    dataset_provider_parameters=hf_dataset,
-    trainer_parameters=hf_tuning_parameters,
-    objective_metric_name="train_loss",
-    objective_type="minimize",
-    algorithm_name="random",
-    max_trial_count=max_trials,
-    parallel_trial_count=parallel_trials,
-    resources_per_trial=TrainerResources(
-        num_workers=2,
-        num_procs_per_worker=2,
-        resources_per_worker={"gpu": 2, "cpu": 4, "memory": "10G"},
-    ),
-)
+        # Katib client
+        cl = KatibClient(namespace="kubeflow")
+        
+        # Run Katib tuning
+        cl.tune(
+            name=exp_name,
+            model_provider_parameters=hf_model,
+            dataset_provider_parameters=hf_dataset,
+            trainer_parameters=hf_tuning_parameters,
+            objective_metric_name="train_loss",
+            objective_type="minimize",
+            algorithm_name="random",
+            max_trial_count=max_trials,
+            parallel_trial_count=parallel_trials,
+            resources_per_trial=TrainerResources(
+                num_workers=2,
+                num_procs_per_worker=2,
+                resources_per_worker={"gpu": 2, "cpu": 4, "memory": "10G"},
+            ),
+        )
 
 # Wait for completion
 cl.wait_for_experiment_condition(name=exp_name)
@@ -103,10 +151,43 @@ print("Best Hyperparameters:", best)
 # Save best hyperparameters
 with open("/tmp/best.json", "w") as f:
     json.dump(best, f)
-PYTHON_CODE
     args:
+      - --exp_name
+      - {inputValue: model_name}
+    
+      - --model_url
+      - {inputValue: model_url}
+    
+      - --dataset_repo
+      - {inputValue: dataset_repo}
+
+      - --trainer_parameter
+      - {inputValue: trainer_parameter}
+      
+      - --objective_metric_name
+      - {inputValue: objective_metric_name}
+
+      - --objective_type
+      - {inputValue: objective_type}
+
+      - --objective_goal
+      - {inputValue: objective_goal}
+    
+      - --max_trial_count
+      - {inputValue: max_trial_count}
+    
+      - --parallel_trial_count
+      - {inputValue: parallel_trial_count}
+
+      - --resources_per_trial
+      - {inputValue: resources_per_trial}
+  
+      - --max_failed_trial_count
+      - {inputValue: max_failed_trial_count}
+    
       - --best_hyperparams
       - {outputPath: best_hyperparams}
+      
       - --payload
       - {outputPath: payload}
 
