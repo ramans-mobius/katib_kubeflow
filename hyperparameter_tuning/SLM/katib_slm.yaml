@@ -1,0 +1,165 @@
+name: Katib HuggingFace LLaMA Tuner
+description: Launches a Katib hyperparameter tuning experiment for fine-tuning LLaMA on IMDB using LoRA.
+
+inputs:
+  - name: model_uri
+    type: String
+    default: hf://meta-llama/Llama-3.2-1B
+    description: Hugging Face model URI to fine-tune (e.g., meta-llama/Llama-3.2-1B)
+
+  - name: dataset_repo
+    type: String
+    default: imdb
+    description: Hugging Face dataset repository (e.g., imdb)
+
+  - name: dataset_split
+    type: String
+    default: train[:1000]
+    description: Dataset split to use (e.g., train[:1000])
+
+  - name: experiment_name
+    type: String
+    default: llama-katib-exp
+    description: Katib experiment name
+
+  - name: max_trial_count
+    type: Integer
+    default: 2
+    description: Maximum number of trials to run
+
+  - name: parallel_trial_count
+    type: Integer
+    default: 1
+    description: Number of parallel trials
+
+  - name: objective_metric_name
+    type: String
+    default: train_loss
+    description: Metric to optimize (e.g., train_loss, eval_loss, accuracy)
+
+  - name: objective_type
+    type: String
+    default: minimize
+    description: Objective type (maximize or minimize)
+
+  - name: algorithm_name
+    type: String
+    default: random
+    description: Search algorithm (e.g., random, tpe, bayesianoptimization)
+
+outputs:
+  - name: best_hyperparams
+    type: JsonArray
+    description: Best hyperparameters found by Katib
+
+implementation:
+  container:
+    image: sanram00/slm_katib_image:latest
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import kubeflow.katib as katib
+        from kubeflow.katib import KatibClient
+        from transformers import AutoModelForSequenceClassification, TrainingArguments
+        from peft import LoraConfig
+        from kubeflow.storage_initializer.hugging_face import (
+            HuggingFaceModelParams,
+            HuggingFaceDatasetParams,
+            HuggingFaceTrainerParams,
+        )
+        from types import SimpleNamespace
+        import argparse, json, os
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--model_uri", type=str, required=True)
+        parser.add_argument("--dataset_repo", type=str, required=True)
+        parser.add_argument("--dataset_split", type=str, required=True)
+        parser.add_argument("--experiment_name", type=str, required=True)
+        parser.add_argument("--max_trial_count", type=int, required=True)
+        parser.add_argument("--parallel_trial_count", type=int, required=True)
+        parser.add_argument("--objective_metric_name", type=str, required=True)
+        parser.add_argument("--objective_type", type=str, required=True)
+        parser.add_argument("--algorithm_name", type=str, required=True)
+        parser.add_argument("--best_hyperparams", type=str, required=True)
+        args = parser.parse_args()
+
+        class KatibLoraConfig(SimpleNamespace):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+        lora_cfg = KatibLoraConfig(
+            r = katib.search.int(min=2, max=4),
+            lora_alpha = 2,
+            lora_dropout = 0.1,
+            bias = "none",
+        )
+
+        hf_model = HuggingFaceModelParams(
+            model_uri = args.model_uri,
+            transformer_type = AutoModelForSequenceClassification,
+        )
+
+        hf_dataset = HuggingFaceDatasetParams(
+            repo_id = args.dataset_repo,
+            split = args.dataset_split,
+        )
+
+        hf_tuning_parameters = HuggingFaceTrainerParams(
+            training_parameters = TrainingArguments(
+                output_dir = "results",
+                save_strategy = "no",
+                learning_rate = katib.search.double(min=1e-05, max=5e-05),
+                num_train_epochs = 3,
+            ),
+            lora_config = lora_cfg,
+        )
+
+        cl = KatibClient(namespace="kubeflow")
+
+        cl.tune(
+            name = args.experiment_name,
+            model_provider_parameters = hf_model,
+            dataset_provider_parameters = hf_dataset,
+            trainer_parameters = hf_tuning_parameters,
+            objective_metric_name = args.objective_metric_name,
+            objective_type = args.objective_type,
+            algorithm_name = args.algorithm_name,
+            max_trial_count = args.max_trial_count,
+            parallel_trial_count = args.parallel_trial_count,
+            resources_per_trial = katib.TrainerResources(
+                num_workers=1,
+                num_procs_per_worker=1,
+                resources_per_worker={"gpu": 2, "cpu": 2, "memory": "4G"},
+            ),
+        )
+
+        cl.wait_for_experiment_condition(name=args.experiment_name)
+
+        best = cl.get_optimal_hyperparameters(args.experiment_name)
+        os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+        with open(args.best_hyperparams, "w") as f:
+            json.dump(best, f, indent=2)
+
+    args:
+      - --model_uri
+      - {inputValue: model_uri}
+      - --dataset_repo
+      - {inputValue: dataset_repo}
+      - --dataset_split
+      - {inputValue: dataset_split}
+      - --experiment_name
+      - {inputValue: experiment_name}
+      - --max_trial_count
+      - {inputValue: max_trial_count}
+      - --parallel_trial_count
+      - {inputValue: parallel_trial_count}
+      - --objective_metric_name
+      - {inputValue: objective_metric_name}
+      - --objective_type
+      - {inputValue: objective_type}
+      - --algorithm_name
+      - {inputValue: algorithm_name}
+      - --best_hyperparams
+      - {outputPath: best_hyperparams}
