@@ -1,0 +1,46 @@
+name: Load IMDB Dataset
+description: Downloads the IMDB dataset from HuggingFace and saves it as a pickled Dataset type.
+outputs:
+  - {name: imdb_data, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        from datasets import load_dataset
+        
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--imdb_data', type=str, required=True)
+        parser.add_argument('--split', type=str, default="train[:1000]", help="Dataset split to download")
+        args = parser.parse_args()
+        
+        print(f"[INFO] Downloading IMDB dataset split: {args.split}")
+        dataset = load_dataset("imdb", split=args.split)
+        
+        print(f"[INFO] Dataset downloaded successfully")
+        print(f"[INFO] Number of samples: {len(dataset)}")
+        print(f"[INFO] Features: {dataset.features}")
+        
+        # Ensure output directory
+        os.makedirs(os.path.dirname(args.imdb_data), exist_ok=True)
+        
+        # Save dataset as pickle
+        with open(args.imdb_data, "wb") as f:
+            pickle.dump(dataset, f)
+        
+        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_data}")
+    args:
+      - --imdb_data
+      - {outputPath: imdb_data}
