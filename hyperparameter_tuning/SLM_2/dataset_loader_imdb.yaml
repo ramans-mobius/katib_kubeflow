@@ -24,34 +24,34 @@ implementation:
         dataset = load_dataset("imdb")
         train_data = dataset["train"]
         
-        # Ensure both classes are present in the sampled subset
         # Sample more than needed first, then filter
         sample_size = 2000
         subset = train_data.select(range(sample_size))
 
-        # Count class distribution
         labels = subset["label"]
         if 0 not in labels or 1 not in labels:
-            print("[WARN] One of the classes missing, selecting full dataset temporarily.")
-            subset = train_data  # fallback to full dataset if needed
+            print("[WARN] One of the classes missing, using full dataset.")
+            subset = train_data  # fallback
 
-        # Downsample to 1000 but ensure both classes remain
         pos = [i for i, l in enumerate(subset["label"]) if l == 1]
         neg = [i for i, l in enumerate(subset["label"]) if l == 0]
 
-        min_class = min(len(pos), len(neg))
+        min_class = min(len(pos), len(neg), 500)  # keep total around 1000
         balanced_indices = pos[:min_class] + neg[:min_class]
         balanced_subset = subset.select(balanced_indices)
 
         print(f"[INFO] Final balanced subset: {len(balanced_subset)} samples")
-        print(f"[INFO] Class distribution: {balanced_subset['label'].count(0)} negatives, {balanced_subset['label'].count(1)} positives")
+        print(f"[INFO] Class distribution: "
+              f"{balanced_subset['label'].count(0)} negatives, "
+              f"{balanced_subset['label'].count(1)} positives")
 
-        os.makedirs(os.path.dirname("{outputPath: imdb_raw_data}"), exist_ok=True)
-        balanced_subset.save_to_disk("{outputPath: imdb_raw_data}")
+        os.makedirs(os.path.dirname({outputPath: imdb_raw_data}), exist_ok=True)
+        balanced_subset.save_to_disk({outputPath: imdb_raw_data})
         print(f"[SUCCESS] Saved IMDB dataset to {outputPath: imdb_raw_data}")
 
     args:
-  - --imdb_raw_data
-  - {outputPath: imdb_raw_data}
+      - --imdb_raw_data
+      - {outputPath: imdb_raw_data}
+
 
 
