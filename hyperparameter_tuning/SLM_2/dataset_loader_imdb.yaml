@@ -1,13 +1,8 @@
-name: Preprocess IMDB Dataset 2
-description: Preprocesses the IMDB dataset and outputs processed data and weights.
-inputs:
+name: Load IMDB Dataset
+description: Downloads and saves the IMDB dataset for preprocessing.
+outputs:
   - name: imdb_raw_data
     type: Dataset
-outputs:
-  - name: imdb_processed_data
-    type: Dataset
-  - name: weights_out1
-    type: String
 implementation:
   container:
     image: python:3.9
@@ -15,40 +10,16 @@ implementation:
       - sh
       - -c
       - |
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch || \
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch --user
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets --user
         exec "$0" "$@"
       - python3
       - -u
       - -c
       - |
+        from datasets import load_dataset
         import os
-        import json
-        import torch
-        from datasets import load_from_disk
-
-        raw_data_path = "{inputPath: imdb_raw_data}"
-        processed_data_path = "{outputPath: imdb_processed_data}"
-        weights_path = "{outputPath: weights_out1}"
-
-        print(f"[INFO] Loading IMDB dataset from {raw_data_path}")
-        dataset = load_from_disk(raw_data_path)
-
-        # Basic preprocessing example: just keep train[:1000] for demo
-        small_train = dataset["train"].select(range(1000))
-
-        # Calculate class weights (example: simple frequency-based)
-        labels = small_train["label"]
-        neg, pos = labels.count(0), labels.count(1)
-        total = len(labels)
-        class_weights = [total/(2*neg), total/(2*pos)]
-
-        os.makedirs(os.path.dirname(processed_data_path), exist_ok=True)
-        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
-
-        small_train.save_to_disk(processed_data_path)
-        with open(weights_path, "w") as f:
-            json.dump({"class_weights": class_weights}, f)
-
-        print(f"[SUCCESS] Preprocessed IMDB data saved to {processed_data_path}")
-        print(f"[SUCCESS] Weights saved to {weights_path}")
+        dataset = load_dataset("imdb")
+        os.makedirs(os.path.dirname("{outputPath: imdb_raw_data}"), exist_ok=True)
+        dataset.save_to_disk("{outputPath: imdb_raw_data}")
+        print(f"[SUCCESS] Saved IMDB dataset to {outputPath: imdb_raw_data}")
