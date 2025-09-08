@@ -1,12 +1,12 @@
-name: Preprocess IMDB Dataset final
-description: Preprocesses the IMDB dataset, analyzes class distribution, and outputs both preprocessed data and class weights.
+name: Preprocess IMDB Data
+description: Preprocesses the IMDB dataset and outputs processed data and weights.
 inputs:
   - name: imdb_raw_data
     type: Dataset
 outputs:
-  - name: imdb_preprocessed
+  - name: imdb_processed_data
     type: Dataset
-  - name: weights_out
+  - name: weights_out1
     type: String
 implementation:
   container:
@@ -15,75 +15,40 @@ implementation:
       - sh
       - -c
       - |
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision torchaudio datasets scikit-learn || \
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch torchvision torchaudio datasets scikit-learn --user
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch --user
         exec "$0" "$@"
       - python3
       - -u
       - -c
       - |
-        import argparse, os, pickle, json, torch
+        import os
+        import json
+        import torch
         from datasets import load_from_disk
-        from sklearn.model_selection import train_test_split
 
-        # --- Parse Arguments ---
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--imdb_raw_data', type=str, required=True)
-        parser.add_argument('--imdb_preprocessed', type=str, required=True)
-        parser.add_argument('--weights_out', type=str, required=True)
-        args = parser.parse_args()
+        raw_data_path = "{inputPath: imdb_raw_data}"
+        processed_data_path = "{outputPath: imdb_processed_data}"
+        weights_path = "{outputPath: weights_out1}"
 
-        print(f"[INFO] Loading raw IMDB dataset from: {args.imdb_raw_data}")
-        dataset = load_from_disk(args.imdb_raw_data)
+        print(f"[INFO] Loading IMDB dataset from {raw_data_path}")
+        dataset = load_from_disk(raw_data_path)
 
-        # --- Preprocessing ---
-        print("[INFO] Preprocessing data...")
-        texts = dataset['train']['text'][:1000]  # adjust for sample size if needed
-        labels = dataset['train']['label'][:1000]
+        # Basic preprocessing example: just keep train[:1000] for demo
+        small_train = dataset["train"].select(range(1000))
 
-        # Example: minimal preprocessing (lowercase)
-        texts = [t.lower() for t in texts]
+        # Calculate class weights (example: simple frequency-based)
+        labels = small_train["label"]
+        neg, pos = labels.count(0), labels.count(1)
+        total = len(labels)
+        class_weights = [total/(2*neg), total/(2*pos)]
 
-        X_train, X_val, y_train, y_val = train_test_split(texts, labels, test_size=0.2, stratify=labels)
+        os.makedirs(os.path.dirname(processed_data_path), exist_ok=True)
+        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
 
-        # --- Compute Class Weights ---
-        labels_tensor = torch.tensor(y_train)
-        class_counts = torch.bincount(labels_tensor)
-        total = len(labels_tensor)
-        class_weights = [total/(2*c.item()) if c.item() > 0 else 1.0 for c in class_counts]
-        alpha_weights = [class_counts[1].item()/total, class_counts[0].item()/total]
+        small_train.save_to_disk(processed_data_path)
+        with open(weights_path, "w") as f:
+            json.dump({"class_weights": class_weights}, f)
 
-        weights_dict = {
-            'focal_loss_alpha': alpha_weights,
-            'class_weights': class_weights
-        }
-
-        print(f"[INFO] Class weights: {class_weights}")
-        print(f"[INFO] Focal loss alpha: {alpha_weights}")
-
-        # --- Save Outputs ---
-        os.makedirs(os.path.dirname(args.imdb_preprocessed), exist_ok=True)
-        os.makedirs(os.path.dirname(args.weights_out), exist_ok=True)
-
-        preprocessed_data = {
-            'train_texts': X_train,
-            'val_texts': X_val,
-            'train_labels': y_train,
-            'val_labels': y_val
-        }
-
-        with open(args.imdb_preprocessed, "wb") as f:
-            pickle.dump(preprocessed_data, f)
-
-        with open(args.weights_out, "w") as f:
-            json.dump(weights_dict, f, indent=2)
-
-        print(f"[SUCCESS] Preprocessed data saved to: {args.imdb_preprocessed}")
-        print(f"[SUCCESS] Weights saved to: {args.weights_out}")
-    args:
-      - --imdb_raw_data
-      - {inputPath: imdb_raw_data}
-      - --imdb_preprocessed
-      - {outputPath: imdb_preprocessed}
-      - --weights_out
-      - {outputPath: weights_out}
+        print(f"[SUCCESS] Preprocessed IMDB data saved to {processed_data_path}")
+        print(f"[SUCCESS] Weights saved to {weights_path}")
