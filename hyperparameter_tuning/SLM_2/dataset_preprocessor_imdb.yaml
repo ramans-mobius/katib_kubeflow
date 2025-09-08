@@ -1,4 +1,4 @@
-name: Preprocess IMDB Data
+name: Preprocess IMDB Dataset final
 description: Preprocesses the IMDB dataset, analyzes class distribution, and outputs both preprocessed data and class weights.
 inputs:
   - name: imdb_raw_data
