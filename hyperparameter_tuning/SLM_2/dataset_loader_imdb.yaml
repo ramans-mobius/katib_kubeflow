@@ -1,7 +1,13 @@
-name: Load IMDB Dataset
-description: Downloads the IMDB dataset from HuggingFace and saves it as a pickled Dataset type.
+name: Preprocess IMDB Data
+description: Preprocesses the IMDB dataset and outputs processed data and weights.
+inputs:
+  - name: imdb_raw_data
+    type: Dataset
 outputs:
-  - {name: imdb_data, type: Dataset}
+  - name: imdb_processed_data
+    type: Dataset
+  - name: weights_out1
+    type: String
 implementation:
   container:
     image: python:3.9
@@ -9,38 +15,40 @@ implementation:
       - sh
       - -c
       - |
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas || \
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets pandas --user
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch --user
         exec "$0" "$@"
       - python3
       - -u
       - -c
       - |
-        import argparse
         import os
-        import pickle
-        from datasets import load_dataset
-        
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--imdb_data', type=str, required=True)
-        parser.add_argument('--split', type=str, default="train[:1000]", help="Dataset split to download")
-        args = parser.parse_args()
-        
-        print(f"[INFO] Downloading IMDB dataset split: {args.split}")
-        dataset = load_dataset("imdb", split=args.split)
-        
-        print(f"[INFO] Dataset downloaded successfully")
-        print(f"[INFO] Number of samples: {len(dataset)}")
-        print(f"[INFO] Features: {dataset.features}")
-        
-        # Ensure output directory
-        os.makedirs(os.path.dirname(args.imdb_data), exist_ok=True)
-        
-        # Save dataset as pickle
-        with open(args.imdb_data, "wb") as f:
-            pickle.dump(dataset, f)
-        
-        print(f"[SUCCESS] Saved IMDB dataset to {args.imdb_data}")
-    args:
-      - --imdb_data
-      - {outputPath: imdb_data}
+        import json
+        import torch
+        from datasets import load_from_disk
+
+        raw_data_path = "{inputPath: imdb_raw_data}"
+        processed_data_path = "{outputPath: imdb_processed_data}"
+        weights_path = "{outputPath: weights_out1}"
+
+        print(f"[INFO] Loading IMDB dataset from {raw_data_path}")
+        dataset = load_from_disk(raw_data_path)
+
+        # Basic preprocessing example: just keep train[:1000] for demo
+        small_train = dataset["train"].select(range(1000))
+
+        # Calculate class weights (example: simple frequency-based)
+        labels = small_train["label"]
+        neg, pos = labels.count(0), labels.count(1)
+        total = len(labels)
+        class_weights = [total/(2*neg), total/(2*pos)]
+
+        os.makedirs(os.path.dirname(processed_data_path), exist_ok=True)
+        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+
+        small_train.save_to_disk(processed_data_path)
+        with open(weights_path, "w") as f:
+            json.dump({"class_weights": class_weights}, f)
+
+        print(f"[SUCCESS] Preprocessed IMDB data saved to {processed_data_path}")
+        print(f"[SUCCESS] Weights saved to {weights_path}")
