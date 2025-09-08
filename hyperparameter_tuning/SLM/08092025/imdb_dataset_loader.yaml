@@ -1,0 +1,32 @@
+name: Split IMDB Dataset
+description: Splits the IMDB dataset into train, validation, and test sets and saves as artifact.
+inputs: []
+outputs:
+  - { name: imdb_dataset, type: string }
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v2
+    command:
+      - python
+      - -u
+      - -c
+      - |
+        import json, os
+        from datasets import load_dataset
+
+        dataset = load_dataset("imdb")
+
+        split_data = {
+            "train": dataset["train"][:],
+            "test": dataset["test"][:]
+        }
+
+        output_path = "/tmp/outputs/imdb_dataset/data.json"
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(split_data, f)
+
+    args:
+      - --imdb_dataset
+      - { outputPath: imdb_dataset }
