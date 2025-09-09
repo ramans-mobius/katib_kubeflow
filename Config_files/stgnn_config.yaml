@@ -1,0 +1,86 @@
+basic_stgnn:
+  gcn_true: True
+  buildA_true: True
+  num_nodes: 38
+  seq_in_len: 100
+  seq_out_len: 1
+  subgraph_size: 10
+  propalpha: 0.1
+  tanhalpha: 20
+  node_dim: 256
+  gcn_depth: 2
+  dilation_exponential: 1
+  conv_channels: 16
+  residual_channels: 16
+  skip_channels: 32
+  end_channels: 64
+  layers: 2
+  in_dim: 1
+  dropout: 0.1
+  hidden_dim: 16
+  epochs: 10
+  batch_size: 64
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  clip: 10
+  step_size1: 2500
+  optimizer: 'adam'
+  task_type: 'regression'
+
+medium_stgnn:
+  gcn_true: True
+  buildA_true: True
+  num_nodes: 38
+  seq_in_len: 100
+  seq_out_len: 1
+  subgraph_size: 20        # Increased but ≤ num_nodes
+  propalpha: 0.15
+  tanhalpha: 15
+  node_dim: 128
+  gcn_depth: 2
+  dilation_exponential: 1
+  conv_channels: 32
+  residual_channels: 32
+  skip_channels: 64
+  end_channels: 128
+  layers: 2
+  in_dim: 1
+  dropout: 0.2
+  hidden_dim: 32
+  epochs: 50
+  batch_size: 64
+  learning_rate: 0.0005
+  weight_decay: 0.00005
+  clip: 10
+  step_size1: 2500
+  optimizer: 'adam'
+  task_type: 'regression'
+
+large_stgnn:
+  gcn_true: True
+  buildA_true: True
+  num_nodes: 38
+  seq_in_len: 100
+  seq_out_len: 1
+  subgraph_size: 30        # Near max nodes
+  propalpha: 0.2
+  tanhalpha: 10
+  node_dim: 64
+  gcn_depth: 2
+  dilation_exponential: 1
+  conv_channels: 64
+  residual_channels: 64
+  skip_channels: 128
+  end_channels: 128
+  layers: 2
+  in_dim: 1
+  dropout: 0.3
+  hidden_dim: 64
+  epochs: 100
+  batch_size: 128
+  learning_rate: 0.0007
+  weight_decay: 0.00005
+  clip: 10
+  step_size1: 2500
+  optimizer: 'adam'
+  task_type: 'regression'
