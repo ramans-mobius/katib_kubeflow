@@ -1,0 +1,67 @@
+name: IMDB Load & Preprocess
+description: Loads, preprocesses, and stores IMDB dataset and weights as Kubeflow artifacts.
+
+outputs:
+  - name: imdb_processed_data
+    type: Dataset
+  - name: weights_out1
+    type: String
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet datasets torch --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import os, json, pickle
+        from datasets import load_dataset
+
+        # Load IMDB dataset
+        dataset = load_dataset("imdb")
+        train_data = dataset["train"].shuffle(seed=42)
+
+        # Balance 1000 samples (ensure both classes)
+        labels = train_data["label"]
+        pos = [i for i, l in enumerate(labels) if l == 1]
+        neg = [i for i, l in enumerate(labels) if l == 0]
+        n = min(len(pos), len(neg), 500)
+        indices = pos[:n] + neg[:n]
+        subset = train_data.select(indices)
+
+        # Calculate weights
+        total = len(subset)
+        pos_count = sum(subset["label"])
+        neg_count = total - pos_count
+        class_weights = [total/(2*neg_count), total/(2*pos_count)]
+        alpha_weights = [pos_count/total, neg_count/total]
+
+        weights_dict = {
+            "focal_loss_alpha": alpha_weights,
+            "class_weights": class_weights
+        }
+
+        # Save dataset and weights
+        os.makedirs(os.path.dirname("{outputPath: imdb_processed_data}"), exist_ok=True)
+        with open("{outputPath: imdb_processed_data}", "wb") as f:
+            pickle.dump(subset, f)
+
+        os.makedirs(os.path.dirname("{outputPath: weights_out1}"), exist_ok=True)
+        with open("{outputPath: weights_out1}", "w") as f:
+            json.dump(weights_dict, f, indent=2)
+
+        print(f"[SUCCESS] Saved dataset to {outputPath: imdb_processed_data}")
+        print(f"[SUCCESS] Saved weights to {outputPath: weights_out1}")
+
+    args:
+      - --imdb_processed_data
+      - {outputPath: imdb_processed_data}
+      - --weights_out1
+      - {outputPath: weights_out1}
