@@ -4,7 +4,7 @@ description: Launches a Katib experiment for GNNS using a predefined objective f
 inputs:
   - name: model_name
     type: String
-    default: tgcn
+    default: stgnn
     description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
 
   - name: model_type
@@ -38,7 +38,7 @@ inputs:
     
   - name: algorithm_name
     type: String
-    default: tpe
+    default: bayesianoptimization
     description: Search algorithm for Katib ( e.g., random, grid, tpe, bayesianoptimization, hyperband)
 
   - name: early_stopping_algorithm
@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v8
+    image: sanram00/stgnn-image:v9
     command:
       - python3
       - -u
@@ -186,7 +186,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v8",
+                                    "image": "sanram00/stgnn-image:v9",
                                     "command": ["python", "train_model_trial.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
