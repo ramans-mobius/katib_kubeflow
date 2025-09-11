@@ -1,4 +1,4 @@
-name: 2 Katib GNNS Tuner (STGNN included) 
+name: 3 Katib GNNS Tuner (STGNN included) 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v3
+    image: sanram00/stgnn-image:v4
     command:
       - python3
       - -u
