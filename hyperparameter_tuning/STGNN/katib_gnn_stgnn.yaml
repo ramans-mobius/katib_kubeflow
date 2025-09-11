@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-train:v2
+    image: sanram00/stgnn-image:v3
     command:
       - python3
       - -u
