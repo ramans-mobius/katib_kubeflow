@@ -1,4 +1,4 @@
-name: Katib GNNS Tuner (STGNN included) 
+name: 2 Katib GNNS Tuner (STGNN included) 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
