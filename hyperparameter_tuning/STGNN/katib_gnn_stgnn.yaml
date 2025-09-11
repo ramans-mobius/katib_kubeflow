@@ -1,4 +1,4 @@
-name: 9 Katib GNNS Tuner (STGNN included) 
+name: 10 Katib GNNS Tuner (STGNN included) 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v9
+    image: sanram00/stgnn-image:v10
     command:
       - python3
       - -u
@@ -186,7 +186,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v9",
+                                    "image": "sanram00/stgnn-image:v10",
                                     "command": ["python", "train_model_trial.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
