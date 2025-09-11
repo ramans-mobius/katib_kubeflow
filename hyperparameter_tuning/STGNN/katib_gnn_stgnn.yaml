@@ -186,8 +186,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "ankitdockerhubprofile/gnns_tgcn_image:latest",
-                                    "command": ["python", "train_model.py"],
+                                    "image": "sanram00/stgnn-image:v4",
+                                    "command": ["python", "train_model_with_stgnn.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
