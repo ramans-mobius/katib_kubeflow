@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: ankitdockerhubprofile/gnns_tgcn_image:latest
+    image: sanram00/stgnn-image:v26
     command:
       - python3
       - -u
@@ -126,7 +126,13 @@ implementation:
         parser.add_argument("--weights_url", type=str, required=True)
         
         args = parser.parse_args()
+        args.process_data_url = args.process_data_url.replace("$$", "\$\$$")
+        args.weights_url = args.weights_url.replace("$$", "\$\$$")
 
+        print("After changing:")
+        print(f"Dataset URL: {args.process_data_url}")
+        print(f"Weights URL: {args.weights_url}")
+        
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
@@ -186,8 +192,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "ankitdockerhubprofile/gnns_tgcn_image:latest",
-                                    "command": ["python", "train_model.py"],
+                                    "image": "sanram00/stgnn-image:v26",
+                                    "command": ["python", "train_model_trial.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
