@@ -126,10 +126,7 @@ implementation:
         parser.add_argument("--weights_url", type=str, required=True)
         
         args = parser.parse_args()
-        args.process_data_url = "".join(args.process_data_url.split())
-        args.weights_url = "".join(args.weights_url.split())
-        
-        args.process_data_url = args.process_data_url.replace("$", "$$$")
+        args.process_data_url = args.process_data_url.replace("$$", "$$$")
         args.weights_url = args.weights_url.replace("$$", "$$$")
 
         print("After changing:")
