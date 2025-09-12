@@ -1,4 +1,4 @@
-name: 26 Katib GNNS Tuner (STGNN included) 
+name: 27 Katib GNNS Tuner (STGNN included) 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -126,7 +126,8 @@ implementation:
         parser.add_argument("--weights_url", type=str, required=True)
         
         args = parser.parse_args()
-
+        print(f"Dataset URL: {process_data_url}")
+        print(f"Weights URL: {weights_url}")
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
