@@ -1,4 +1,4 @@
-name: 10 Katib GNNS Tuner (STGNN included) 
+name: 11 Katib GNNS Tuner (STGNN included) 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -33,7 +33,7 @@ inputs:
     description: Objective type for Katib optimization (e.g., maximize, minimize)
 
   - name: objective_goal
-    type: String
+    type: Float
     description: Target goal value for the metric (e.g., 0.99)
     
   - name: algorithm_name
@@ -52,12 +52,12 @@ inputs:
     description: Maximum number of trials
 
   - name: parallel_trial_count
-    type: String
+    type: Integer
     default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: String
+    type: Integer
     default: '2'
     description: Maximum number of failed trials
 
@@ -284,7 +284,7 @@ implementation:
 
         best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
         params = best.parameter_assignments
-        hp_dict = {p.name: float(p.value) for p in params}
+        hp_dict = {p.name: auto_cast(p.value) for p in params}
         # hp_dict = {
         #   p.name: (float(p.value) if p.value.replace('.', '', 1).isdigit() else p.value)
         #   for p in params
