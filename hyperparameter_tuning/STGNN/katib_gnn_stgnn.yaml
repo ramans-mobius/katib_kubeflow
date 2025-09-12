@@ -129,8 +129,8 @@ implementation:
         args.process_data_url = "".join(args.process_data_url.split())
         args.weights_url = "".join(args.weights_url.split())
         
-        args.process_data_url = args.process_data_url.replace("_$_V1", "_$$$_V1")
-        args.weights_url = args.weights_url.replace("_$_V1", "_$$$_V1")
+        args.process_data_url = args.process_data_url.replace("$", "$$$")
+        args.weights_url = args.weights_url.replace("$$", "$$$")
 
         print("After changing:")
         print(f"Dataset URL: {args.process_data_url}")
