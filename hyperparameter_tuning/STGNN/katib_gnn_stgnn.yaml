@@ -126,8 +126,13 @@ implementation:
         parser.add_argument("--weights_url", type=str, required=True)
         
         args = parser.parse_args()
-        args.process_data_url = args.process_data_url.replace("$$", "\$\$$")
-        args.weights_url = args.weights_url.replace("$$", "\$\$$")
+        #args.process_data_url = args.process_data_url.replace("$$", "\$\$$")
+        #args.weights_url = args.weights_url.replace("$$", "\$\$$")
+        #args.process_data_url = args.process_data_url.replace("$$", "$$$")
+        #args.weights_url = args.weights_url.replace("$$", "$$$")
+        
+        args.process_data_url = "https://cdn.mobiusdtaas.ai/_/bottle/limka/soda/328725b4-2b33-4c76-93aa-288dc5da88b4_$$_V1_processed_data_0e21d8f6-cefe-4660-b76d-a34eb44f1427.pkl"
+        args.weights_url = "https://cdn.mobiusdtaas.ai/_/bottle/limka/soda/ec64f0f2-2e57-4037-9e10-47d4472f68ab_$$_V1_config_ecd1e6db-990c-4c6a-b736-35438e1548b4.json"
 
         print("After changing:")
         print(f"Dataset URL: {args.process_data_url}")
