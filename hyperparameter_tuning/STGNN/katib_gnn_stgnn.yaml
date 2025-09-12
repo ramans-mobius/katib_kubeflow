@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v10
+    image: sanram00/stgnn-image:v12
     command:
       - python3
       - -u
@@ -186,7 +186,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v10",
+                                    "image": "sanram00/stgnn-image:v12",
                                     "command": ["python", "train_model_trial.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
