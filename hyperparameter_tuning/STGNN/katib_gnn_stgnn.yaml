@@ -126,8 +126,8 @@ implementation:
         parser.add_argument("--weights_url", type=str, required=True)
         
         args = parser.parse_args()
-        print(f"Dataset URL: {process_data_url}")
-        print(f"Weights URL: {weights_url}")
+        print(f"Dataset URL: {args.process_data_url}")
+        print(f"Weights URL: {args.weights_url}")
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
