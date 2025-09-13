@@ -39,7 +39,7 @@ inputs:
     
   - name: algorithm_name
     type: String
-    default: tpe
+    default: bayesianoptimization
     description: Search algorithm for Katib ( e.g., random, grid, tpe, bayesianoptimization, hyperband)
 
   - name: early_stopping_algorithm
@@ -132,10 +132,9 @@ implementation:
         params_input = json.loads(args.parameters_to_tune)
 
         print("Inside the Katib Break:")
-        print(f"Dataset URL:{args.process_data_url})
-        print(f"Weights URL:{args.weights_url})
+        print(f"Dataset URL:{args.process_data_url}")
+        print(f"Weights URL:{args.weights_url}")
 
-        
         parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
