@@ -79,7 +79,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v28
+    image: sanram00/stgnn-image:v29
     command:
       - python3
       - -u
@@ -134,6 +134,8 @@ implementation:
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url})
         print(f"Weights URL:{args.weights_url})
+
+        
         parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
@@ -189,7 +191,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v28",
+                                    "image": "sanram00/stgnn-image:v29",
                                     "command": ["python", "train_model_url_fixed.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
