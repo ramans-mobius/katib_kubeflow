@@ -190,7 +190,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v34",
+                                    "image": "sanram00/stgnn-image:v38",
                                     "command": ["python", "train_model_final.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
