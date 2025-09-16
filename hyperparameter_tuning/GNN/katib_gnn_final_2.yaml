@@ -1,5 +1,5 @@
 
-name: Katib GNN Tuner Default and URL
+name: 2 Katib GNN Tuner Default and URL
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
