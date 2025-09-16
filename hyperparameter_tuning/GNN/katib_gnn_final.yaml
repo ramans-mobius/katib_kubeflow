@@ -79,7 +79,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v38
+    image: sanram00/stgnn-image:v41
     command:
       - python3
       - -u
@@ -190,8 +190,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v38",
-                                    "command": ["python", "train_model_final.py"],
+                                    "image": "sanram00/stgnn-image:v41",
+                                    "command": ["python", "train_usecase1.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
