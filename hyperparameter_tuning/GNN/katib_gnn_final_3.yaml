@@ -8,6 +8,11 @@ inputs:
     default: stgnn
     description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
 
+  - name: usecase
+    type: String
+    default: usecase1
+    description: Name or ID of the use case (e.g., usecase1, usecase2, fraud, traffic)
+
   - name: model_type
     type: String
     default: gnns
@@ -88,6 +93,7 @@ implementation:
         import argparse
         import json
         import os
+        import time
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
@@ -121,6 +127,7 @@ implementation:
         parser.add_argument("--max_failed_trial_count", type=int, required=True)
         parser.add_argument("--experiment_name", type=str, required=True)
         parser.add_argument("--model_name", type=str, required=True)
+        parser.add_argument("--usecase", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
         parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--process_data_url", type=str, required=True)
@@ -259,7 +266,7 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['model_name'] = f"{args.model_name}_trial{idx}"
+            paramss['model_name'] = f"{args.model_name}_{args.usecase}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
             paramss["timestamp"] = int(time.time() * 1000)
@@ -329,6 +336,8 @@ implementation:
       - {inputValue: max_trial_count}
       - --parallel_trial_count
       - {inputValue: parallel_trial_count}
+      - --usecase
+      - {inputValue: usecase}
       - --max_failed_trial_count
       - {inputValue: max_failed_trial_count}
       - --best_hyperparams
