@@ -79,7 +79,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v34
+    image: sanram00/stgnn-image:v38
     command:
       - python3
       - -u
