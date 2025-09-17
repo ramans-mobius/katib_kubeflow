@@ -204,7 +204,7 @@ implementation:
                                 {
                                     "name": "training-container",
                                     "image": "sanram00/stgnn-image:v45",
-                                    "command": ["python", "train_usecase1.py"],
+                                    "command": ["python", "train_final.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
