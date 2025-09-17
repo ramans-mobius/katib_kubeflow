@@ -92,6 +92,7 @@ implementation:
         import json
         import os
         import time
+        import uuid
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
