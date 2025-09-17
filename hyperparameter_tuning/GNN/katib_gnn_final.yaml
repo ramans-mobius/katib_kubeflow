@@ -66,6 +66,11 @@ inputs:
     default: '2'
     description: Maximum number of failed trials
 
+  - name: config_json
+    type: String
+    default: "{\"gcn_true\": true, \"buildA_true\": true, \"num_nodes\": 15, \"seq_in_len\": 100, \"seq_out_len\": 1, \"subgraph_size\": 10, \"propalpha\": 0.1, \"tanhalpha\": 20, \"node_dim\": 256, \"gcn_depth\": 2, \"dilation_exponential\": 1, \"conv_channels\": 16, \"residual_channels\": 16, \"skip_channels\": 32, \"end_channels\": 64, \"layers\": 2, \"in_dim\": 1, \"dropout\": 0.1, \"hidden_dim\": 16, \"epochs\": 10, \"batch_size\": 64, \"learning_rate\": 0.0003, \"weight_decay\": 0.0001, \"clip\": 10, \"step_size1\": 2500, \"optimizer\": \"adam\", \"task_type\": \"regression\"}"
+    description: JSON string of default model configuration
+
 outputs:
   - name: best_hyperparams
     type: JsonArray
@@ -125,16 +130,19 @@ implementation:
         parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--process_data_url", type=str, required=True)
         parser.add_argument("--weights_url", type=str, required=True)
+        parser.add_argument("--config_json", type=str, required=True)
         
         args = parser.parse_args()
 
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
+        
 
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
-
+        print(f"Configuration:{args.config_json}")
+        
         parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
@@ -198,7 +206,8 @@ implementation:
                                     ], []) + [
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
-                                    "--weights_url", args.weights_url
+                                    "--weights_url", args.weights_url,
+                                    "--config_json", args.config_json   
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
@@ -315,6 +324,8 @@ implementation:
       - {inputValue: weights_url}
       - --parameters_to_tune
       - {inputValue: parameters_to_tune}
+      - --config_json
+      - {inputValue: config_json}
       - --objective_metric_name
       - {inputValue: objective_metric_name}
       - --objective_type
@@ -331,8 +342,8 @@ implementation:
       - {inputValue: parallel_trial_count}
       - --max_failed_trial_count
       - {inputValue: max_failed_trial_count}
-      - --usecase
-      - {inputValue: usecase}
+      - --projectid
+      - {inputValue: projectid}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
       - --payload
