@@ -8,7 +8,7 @@ inputs:
     default: stgnn
     description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
 
-  - name: usecase
+  - name: projectid
     type: String
     default: usecase1
     description: Name or ID of the use case (e.g., usecase1, usecase2, fraud, traffic)
@@ -127,7 +127,7 @@ implementation:
         parser.add_argument("--max_failed_trial_count", type=int, required=True)
         parser.add_argument("--experiment_name", type=str, required=True)
         parser.add_argument("--model_name", type=str, required=True)
-        parser.add_argument("--usecase", type=str, required=True)
+        parser.add_argument("--projectid", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
         parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--process_data_url", type=str, required=True)
@@ -338,8 +338,8 @@ implementation:
       - {inputValue: parallel_trial_count}
       - --max_failed_trial_count
       - {inputValue: max_failed_trial_count}
-      - --usecase
-      - {inputValue: usecase}
+      - --projectid
+      - {inputValue: projectid}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
       - --payload
