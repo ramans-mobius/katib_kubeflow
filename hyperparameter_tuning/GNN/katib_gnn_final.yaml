@@ -137,11 +137,16 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
         
-
+        try:
+            cfg = json.loads(args.config_json)
+            print("Parsed config:", cfg)
+        except Exception as e:
+            print("Failed to parse config_json:", e)
+            
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
-        print(f"Configuration:{args.config_json}")
+        print(f"Configuration:{cfg}")
         
         parameters = [
             V1beta1ParameterSpec(
@@ -207,7 +212,7 @@ implementation:
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
                                     "--weights_url", args.weights_url,
-                                    "--config_json", args.config_json   
+                                    "--config_json", cfg,   
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
