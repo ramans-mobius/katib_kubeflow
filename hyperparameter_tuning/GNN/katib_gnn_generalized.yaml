@@ -1,4 +1,4 @@
-name: Katib GNN Tuner Default and URL
+name: Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -70,7 +70,6 @@ inputs:
     type: String
     default: '{"gcn_true": true, "buildA_true": true, "num_nodes": 15, "seq_in_len": 100, "seq_out_len": 1, "subgraph_size": 10, "propalpha": 0.1, "tanhalpha": 20, "node_dim": 256, "gcn_depth": 2, "dilation_exponential": 1, "conv_channels": 16, "residual_channels": 16, "skip_channels": 32, "end_channels": 64, "layers": 2, "in_dim": 1, "dropout": 0.1, "hidden_dim": 16, "epochs": 10, "batch_size": 64, "learning_rate": 0.0003, "weight_decay": 0.0001, "clip": 10, "step_size1": 2500, "optimizer": "adam", "task_type": "regression"}'
 
-
 outputs:
 
   - name: best_hyperparams
@@ -84,7 +83,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v45
+    image: sanram00/stgnn-image:v47
     command:
       - python3
       - -u
@@ -138,16 +137,12 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
         
-        try:
-            cfg = json.loads(args.config_json)
-            print("Parsed config:", cfg)
-        except Exception as e:
-            print("Failed to parse config_json:", e)
-            
+        cfg = json.loads(args.config_json)
+        print("Parsed config:", cfg)   # Show the parsed dictionary
+        
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
-        print(f"Configuration:{cfg}")
         
         parameters = [
             V1beta1ParameterSpec(
@@ -157,7 +152,7 @@ implementation:
             )
             for p in params_input
         ]
-
+        
         metrics_collector = V1beta1MetricsCollectorSpec(
             source={
                 "fileSystemPath": V1beta1FileSystemPath(
@@ -204,8 +199,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v45",
-                                    "command": ["python", "train_final.py"],
+                                    "image": "sanram00/stgnn-image:v47",
+                                    "command": ["python", "train_model_fully_generalized.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
@@ -213,7 +208,7 @@ implementation:
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
                                     "--weights_url", args.weights_url,
-                                    "--config_json", cfg,   
+                                    "--config_json", json.dumps(cfg),  
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
