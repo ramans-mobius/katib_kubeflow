@@ -1,4 +1,3 @@
-
 name: Katib GNN Tuner Default and URL
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
@@ -8,7 +7,7 @@ inputs:
     default: stgnn
     description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
 
-  - name: usecase
+  - name: projectid
     type: String
     default: usecase1
     description: Name or ID of the use case (e.g., usecase1, usecase2, fraud, traffic)
@@ -266,10 +265,12 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['model_name'] = f"{args.model_name}_{args.usecase}_trial{idx}"
+            paramss['projectid'] = f"{args.usecase}"
+            paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
-            paramss["timestamp"] = int(time.time() * 1000)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            paramss["timestamp"] = timestamp
             # Add hyperparameters
             for param in trial.spec.parameter_assignments:
                 paramss[param.name] = auto_cast(param.value)
