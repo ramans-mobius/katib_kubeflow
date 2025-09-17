@@ -270,7 +270,7 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['projectid'] = f"{args.usecase}"
+            paramss['projectid'] = f"{args.projectid}"
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
