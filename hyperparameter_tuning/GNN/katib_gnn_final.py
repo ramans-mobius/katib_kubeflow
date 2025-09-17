@@ -67,11 +67,6 @@ inputs:
     default: '2'
     description: Maximum number of failed trials
 
-  - name: experiment_name
-    type: String
-    default: katib-experiment
-    description: Name for the Katib experiment
-
 outputs:
   - name: best_hyperparams
     type: JsonArray
@@ -94,6 +89,7 @@ implementation:
         import json
         import os
         import time 
+        import uuid
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
@@ -125,7 +121,6 @@ implementation:
         parser.add_argument("--max_trial_count", type=int, required=True)
         parser.add_argument("--parallel_trial_count", type=int, required=True)
         parser.add_argument("--max_failed_trial_count", type=int, required=True)
-        parser.add_argument("--experiment_name", type=str, required=True)
         parser.add_argument("--model_name", type=str, required=True)
         parser.add_argument("--projectid", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
@@ -162,7 +157,7 @@ implementation:
             collector={"kind": "File"}
         )
 
-        experiment_name = args.experiment_name
+        experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
 
         objective_spec = V1beta1ObjectiveSpec(
@@ -266,10 +261,12 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['model_name'] = f"{args.model_name}_{args.usecase}_trial{idx}"
+            paramss['projectid'] = f"{args.usecase}"
+            paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
-            paramss["timestamp"] = int(time.time() * 1000)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            paramss["timestamp"] = timestamp
             # Add hyperparameters
             for param in trial.spec.parameter_assignments:
                 paramss[param.name] = auto_cast(param.value)
@@ -318,8 +315,6 @@ implementation:
       - {inputValue: process_data_url}
       - --weights_url
       - {inputValue: weights_url}
-      - --experiment_name
-      - {inputValue: experiment_name}
       - --parameters_to_tune
       - {inputValue: parameters_to_tune}
       - --objective_metric_name
