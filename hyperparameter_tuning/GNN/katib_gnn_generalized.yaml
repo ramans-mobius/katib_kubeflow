@@ -72,6 +72,7 @@ inputs:
 
 
 outputs:
+
   - name: best_hyperparams
     type: JsonArray
     description: Best parameter set found by Katib
