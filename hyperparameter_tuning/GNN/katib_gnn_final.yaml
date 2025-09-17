@@ -131,7 +131,7 @@ implementation:
         parser.add_argument("--process_data_url", type=str, required=True)
         parser.add_argument("--weights_url", type=str, required=True)
         parser.add_argument("--config_json", type=str, required=True)
-        
+        print(config_json)
         args = parser.parse_args()
 
         # Parse input parameters to tune
