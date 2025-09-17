@@ -278,10 +278,10 @@ implementation:
                 metrics_list = []
                 for metric in trial.status.observation.metrics:
                     metrics_list.append({metric.name: auto_cast(metric.latest)})
-                # Save metrics as JSON string
-                paramss["metrics_value"] = str(metrics_list)
+                # Keep metrics as a list of dicts (not a string)
+                paramss["metrics_value"] = metrics_list
             else:
-                paramss["metrics_value"] = None
+                paramss["metrics_value"] = []
         
             payload_data.append(paramss)
               
