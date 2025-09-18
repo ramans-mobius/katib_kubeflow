@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v49
+    image: sanram00/stgnn-image:v51
     command:
       - python3
       - -u
@@ -92,6 +92,7 @@ implementation:
         import json
         import os
         import time
+        import tempfile
         import uuid
         from kubernetes import client, config
         import kubeflow.katib as katib
@@ -139,10 +140,14 @@ implementation:
         params_input = json.loads(args.parameters_to_tune)
         
         cfg = json.loads(args.config_json)
+        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+        with open(tmp_file.name, "w") as f:
+            json.dump(cfg, f)
+        
+        print("Config JSON stored at:", tmp_file.name)
+        
         #cfg = args.config_json
         #cfg = args.config_json.replace('"', '\\\"')
-
-        print("Config passing into python file:", cfg)   # Show the parsed dictionary
         
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
@@ -203,7 +208,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v49",
+                                    "image": "sanram00/stgnn-image:v51",
                                     "command": ["python", "train_model_fully_generalized.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
@@ -212,7 +217,7 @@ implementation:
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
                                     "--weights_url", args.weights_url,
-                                    "--config_json", json.dumps(cfg),  
+                                    "--config_json_path", tmp_file.name  
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
