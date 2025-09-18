@@ -138,8 +138,9 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
         
-        cfg = json.loads(args.config_json)
-        print("Parsed config:", cfg)   # Show the parsed dictionary
+        #cfg = json.loads(args.config_json)
+        cfg = args.config_json
+        print("Config passing into python file:", cfg)   # Show the parsed dictionary
         
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
