@@ -262,7 +262,7 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['projectid'] = f"{args.projectid}"
+            paramss['project_id'] = f"{args.projectid}"
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_name'] = f"{args.model_name}_{args.usecase}_trial{idx}"
             paramss['model_type'] = args.model_type
