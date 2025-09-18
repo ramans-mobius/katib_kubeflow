@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v51
+    image: sanram00/stgnn-image:v52
     command:
       - python3
       - -u
@@ -92,7 +92,7 @@ implementation:
         import json
         import os
         import time
-        import tempfile
+        import base64
         import uuid
         from kubernetes import client, config
         import kubeflow.katib as katib
@@ -138,12 +138,13 @@ implementation:
         
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
+
+        # Convert your config dict to JSON string
+        cfg_json_str = json.dumps(cfg)
         
-        cfg = json.loads(args.config_json)
-        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-        with open(tmp_file.name, "w") as f:
-            json.dump(cfg, f)
-        
+        # Base64 encode it
+        encoded_cfg = base64.b64encode(cfg_json_str.encode()).decode()
+                
         print("Config JSON stored at:", tmp_file.name)
         
         #cfg = args.config_json
@@ -199,26 +200,25 @@ implementation:
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
                     "template": {
-                        "metadata": {
-                            "annotations": {
-                                "sidecar.istio.io/inject": "false"
-                            }
-                        },
                         "spec": {
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v51",
+                                    "image": "sanram00/stgnn-image:v52",
                                     "command": ["python", "train_model_fully_generalized.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
                                     ], []) + [
-                                    "--model_name", args.model_name,
-                                    "--process_data_url", args.process_data_url,
-                                    "--weights_url", args.weights_url,
-                                    "--config_json_path", tmp_file.name  
-                                    # "--elliptic_data", args.elliptic_data
+                                        "--model_name", args.model_name,
+                                        "--process_data_url", args.process_data_url,
+                                        "--weights_url", args.weights_url
+                                    ],
+                                    "env": [
+                                        {
+                                            "name": "CONFIG_JSON_B64",
+                                            "value": encoded_cfg
+                                        }
                                     ],
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
@@ -231,6 +231,7 @@ implementation:
                 }
             }
         )
+
         print(f"Trial spec:{trial_template.trial_spec}")
 
         experiment_spec = V1beta1ExperimentSpec(
