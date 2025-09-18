@@ -139,14 +139,14 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
+        cfg = json.loads(args.config_json)
+        
         # Convert your config dict to JSON string
         cfg_json_str = json.dumps(cfg)
         
         # Base64 encode it
         encoded_cfg = base64.b64encode(cfg_json_str.encode()).decode()
                 
-        print("Config JSON stored at:", tmp_file.name)
-        
         #cfg = args.config_json
         #cfg = args.config_json.replace('"', '\\\"')
         
