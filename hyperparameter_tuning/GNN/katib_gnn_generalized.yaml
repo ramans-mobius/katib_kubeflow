@@ -226,7 +226,7 @@ implementation:
                 }
             }
         )
-        print(f"Trial spec:{trial_spec})
+        print(f"Trial spec:{trial_spec}")
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
