@@ -139,7 +139,9 @@ implementation:
         params_input = json.loads(args.parameters_to_tune)
         
         #cfg = json.loads(args.config_json)
-        cfg = args.config_json
+        #cfg = args.config_json
+        cfg = args.config_json.replace('"', '\\"')
+
         print("Config passing into python file:", cfg)   # Show the parsed dictionary
         
         print("Inside the Katib Break:")
