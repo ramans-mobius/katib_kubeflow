@@ -265,7 +265,7 @@ implementation:
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            timestamp = time.strftime("%Y%m%d%H%M%S")
             paramss["timestamp"] = timestamp
             # Add hyperparameters
             for param in trial.spec.parameter_assignments:
