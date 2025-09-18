@@ -1,4 +1,4 @@
-name: 7 Katib GNN Generalized
+name: 8 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -139,11 +139,12 @@ implementation:
         params_input = json.loads(args.parameters_to_tune)
                 
         #cfg = args.config_json
-        #cfg = args.config_json.replace('"', '\\\"')
+        cfg = args.config_json.replace('"', 'abcdefg')
         
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
+        print(f"After Parsing:{cfg}")
         
         parameters = [
             V1beta1ParameterSpec(
@@ -203,7 +204,8 @@ implementation:
                                     ], []) + [
                                         "--model_name", args.model_name,
                                         "--process_data_url", args.process_data_url,
-                                        "--weights_url", args.weights_url
+                                        "--weights_url", args.weights_url,
+                                        "--config",cfg
                                     ],
                                     ],
                                     "resources": {
