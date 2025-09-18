@@ -209,7 +209,7 @@ implementation:
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
                                     "--weights_url", args.weights_url,
-                                    "--config_json", json.dumps(cfg),  
+                                    "--config_json", cfg,  
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
