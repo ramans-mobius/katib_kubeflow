@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v53
+    image: sanram00/stgnn-image:v54
     command:
       - python3
       - -u
@@ -144,7 +144,7 @@ implementation:
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
-        print(f"After Parsing:{cfg}")
+        print(f"After formatting:{cfg}")
         
         parameters = [
             V1beta1ParameterSpec(
@@ -196,7 +196,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v53",
+                                    "image": "sanram00/stgnn-image:v54",
                                     "command": ["python", "train_model_fully_generalized.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
