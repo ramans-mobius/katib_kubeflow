@@ -1,4 +1,4 @@
-name: 8 Katib GNN Generalized
+name: 9 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v54
+    image: sanram00/stgnn-image:v55
     command:
       - python3
       - -u
@@ -137,9 +137,11 @@ implementation:
         
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
-                
+
+        string_uuid = str(uuid.uuid4())[:8]
+        print("String uuid used here:",string_uuid)
         #cfg = args.config_json
-        cfg = args.config_json.replace('"', 'abcdefg')
+        cfg = args.config_json.replace('"', string_uuid)
         
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
@@ -196,7 +198,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v54",
+                                    "image": "sanram00/stgnn-image:v55",
                                     "command": ["python", "train_model_fully_generalized.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
@@ -205,7 +207,8 @@ implementation:
                                         "--model_name", args.model_name,
                                         "--process_data_url", args.process_data_url,
                                         "--weights_url", args.weights_url,
-                                        "--config",cfg
+                                        "--config",cfg,
+                                        "--uuid_to_replace", string_uuid
                                     ],
                                     ],
                                     "resources": {
