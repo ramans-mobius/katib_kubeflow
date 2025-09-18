@@ -138,9 +138,9 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
         
-        #cfg = json.loads(args.config_json)
+        cfg = json.loads(args.config_json)
         #cfg = args.config_json
-        cfg = args.config_json.replace('"', '\\\"')
+        #cfg = args.config_json.replace('"', '\\\"')
 
         print("Config passing into python file:", cfg)   # Show the parsed dictionary
         
@@ -212,7 +212,7 @@ implementation:
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
                                     "--weights_url", args.weights_url,
-                                    "--config_json", cfg,  
+                                    "--config_json", json.dumps(cfg),  
                                     # "--elliptic_data", args.elliptic_data
                                     ],
                                     "resources": {
@@ -226,6 +226,7 @@ implementation:
                 }
             }
         )
+        print(f"Trial spec:{trial_spec})
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
