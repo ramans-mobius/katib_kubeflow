@@ -210,12 +210,11 @@ implementation:
                                         "--config",cfg,
                                         "--uuid_to_replace", string_uuid
                                     ],
-                                    ],
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
                                 }
-                            ],
+                            ]
                             "restartPolicy": "Never"
                         }
                     }
