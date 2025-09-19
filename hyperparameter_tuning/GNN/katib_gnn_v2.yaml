@@ -1,4 +1,4 @@
-name: V9 Katib GNN Generalized
+name: V10 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -138,7 +138,7 @@ implementation:
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
-        string_uuid = str(uuid.uuid4())[:8]
+        string_uuid = str(uuid.uuid4())[:4]
         print("String uuid used here:",string_uuid)
         #cfg = args.config_json
         cfg = args.config_json.replace('"', string_uuid)
