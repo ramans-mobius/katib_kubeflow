@@ -1,4 +1,4 @@
-name: V16 Katib GNN Generalized
+name: V17 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -199,7 +199,7 @@ implementation:
                                 {
                                     "name": "training-container",
                                     "image": "sanram00/stgnn-image:v66",
-                                    "command": ["python", "train_model_fully_generalized.py"],
+                                    "command": ["python", "train_model_fully_generalized_gpu.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
