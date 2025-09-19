@@ -1,4 +1,4 @@
-name: 13 Katib GNN Generalized
+name: V2 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
