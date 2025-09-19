@@ -1,4 +1,4 @@
-name: V13 Katib GNN Generalized
+name: V14 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -211,7 +211,7 @@ implementation:
                                         "--uuid_to_replace", string_uuid
                                     ],
                                     "resources": {
-                                        "limits": {"cpu": "4", "memory": "4Gi", "gpu": "1"}
+                                        "limits": {"cpu": "4", "memory": "4Gi", "nvidia.com/gpu": "1"}
                                     }
                                 }
                             ],
