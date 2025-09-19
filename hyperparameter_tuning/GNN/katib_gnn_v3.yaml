@@ -1,4 +1,4 @@
-name: V16 Katib GNN Generalized
+name: V17 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
