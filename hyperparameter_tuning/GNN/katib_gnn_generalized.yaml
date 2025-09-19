@@ -207,7 +207,7 @@ implementation:
                                         "--model_name", args.model_name,
                                         "--process_data_url", args.process_data_url,
                                         "--weights_url", args.weights_url,
-                                        "--config",f"'{cfg}'",
+                                        "--config",f"{cfg}",
                                         "--uuid_to_replace", string_uuid
                                     ],
                                     "resources": {
