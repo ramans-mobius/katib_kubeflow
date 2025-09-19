@@ -1,4 +1,4 @@
-name: V10 Katib GNN Generalized
+name: V11 Katib GNN Generalized
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -207,7 +207,7 @@ implementation:
                                         "--model_name", args.model_name,
                                         "--process_data_url", args.process_data_url,
                                         "--weights_url", args.weights_url,
-                                        "--config",cfg,
+                                        "--config",f'{cfg}',
                                         "--uuid_to_replace", string_uuid
                                     ],
                                     "resources": {
