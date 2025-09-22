@@ -157,12 +157,15 @@ implementation:
         ]
         
         metrics_collector = V1beta1MetricsCollectorSpec(
-            source=V1beta1FileSystemPath(
-                path="/katib/mnist.json",
-                kind="File"
-            ),
-            kind="File"
+            collector={"kind": "File"},
+            source={
+                "fileSystemPath": V1beta1FileSystemPath(
+                    path="/katib/mnist.json",
+                    kind="File"
+                )
+            }
         )
+
 
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
