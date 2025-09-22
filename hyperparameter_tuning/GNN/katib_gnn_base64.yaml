@@ -38,7 +38,7 @@ inputs:
     description: Objective type for Katib optimization (e.g., maximize, minimize)
 
   - name: objective_goal
-    type: String
+    type: Float
     description: Target goal value for the metric (e.g., 0.99)
     
   - name: algorithm_name
@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v78
+    image: sanram00/stgnn-image:v79
     command:
       - python3
       - -u
@@ -156,15 +156,16 @@ implementation:
             for p in params_input
         ]
         
+        from kubeflow.katib import V1beta1MetricsCollectorSpec, V1beta1FileSystemPath, V1beta1MetricsCollectorSpecSource
+
         metrics_collector = V1beta1MetricsCollectorSpec(
-            source={
-                "fileSystemPath": V1beta1FileSystemPath(
+            kind="File",
+            source=V1beta1MetricsCollectorSpecSource(
+                file_system_path=V1beta1FileSystemPath(
                     path="/katib/mnist.json",
-                    kind="File",
-                    format="JSON"
+                    kind="File"
                 )
-            },
-            collector={"kind": "File"}
+            )
         )
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
@@ -197,7 +198,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v78",
+                                    "image": "sanram00/stgnn-image:v79",
                                     "command": ["python", "train_model_fully_generalized_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
