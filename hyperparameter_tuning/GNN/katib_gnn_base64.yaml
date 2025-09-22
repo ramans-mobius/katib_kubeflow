@@ -1,4 +1,4 @@
-name: 2 Katib GNN Base64
+name: 3 Katib GNN Base64
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -198,22 +198,15 @@ implementation:
                                 {
                                     "name": "training-container",
                                     "image": "sanram00/stgnn-image:v76",
-                                    "command": ["sh", "-c"],
-                                    "args": [
-                                        # First write the base64 string into /katib/config.b64
-                                        f"echo '{cfg_b64}' > {config_file} && "
-                                        # Then run your training script
-                                        "python train_model_fully_generalized_base64.py "
-                                        + " ".join(
-                                            [
-                                                "--" + p["name"] + " ${trialParameters." + p["name"] + "}"
-                                                for p in params_input
-                                            ]
-                                        )
-                                        + f" --model_name {args.model_name}"
-                                        + f" --process_data_url {args.process_data_url}"
-                                        + f" --weights_url {args.weights_url}"
-                                        + f" --config {config_file}"
+                                    "command": ["python", "train_model_fully_generalized_base64.py"],
+                                    "args": sum([
+                                        ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
+                                        for p in params_input
+                                    ], []) + [
+                                        "--model_name", args.model_name,
+                                        "--process_data_url", args.process_data_url,
+                                        "--weights_url", args.weights_url,
+                                        "--config", cfg_b64   # pass base64 inline!
                                     ],
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
