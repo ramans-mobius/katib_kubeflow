@@ -156,17 +156,14 @@ implementation:
             for p in params_input
         ]
         
-        from kubeflow.katib import V1beta1MetricsCollectorSpec, V1beta1FileSystemPath, V1beta1MetricsCollectorSpecSource
-
         metrics_collector = V1beta1MetricsCollectorSpec(
-            kind="File",
-            source=V1beta1MetricsCollectorSpecSource(
-                file_system_path=V1beta1FileSystemPath(
-                    path="/katib/mnist.json",
-                    kind="File"
-                )
-            )
+            source=V1beta1FileSystemPath(
+                path="/katib/mnist.json",
+                kind="File"
+            ),
+            kind="File"
         )
+
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
