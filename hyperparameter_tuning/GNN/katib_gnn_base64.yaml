@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v73
+    image: sanram00/stgnn-image:v74
     command:
       - python3
       - -u
@@ -197,7 +197,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v73",
+                                    "image": "sanram00/stgnn-image:v74",
                                     "command": ["sh", "-c"],
                                     "args": [
                                         # First write the base64 string into /katib/config.b64
