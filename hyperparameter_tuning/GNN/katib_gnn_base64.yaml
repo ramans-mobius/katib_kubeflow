@@ -1,4 +1,4 @@
-name: 3 Katib GNN Base64
+name: 4 Katib GNN Base64
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -82,7 +82,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v76
+    image: sanram00/stgnn-image:v77
     command:
       - python3
       - -u
@@ -197,7 +197,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v76",
+                                    "image": "sanram00/stgnn-image:v77",
                                     "command": ["python", "train_model_fully_generalized_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
