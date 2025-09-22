@@ -1,4 +1,4 @@
-name: V22 Katib GNN Generalized
+name: Katib GNN Base64
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
