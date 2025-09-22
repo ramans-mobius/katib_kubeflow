@@ -145,7 +145,7 @@ implementation:
         print("Inside the Katib Break:")
         print(f"Dataset URL:{args.process_data_url}")
         print(f"Weights URL:{args.weights_url}")
-        print(f"After formatting:{cfg}")
+        print(f"After formatting:{cfg_b64}")
         
         parameters = [
             V1beta1ParameterSpec(
