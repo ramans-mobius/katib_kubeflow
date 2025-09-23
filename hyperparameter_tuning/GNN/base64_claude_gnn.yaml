@@ -1,0 +1,436 @@
+name: 7 Katib GNN Base64
+description: Launches a Katib experiment for GNNS using a predefined objective function.
+
+inputs:
+  - name: model_name
+    type: String
+    default: stgnn
+    description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
+
+  - name: projectid
+    type: String
+    default: usecase1
+    description: Name or ID of the use case (e.g., usecase1, usecase2, fraud, traffic)
+
+  - name: model_type
+    type: String
+    default: gnns
+    description: Type of model(e.g., gnn, ml, xgboost etc)
+
+  - name: process_data_url
+    type: String
+    description: URL to fetch the dataset (pickle) from.
+
+  - name: weights_url
+    type: String
+    description: Path to fetch weights JSON from.
+    
+  - name: parameters_to_tune
+    type: String
+    description: List of parameter specs to tune (Katib V1beta1ParameterSpec format)
+
+  - name: objective_metric_name
+    type: String
+    description: Metric name Katib will optimize (e.g., accuracy, f1_score, roc_auc)
+
+  - name: objective_type
+    type: String
+    description: Objective type for Katib optimization (e.g., maximize, minimize)
+
+  - name: objective_goal
+    type: Float
+    description: Target goal value for the metric (e.g., 0.99)
+    
+  - name: algorithm_name
+    type: String
+    default: bayesianoptimization
+    description: Search algorithm for Katib ( e.g., random, grid, tpe, bayesianoptimization, hyperband)
+
+  - name: early_stopping_algorithm
+    type: String
+    default: medianstop
+    description: Early stopping algorithm for Katib (e.g., medianstop, truncation, none)
+
+  - name: max_trial_count 
+    type: Integer
+    default: '4'
+    description: Maximum number of trials
+
+  - name: parallel_trial_count
+    type: String
+    default: '2'
+    description: Number of trials to run in parallel
+
+  - name: max_failed_trial_count
+    type: String
+    default: '2'
+    description: Maximum number of failed trials
+
+  - name: config_json
+    type: String
+   
+outputs:
+
+  - name: best_hyperparams
+    type: JsonArray
+    description: Best parameter set found by Katib
+
+  - name: payload
+    type: string
+    description: Parameters tuning
+  
+
+implementation:
+  container:
+    image: sanram00/stgnn-image:v79
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        import time
+        import uuid
+        import base64
+        from kubernetes import client, config
+        import kubeflow.katib as katib
+        from kubeflow.katib import (
+            V1beta1AlgorithmSpec,
+            V1beta1Experiment,
+            V1beta1ExperimentSpec,
+            V1beta1ObjectiveSpec,
+            V1beta1ParameterSpec,
+            V1beta1EarlyStoppingSpec,
+            V1beta1TrialTemplate,
+            V1beta1MetricsCollectorSpec,
+            V1beta1FileSystemPath,
+        )
+
+        # Load K8s config
+        try:
+            config.load_incluster_config()
+        except:
+            config.load_kube_config()
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--best_hyperparams", type=str, required=True)
+        parser.add_argument("--parameters_to_tune", type=str, required=True)
+        parser.add_argument("--objective_metric_name", type=str, required=True)
+        parser.add_argument("--objective_type", type=str, required=True)
+        parser.add_argument("--objective_goal", type=float, required=True)
+        parser.add_argument("--algorithm_name", type=str, required=True)
+        parser.add_argument("--early_stopping_algorithm", type=str, required=True)
+        parser.add_argument("--max_trial_count", type=int, required=True)
+        parser.add_argument("--parallel_trial_count", type=int, required=True)
+        parser.add_argument("--max_failed_trial_count", type=int, required=True)
+        parser.add_argument("--model_name", type=str, required=True)
+        parser.add_argument("--projectid", type=str, required=True)
+        parser.add_argument("--payload", type=str, required=True)
+        parser.add_argument("--model_type", type=str, required=True)
+        parser.add_argument("--process_data_url", type=str, required=True)
+        parser.add_argument("--weights_url", type=str, required=True)
+        parser.add_argument("--config_json", type=str, required=True)
+        
+        args = parser.parse_args()
+        print("=== KATIB EXPERIMENT SETUP ===")
+        print(f"Model: {args.model_name}")
+        print(f"Max trials: {args.max_trial_count}")
+        print(f"Parallel trials: {args.parallel_trial_count}")
+        print(f"Objective: {args.objective_type} {args.objective_metric_name}")
+        print(f"Dataset URL: {args.process_data_url}")
+        print(f"Weights URL: {args.weights_url}")
+        print("Input configuration:")
+        print(args.config_json)
+        
+        # Parse input parameters to tune
+        params_input = json.loads(args.parameters_to_tune)
+        print(f"Parameters to tune: {[p['name'] for p in params_input]}")
+        
+        cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
+        print(f"Config base64 length: {len(cfg_b64)} characters")
+        
+        parameters = [
+            V1beta1ParameterSpec(
+                name=p["name"],
+                parameter_type=p["parameter_type"],
+                feasible_space=p["feasible_space"]
+            )
+            for p in params_input
+        ]
+        
+        # Enhanced metrics collector with proper path
+        metrics_collector = V1beta1MetricsCollectorSpec(
+            collector={"kind": "File"},
+            source={
+                "fileSystemPath": V1beta1FileSystemPath(
+                    path="/katib/mnist.json",
+                    kind="File"
+                )
+            }
+        )
+
+        experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
+        namespace = "admin"
+        print(f"Experiment name: {experiment_name}")
+
+        objective_spec = V1beta1ObjectiveSpec(
+            type=args.objective_type,
+            goal=args.objective_goal,
+            objective_metric_name=args.objective_metric_name
+        )
+
+        algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
+        early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
+
+        # Enhanced trial template with proper volume mounts and resource management
+        trial_template = V1beta1TrialTemplate(
+            retain=True,
+            primary_container_name="training-container",
+            trial_parameters=[
+                {"name": p["name"], "description": p["name"], "reference": p["name"]}
+                for p in params_input
+            ],
+            trial_spec={
+                "apiVersion": "batch/v1",
+                "kind": "Job",
+                "spec": {
+                    "ttlSecondsAfterFinished": 86400,
+                    "activeDeadlineSeconds": 3600,  # 1 hour timeout per trial
+                    "backoffLimit": 0,  # Don't retry failed jobs
+                    "template": {
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "training-container",
+                                    "image": "sanram00/stgnn-image:v79",
+                                    "command": ["python", "train_model_fully_generalized_base64.py"],
+                                    "args": sum([
+                                        ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
+                                        for p in params_input
+                                    ], []) + [
+                                        "--model_name", args.model_name,
+                                        "--process_data_url", args.process_data_url,
+                                        "--weights_url", args.weights_url,
+                                        "--config", cfg_b64
+                                    ],
+                                    "resources": {
+                                        "requests": {"cpu": "1", "memory": "2Gi"},
+                                        "limits": {"cpu": "4", "memory": "4Gi"}
+                                    },
+                                    "volumeMounts": [
+                                        {
+                                            "name": "katib-metrics",
+                                            "mountPath": "/katib"
+                                        }
+                                    ],
+                                    "env": [
+                                        {
+                                            "name": "PYTHONUNBUFFERED",
+                                            "value": "1"
+                                        },
+                                        {
+                                            "name": "TRIAL_NAME",
+                                            "value": "${trialSpec.Name}"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "volumes": [
+                                {
+                                    "name": "katib-metrics",
+                                    "emptyDir": {}
+                                }
+                            ],
+                            "restartPolicy": "Never"
+                        }
+                    }
+                }
+            }
+        )
+
+        print("Trial template created successfully")
+
+        # Adjust parallel trials for resource management
+        adjusted_parallel_trials = min(args.parallel_trial_count, 2)  # Max 2 parallel for stability
+        print(f"Using {adjusted_parallel_trials} parallel trials (adjusted from {args.parallel_trial_count})")
+
+        experiment_spec = V1beta1ExperimentSpec(
+            objective=objective_spec,
+            algorithm=algorithm_spec,
+            parameters=parameters,
+            trial_template=trial_template,
+            metrics_collector_spec=metrics_collector,
+            max_trial_count=args.max_trial_count,
+            parallel_trial_count=adjusted_parallel_trials,
+            max_failed_trial_count=args.max_failed_trial_count,
+            early_stopping=early_stopping_spec
+        )
+
+        katib_client = katib.KatibClient(namespace=namespace)
+        experiment = V1beta1Experiment(
+            api_version="kubeflow.org/v1beta1",
+            kind="Experiment",
+            metadata=client.V1ObjectMeta(name=experiment_name, namespace=namespace),
+            spec=experiment_spec
+        )
+
+        def auto_cast(value: str):
+            """Cast Katib param string into int, float, bool, or keep as string."""
+            if value.lower() in ["true", "false"]:
+                return value.lower() == "true"
+            if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                return int(value)
+            try:
+                return float(value)
+            except ValueError:
+                return value
+
+        print("=== CREATING KATIB EXPERIMENT ===")
+        try:
+            katib_client.create_experiment(experiment)
+            print(f"✓ Created experiment: {experiment_name}")
+            
+            print("=== WAITING FOR EXPERIMENT COMPLETION ===")
+            print("This may take several minutes...")
+            
+            # Wait with enhanced error handling
+            katib_client.wait_for_experiment_condition(
+                name=experiment_name, 
+                namespace=namespace, 
+                timeout=7200,  # 2 hours
+                expected_conditions=["Succeeded", "Failed"]
+            )
+            
+            # Check final experiment status
+            exp = katib_client.get_experiment(experiment_name, namespace)
+            print(f"✓ Experiment completed with status: {exp.status.condition_types}")
+            
+        except Exception as e:
+            print(f"❌ Error in experiment execution: {e}")
+            
+            # Debug information
+            try:
+                exp = katib_client.get_experiment(experiment_name, namespace)
+                print(f"Experiment status: {exp.status}")
+                
+                trials = katib_client.list_trials(experiment_name, namespace)
+                print(f"Total trials: {len(trials)}")
+                
+                for i, trial in enumerate(trials):
+                    print(f"Trial {i+1}:")
+                    print(f"  - Status: {trial.status.condition_types}")
+                    print(f"  - Parameters: {[(p.name, p.value) for p in trial.spec.parameter_assignments]}")
+                    if trial.status.observation and trial.status.observation.metrics:
+                        print(f"  - Metrics: {[(m.name, m.latest) for m in trial.status.observation.metrics]}")
+                    else:
+                        print(f"  - Metrics: None collected")
+                        
+            except Exception as debug_e:
+                print(f"Failed to get debug info: {debug_e}")
+            
+            raise
+
+        print("=== COLLECTING RESULTS ===")
+        
+        # Fetch all trials for this experiment
+        trials = katib_client.list_trials(experiment_name, namespace)
+        print(f"Processing {len(trials)} trials...")
+
+        payload_data = []
+
+        for idx, trial in enumerate(trials, start=1):
+            paramss = {}
+            paramss['project_id'] = f"{args.projectid}"
+            paramss['model_name'] = f"{args.model_name}_trial{idx}"
+            paramss['model_type'] = args.model_type
+            
+            # Add timestamp
+            timestamp = int(time.strftime("%Y%m%d%H%M%S"))
+            paramss["timestamp"] = timestamp
+            
+            # Add hyperparameters
+            for param in trial.spec.parameter_assignments:
+                paramss[param.name] = auto_cast(param.value)
+            
+            # Add metrics
+            if trial.status.observation and trial.status.observation.metrics:
+                metrics_list = []
+                for metric in trial.status.observation.metrics:
+                    metrics_list.append({metric.name: auto_cast(metric.latest)})
+                paramss["metrics_value"] = metrics_list
+            else:
+                paramss["metrics_value"] = []
+                print(f"Warning: No metrics collected for trial {idx}")
+        
+            payload_data.append(paramss)
+              
+        payload = {
+            "data": payload_data
+        }
+
+        # Save payload for next brick
+        os.makedirs(os.path.dirname(args.payload), exist_ok=True)
+        with open(args.payload, "w") as f:
+            json.dump(payload, f)
+        print(f"✓ Saved payload to {args.payload}")
+
+        # Get best hyperparameters
+        try:
+            best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
+            params = best.parameter_assignments
+            hp_dict = {p.name: auto_cast(p.value) for p in params}
+            print(f"✓ Best Hyperparameters Found: {hp_dict}")
+            
+            dir_path = os.path.dirname(args.best_hyperparams)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+
+            with open(args.best_hyperparams, "w") as f:
+                json.dump(hp_dict, f, indent=2)
+            print(f"✓ Saved best hyperparameters to {args.best_hyperparams}")
+            
+        except Exception as e:
+            print(f"❌ Error getting optimal hyperparameters: {e}")
+            # Save empty dict to avoid pipeline failure
+            with open(args.best_hyperparams, "w") as f:
+                json.dump({}, f, indent=2)
+
+        print("=== KATIB EXPERIMENT COMPLETED SUCCESSFULLY ===")
+
+    args:
+      - --model_name
+      - {inputValue: model_name}
+      - --model_type
+      - {inputValue: model_type}
+      - --process_data_url
+      - {inputValue: process_data_url}
+      - --weights_url
+      - {inputValue: weights_url}
+      - --parameters_to_tune
+      - {inputValue: parameters_to_tune}
+      - --config_json
+      - {inputValue: config_json}
+      - --objective_metric_name
+      - {inputValue: objective_metric_name}
+      - --objective_type
+      - {inputValue: objective_type}
+      - --objective_goal
+      - {inputValue: objective_goal}
+      - --algorithm_name
+      - {inputValue: algorithm_name}
+      - --early_stopping_algorithm
+      - {inputValue: early_stopping_algorithm}
+      - --max_trial_count
+      - {inputValue: max_trial_count}
+      - --parallel_trial_count
+      - {inputValue: parallel_trial_count}
+      - --max_failed_trial_count
+      - {inputValue: max_failed_trial_count}
+      - --projectid
+      - {inputValue: projectid}
+      - --best_hyperparams
+      - {outputPath: best_hyperparams}
+      - --payload
+      - {outputPath: payload}
