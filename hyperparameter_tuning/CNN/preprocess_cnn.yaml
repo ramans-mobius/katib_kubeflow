@@ -55,27 +55,16 @@ implementation:
             with open(path, 'wb') as f:
                 pickle.dump(obj, f)
 
-        def preprocess_data(data, image_size, augmentation=False):
-            # Convert to tensor and resize
-            if isinstance(data, torch.utils.data.dataset.Subset):
-                X = [d[0] for d in data]
-                y = [d[1] for d in data]
-            elif isinstance(data, np.ndarray):
-                X = data
-                y = None
-            else:
-                # Assume dataset is already tensor dataset
-                X = [d[0] for d in data]
-                y = [d[1] for d in data]
-
+        def preprocess_images(data, image_size, augmentation=False):
             transform_list = [transforms.Resize((image_size, image_size)), transforms.ToTensor()]
             if augmentation:
                 transform_list.insert(0, transforms.RandomHorizontalFlip())
             transform = transforms.Compose(transform_list)
 
+            X, y = zip(*data) if isinstance(data, list) else (data[0], data[1])
             X_tensor = torch.stack([transform(torch.tensor(x, dtype=torch.float32)) for x in X])
-            y_tensor = torch.tensor(y) if y is not None else None
-            return TensorDataset(X_tensor, y_tensor) if y_tensor is not None else TensorDataset(X_tensor)
+            y_tensor = torch.tensor(y, dtype=torch.long)
+            return TensorDataset(X_tensor, y_tensor)
 
         # Load datasets
         train_data = load_pickle(args.train_dataset)
@@ -83,9 +72,9 @@ implementation:
         test_data = load_pickle(args.test_dataset)
 
         # Preprocess datasets
-        train_ds = preprocess_data(train_data, args.image_size, args.augmentation)
-        val_ds = preprocess_data(val_data, args.image_size, False)
-        test_ds = preprocess_data(test_data, args.image_size, False)
+        train_ds = preprocess_images(train_data, args.image_size, args.augmentation)
+        val_ds = preprocess_images(val_data, args.image_size, False)
+        test_ds = preprocess_images(test_data, args.image_size, False)
 
         # Create DataLoaders
         train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
