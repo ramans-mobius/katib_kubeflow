@@ -1,0 +1,118 @@
+name: CNN Preprocessing Brick
+description: Prepares train/validation/test datasets for CNN training with optional resizing, normalization, and augmentation.
+inputs:
+  - {name: train_dataset, type: Dataset, description: "Pickle file with training dataset"}
+  - {name: val_dataset, type: Dataset, description: "Pickle file with validation dataset"}
+  - {name: test_dataset, type: Dataset, description: "Pickle file with test dataset"}
+  - {name: image_size, type: int, description: "Target image size (assumes square)", default: 32}
+  - {name: batch_size, type: int, description: "Batch size for DataLoaders", default: 64}
+  - {name: augmentation, type: bool, description: "Whether to apply simple augmentation", default: True}
+outputs:
+  - {name: train_loader_pickle, type: Dataset, description: "Pickle file with train DataLoader"}
+  - {name: val_loader_pickle, type: Dataset, description: "Pickle file with validation DataLoader"}
+  - {name: test_loader_pickle, type: Dataset, description: "Pickle file with test DataLoader"}
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        python3 -m pip install --quiet torch torchvision numpy pickle || \
+        python3 -m pip install --quiet torch torchvision numpy pickle --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import pickle
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+        from torchvision import transforms
+        import numpy as np
+        import os
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--train_dataset', type=str, required=True)
+        parser.add_argument('--val_dataset', type=str, required=True)
+        parser.add_argument('--test_dataset', type=str, required=True)
+        parser.add_argument('--image_size', type=int, default=32)
+        parser.add_argument('--batch_size', type=int, default=64)
+        parser.add_argument('--augmentation', type=bool, default=True)
+        parser.add_argument('--train_loader_pickle', type=str, required=True)
+        parser.add_argument('--val_loader_pickle', type=str, required=True)
+        parser.add_argument('--test_loader_pickle', type=str, required=True)
+        args = parser.parse_args()
+
+        def load_pickle(path):
+            with open(path, 'rb') as f:
+                return pickle.load(f)
+
+        def save_pickle(obj, path):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, 'wb') as f:
+                pickle.dump(obj, f)
+
+        def preprocess_data(data, image_size, augmentation=False):
+            # Convert to tensor and resize
+            if isinstance(data, torch.utils.data.dataset.Subset):
+                X = [d[0] for d in data]
+                y = [d[1] for d in data]
+            elif isinstance(data, np.ndarray):
+                X = data
+                y = None
+            else:
+                # Assume dataset is already tensor dataset
+                X = [d[0] for d in data]
+                y = [d[1] for d in data]
+
+            transform_list = [transforms.Resize((image_size, image_size)), transforms.ToTensor()]
+            if augmentation:
+                transform_list.insert(0, transforms.RandomHorizontalFlip())
+            transform = transforms.Compose(transform_list)
+
+            X_tensor = torch.stack([transform(torch.tensor(x, dtype=torch.float32)) for x in X])
+            y_tensor = torch.tensor(y) if y is not None else None
+            return TensorDataset(X_tensor, y_tensor) if y_tensor is not None else TensorDataset(X_tensor)
+
+        # Load datasets
+        train_data = load_pickle(args.train_dataset)
+        val_data = load_pickle(args.val_dataset)
+        test_data = load_pickle(args.test_dataset)
+
+        # Preprocess datasets
+        train_ds = preprocess_data(train_data, args.image_size, args.augmentation)
+        val_ds = preprocess_data(val_data, args.image_size, False)
+        test_ds = preprocess_data(test_data, args.image_size, False)
+
+        # Create DataLoaders
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
+        test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
+
+        # Save DataLoaders as pickle
+        save_pickle(train_loader, args.train_loader_pickle)
+        save_pickle(val_loader, args.val_loader_pickle)
+        save_pickle(test_loader, args.test_loader_pickle)
+
+    args:
+      - --train_dataset
+      - {inputPath: train_dataset}
+      - --val_dataset
+      - {inputPath: val_dataset}
+      - --test_dataset
+      - {inputPath: test_dataset}
+      - --image_size
+      - {inputValue: image_size}
+      - --batch_size
+      - {inputValue: batch_size}
+      - --augmentation
+      - {inputValue: augmentation}
+      - --train_loader_pickle
+      - {outputPath: train_loader_pickle}
+      - --val_loader_pickle
+      - {outputPath: val_loader_pickle}
+      - --test_loader_pickle
+      - {outputPath: test_loader_pickle}
