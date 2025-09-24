@@ -1,16 +1,45 @@
 name: CNN Preprocessing Brick
 description: Prepares train/validation/test datasets for CNN training with optional resizing, normalization, and augmentation.
 inputs:
-  - {name: train_dataset, type: Dataset, description: "Pickle file with training dataset"}
-  - {name: val_dataset, type: Dataset, description: "Pickle file with validation dataset"}
-  - {name: test_dataset, type: Dataset, description: "Pickle file with test dataset"}
-  - {name: image_size, type: int, description: "Target image size (assumes square)", default: 32}
-  - {name: batch_size, type: int, description: "Batch size for DataLoaders", default: 64}
-  - {name: augmentation, type: bool, description: "Whether to apply simple augmentation", default: True}
+  - name: train_dataset
+    type: Dataset
+    description: "Pickle file with training dataset"
+    
+  - name: val_dataset
+    type: Dataset
+    description: "Pickle file with validation dataset"
+    
+  - name: test_dataset
+    type: Dataset
+    description: "Pickle file with test dataset"
+    
+  - name: image_size
+    type: int
+    description: "Target image size (assumes square)"
+    default: 32
+    
+  - name: batch_size
+    type: int
+    description: "Batch size for DataLoaders"
+    default: 64
+    
+  - name: augmentation
+    type: bool
+    description: "Whether to apply simple augmentation"
+    default: True
+    
 outputs:
-  - {name: train_loader_pickle, type: Dataset, description: "Pickle file with train DataLoader"}
-  - {name: val_loader_pickle, type: Dataset, description: "Pickle file with validation DataLoader"}
-  - {name: test_loader_pickle, type: Dataset, description: "Pickle file with test DataLoader"}
+  - name: train_loader_pickle
+    type: Dataset
+    description: "Pickle file with train DataLoader"
+    
+  - name: val_loader_pickle
+    type: Dataset
+    description: "Pickle file with validation DataLoader"
+    
+  - name: test_loader_pickle
+    type: Dataset
+    description: "Pickle file with test DataLoader"
 
 implementation:
   container:
