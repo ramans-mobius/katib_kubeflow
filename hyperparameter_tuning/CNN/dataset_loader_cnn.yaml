@@ -1,0 +1,124 @@
+name: Load Dataset for CNN
+description: Fetches dataset from JSON API, predefined dataset, or local path, and prepares train/validation/test splits for CNN.
+inputs:
+  - {name: api_url, type: string, description: 'Optional API URL to fetch JSON dataset'}
+  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
+  - {name: dataset_name, type: string, description: 'Predefined dataset name (mnist, fashionmnist, cifar10)'}
+  - {name: local_path, type: string, description: 'Optional local dataset path'}
+  - {name: val_fraction, type: float, description: 'Fraction of training data to use for validation', default: 0.1}
+outputs:
+  - {name: train_dataset, type: Dataset}
+  - {name: val_dataset, type: Dataset}
+  - {name: test_dataset, type: Dataset}
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        python3 -m pip install --quiet torch torchvision pandas scikit-learn requests || \
+        python3 -m pip install --quiet torch torchvision pandas scikit-learn requests --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        import numpy as np
+        import pandas as pd
+        import requests
+        from sklearn.model_selection import train_test_split
+        from torchvision import datasets, transforms
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--api_url', type=str, default=None)
+        parser.add_argument('--access_token', type=str, default=None)
+        parser.add_argument('--dataset_name', type=str, default=None)
+        parser.add_argument('--local_path', type=str, default=None)
+        parser.add_argument('--val_fraction', type=float, default=0.1)
+        parser.add_argument('--train_dataset', type=str, required=True)
+        parser.add_argument('--val_dataset', type=str, required=True)
+        parser.add_argument('--test_dataset', type=str, required=True)
+        args = parser.parse_args()
+
+        def save_pickle(obj, path):
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "wb") as f:
+                pickle.dump(obj, f)
+
+        # JSON API Dataset
+        if args.api_url:
+            headers = {"Authorization": f"Bearer {open(args.access_token).read().strip()}"}
+            resp = requests.get(args.api_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data = pd.DataFrame(resp.json())
+            # Keep numeric only
+            numeric_cols = data.select_dtypes(include=[np.number]).columns
+            data = data[numeric_cols].fillna(0)
+            X = data.values
+            y = None  # No labels unless API provides them
+            # Simple train/val/test split
+            train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
+            train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
+            save_pickle(train_X, args.train_dataset)
+            save_pickle(val_X, args.val_dataset)
+            save_pickle(test_X, args.test_dataset)
+            
+        # Local dataset
+        elif args.local_path:
+            data = pd.read_csv(args.local_path)
+            X = data.select_dtypes(include=[np.number]).fillna(0).values
+            train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
+            train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
+            save_pickle(train_X, args.train_dataset)
+            save_pickle(val_X, args.val_dataset)
+            save_pickle(test_X, args.test_dataset)
+            
+        # Predefined dataset
+        elif args.dataset_name:
+            dataset_name = args.dataset_name.lower()
+            transform = transforms.ToTensor()
+            if dataset_name == "mnist":
+                train_set = datasets.MNIST(root="./data", train=True, download=True, transform=transform)
+                test_set = datasets.MNIST(root="./data", train=False, download=True, transform=transform)
+            elif dataset_name == "fashionmnist":
+                train_set = datasets.FashionMNIST(root="./data", train=True, download=True, transform=transform)
+                test_set = datasets.FashionMNIST(root="./data", train=False, download=True, transform=transform)
+            elif dataset_name == "cifar10":
+                transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+                train_set = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
+                test_set = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
+            else:
+                raise ValueError(f"Unsupported dataset: {dataset_name}")
+            # Split validation from training
+            train_len = int(len(train_set) * (1 - args.val_fraction))
+            val_len = len(train_set) - train_len
+            train_set, val_set = torch.utils.data.random_split(train_set, [train_len, val_len])
+            save_pickle(train_set, args.train_dataset)
+            save_pickle(val_set, args.val_dataset)
+            save_pickle(test_set, args.test_dataset)
+            
+        else:
+            raise ValueError("No dataset source provided")
+        
+    args:
+      - --api_url
+      - {inputValue: api_url}
+      - --access_token
+      - {inputPath: access_token}
+      - --dataset_name
+      - {inputValue: dataset_name}
+      - --local_path
+      - {inputValue: local_path}
+      - --val_fraction
+      - {inputValue: val_fraction}
+      - --train_dataset
+      - {outputPath: train_dataset}
+      - --val_dataset
+      - {outputPath: val_dataset}
+      - --test_dataset
+      - {outputPath: test_dataset}
