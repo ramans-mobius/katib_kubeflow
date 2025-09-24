@@ -1,15 +1,36 @@
 name: Load Dataset for CNN
 description: Fetches dataset from JSON API, predefined dataset, or local path, and prepares train/validation/test splits for CNN.
 inputs:
-  - {name: api_url, type: string, description: 'Optional API URL to fetch JSON dataset'}
-  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
-  - {name: dataset_name, type: string, description: 'Predefined dataset name (mnist, fashionmnist, cifar10)'}
-  - {name: local_path, type: string, description: 'Optional local dataset path'}
-  - {name: val_fraction, type: float, description: 'Fraction of training data to use for validation', default: 0.1}
+  - name: api_url
+    type: string
+    description: 'Optional API URL to fetch JSON dataset'
+    
+  - name: access_token
+    type: string
+    description: 'Bearer access token for API auth'
+    
+  - name: dataset_name
+    type: string
+    description: 'Predefined dataset name (mnist, fashionmnist, cifar10)'
+    
+  - name: local_path
+    type: string
+    description: 'Optional local dataset path'
+    
+  - name: val_fraction
+    type: float
+    description: 'Fraction of training data to use for validation'
+    default: 0.1
+    
 outputs:
-  - {name: train_dataset, type: Dataset}
-  - {name: val_dataset, type: Dataset}
-  - {name: test_dataset, type: Dataset}
+  - name: train_dataset
+    type: Dataset
+    
+  - name: val_dataset
+    type: Dataset
+    
+  - name: test_dataset
+    type: Dataset
 
 implementation:
   container:
