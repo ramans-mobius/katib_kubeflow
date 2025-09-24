@@ -1,5 +1,6 @@
 name: Load Dataset for CNN
 description: Fetches dataset from JSON API, predefined dataset, or local path, and prepares train/validation/test splits for CNN.
+
 inputs:
   - name: api_url
     type: string
@@ -34,14 +35,8 @@ outputs:
 
 implementation:
   container:
-    image: python:3.9
+    image: pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
     command:
-      - sh
-      - -c
-      - |
-        python3 -m pip install --quiet torch torchvision pandas scikit-learn requests || \
-        python3 -m pip install --quiet torch torchvision pandas scikit-learn requests --user
-        exec "$0" "$@"
       - python3
       - -u
       - -c
@@ -52,6 +47,7 @@ implementation:
         import numpy as np
         import pandas as pd
         import requests
+        import torch
         from sklearn.model_selection import train_test_split
         from torchvision import datasets, transforms
 
@@ -66,71 +62,290 @@ implementation:
         parser.add_argument('--test_dataset', type=str, required=True)
         args = parser.parse_args()
 
+        print("=== CNN DATASET LOADING STARTED ===")
+        print(f"API URL: {args.api_url}")
+        print(f"Dataset name: {args.dataset_name}")
+        print(f"Local path: {args.local_path}")
+        print(f"Validation fraction: {args.val_fraction}")
+
         def save_pickle(obj, path):
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             with open(path, "wb") as f:
                 pickle.dump(obj, f)
+            print(f"Saved dataset to: {path}")
 
-        # JSON API Dataset
-        if args.api_url:
-            headers = {"Authorization": f"Bearer {open(args.access_token).read().strip()}"}
-            resp = requests.get(args.api_url, headers=headers, timeout=30)
-            resp.raise_for_status()
-            data = pd.DataFrame(resp.json())
-            # Keep numeric only
-            numeric_cols = data.select_dtypes(include=[np.number]).columns
-            data = data[numeric_cols].fillna(0)
-            X = data.values
-            y = None  # No labels unless API provides them
-            # Simple train/val/test split
-            train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
-            train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
-            save_pickle(train_X, args.train_dataset)
-            save_pickle(val_X, args.val_dataset)
-            save_pickle(test_X, args.test_dataset)
+        def load_access_token(token_path):
+            """Load access token from file path or return as string if it's the token itself"""
+            if token_path and os.path.isfile(token_path):
+                with open(token_path, 'r') as f:
+                    return f.read().strip()
+            return token_path  # Return as-is if it's the actual token
+
+        def convert_to_image_format(data, labels=None):
+            """Convert data to proper image format for CNN"""
+            data = np.array(data)
             
-        # Local dataset
-        elif args.local_path:
-            data = pd.read_csv(args.local_path)
-            X = data.select_dtypes(include=[np.number]).fillna(0).values
-            train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
-            train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
-            save_pickle(train_X, args.train_dataset)
-            save_pickle(val_X, args.val_dataset)
-            save_pickle(test_X, args.test_dataset)
+            # If data is 1D, try to reshape to square image
+            if data.ndim == 1:
+                size = int(np.sqrt(len(data)))
+                if size * size == len(data):
+                    data = data.reshape(size, size)
+                else:
+                    # Pad or truncate to make it square
+                    target_size = 32  # Default size
+                    if len(data) > target_size * target_size:
+                        data = data[:target_size * target_size].reshape(target_size, target_size)
+                    else:
+                        padded = np.zeros(target_size * target_size)
+                        padded[:len(data)] = data
+                        data = padded.reshape(target_size, target_size)
             
-        # Predefined dataset
-        elif args.dataset_name:
-            dataset_name = args.dataset_name.lower()
-            transform = transforms.ToTensor()
-            if dataset_name == "mnist":
-                train_set = datasets.MNIST(root="./data", train=True, download=True, transform=transform)
-                test_set = datasets.MNIST(root="./data", train=False, download=True, transform=transform)
-            elif dataset_name == "fashionmnist":
-                train_set = datasets.FashionMNIST(root="./data", train=True, download=True, transform=transform)
-                test_set = datasets.FashionMNIST(root="./data", train=False, download=True, transform=transform)
-            elif dataset_name == "cifar10":
-                transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-                train_set = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
-                test_set = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
+            # Add channel dimension if needed (grayscale)
+            if data.ndim == 2:
+                data = np.expand_dims(data, axis=0)  # Add channel dimension
+            elif data.ndim == 3 and data.shape[2] in [1, 3]:
+                # Convert HWC to CHW
+                data = np.transpose(data, (2, 0, 1))
+            
+            # Normalize to [0, 1] if needed
+            if data.max() > 1:
+                data = data / 255.0
+            
+            return data
+
+        try:
+            # JSON API Dataset
+            if args.api_url:
+                print("Loading dataset from API...")
+                headers = {}
+                if args.access_token:
+                    token = load_access_token(args.access_token)
+                    headers = {"Authorization": f"Bearer {token}"}
+                
+                resp = requests.get(args.api_url, headers=headers, timeout=60)
+                resp.raise_for_status()
+                
+                data = resp.json()
+                if isinstance(data, dict):
+                    # Handle different JSON structures
+                    if 'data' in data:
+                        X = np.array(data['data'])
+                        y = np.array(data.get('labels', np.zeros(len(X))))
+                    else:
+                        df = pd.DataFrame(data)
+                        numeric_cols = df.select_dtypes(include=[np.number]).columns
+                        X = df[numeric_cols].fillna(0).values
+                        y = np.arange(len(X))  # Default sequential labels
+                else:
+                    df = pd.DataFrame(data)
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns
+                    X = df[numeric_cols].fillna(0).values
+                    y = np.arange(len(X))  # Default sequential labels
+                
+                print(f"Loaded {len(X)} samples from API")
+                
+                # Convert to image format
+                X_processed = []
+                for i, sample in enumerate(X):
+                    img = convert_to_image_format(sample)
+                    X_processed.append(img)
+                    if (i + 1) % 1000 == 0:
+                        print(f"Processed {i + 1}/{len(X)} samples")
+                
+                X = np.array(X_processed)
+                
+                # Split data
+                if len(np.unique(y)) > 1:  # Multi-class
+                    train_X, test_X, train_y, test_y = train_test_split(
+                        X, y, test_size=0.2, random_state=42, stratify=y
+                    )
+                    train_X, val_X, train_y, val_y = train_test_split(
+                        train_X, train_y, test_size=args.val_fraction, random_state=42, stratify=train_y
+                    )
+                else:  # Single class or no labels
+                    train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
+                    train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
+                    train_y = np.zeros(len(train_X))
+                    val_y = np.zeros(len(val_X))
+                    test_y = np.zeros(len(test_X))
+                
+                # Save as (data, labels) tuples
+                save_pickle((train_X, train_y), args.train_dataset)
+                save_pickle((val_X, val_y), args.val_dataset)
+                save_pickle((test_X, test_y), args.test_dataset)
+                
+            # Local dataset
+            elif args.local_path:
+                print(f"Loading dataset from local path: {args.local_path}")
+                
+                if args.local_path.endswith('.csv'):
+                    data = pd.read_csv(args.local_path)
+                    # Assume last column is labels, rest are features
+                    if data.shape[1] > 1:
+                        X = data.iloc[:, :-1].select_dtypes(include=[np.number]).fillna(0).values
+                        y = data.iloc[:, -1].values
+                    else:
+                        X = data.select_dtypes(include=[np.number]).fillna(0).values
+                        y = np.arange(len(X))
+                        
+                elif args.local_path.endswith(('.pkl', '.pickle')):
+                    with open(args.local_path, 'rb') as f:
+                        data = pickle.load(f)
+                    if isinstance(data, tuple):
+                        X, y = data
+                    else:
+                        X = data
+                        y = np.arange(len(X))
+                else:
+                    raise ValueError(f"Unsupported file format: {args.local_path}")
+                
+                print(f"Loaded {len(X)} samples from local file")
+                
+                # Convert to image format
+                X_processed = []
+                for i, sample in enumerate(X):
+                    img = convert_to_image_format(sample)
+                    X_processed.append(img)
+                    if (i + 1) % 1000 == 0:
+                        print(f"Processed {i + 1}/{len(X)} samples")
+                
+                X = np.array(X_processed)
+                
+                # Split data
+                if len(np.unique(y)) > 1:
+                    train_X, test_X, train_y, test_y = train_test_split(
+                        X, y, test_size=0.2, random_state=42, stratify=y
+                    )
+                    train_X, val_X, train_y, val_y = train_test_split(
+                        train_X, train_y, test_size=args.val_fraction, random_state=42, stratify=train_y
+                    )
+                else:
+                    train_X, test_X = train_test_split(X, test_size=0.2, random_state=42)
+                    train_X, val_X = train_test_split(train_X, test_size=args.val_fraction, random_state=42)
+                    train_y = np.zeros(len(train_X))
+                    val_y = np.zeros(len(val_X))
+                    test_y = np.zeros(len(test_X))
+                
+                save_pickle((train_X, train_y), args.train_dataset)
+                save_pickle((val_X, val_y), args.val_dataset)
+                save_pickle((test_X, test_y), args.test_dataset)
+                
+            # Predefined dataset
+            elif args.dataset_name:
+                print(f"Loading predefined dataset: {args.dataset_name}")
+                dataset_name = args.dataset_name.lower()
+                
+                # Create data directory
+                os.makedirs("./data", exist_ok=True)
+                
+                if dataset_name == "mnist":
+                    # Load raw datasets without transforms for proper splitting
+                    train_set = datasets.MNIST(root="./data", train=True, download=True, transform=None)
+                    test_set = datasets.MNIST(root="./data", train=False, download=True, transform=None)
+                    
+                elif dataset_name == "fashionmnist":
+                    train_set = datasets.FashionMNIST(root="./data", train=True, download=True, transform=None)
+                    test_set = datasets.FashionMNIST(root="./data", train=False, download=True, transform=None)
+                    
+                elif dataset_name == "cifar10":
+                    train_set = datasets.CIFAR10(root="./data", train=True, download=True, transform=None)
+                    test_set = datasets.CIFAR10(root="./data", train=False, download=True, transform=None)
+                    
+                else:
+                    raise ValueError(f"Unsupported dataset: {dataset_name}")
+                
+                print(f"Downloaded {dataset_name} - Train: {len(train_set)}, Test: {len(test_set)}")
+                
+                # Convert to numpy arrays
+                train_data = []
+                train_labels = []
+                for i in range(len(train_set)):
+                    img, label = train_set[i]
+                    if hasattr(img, 'numpy'):
+                        img_array = img.numpy()
+                    else:
+                        img_array = np.array(img)
+                    
+                    # Ensure proper format (CHW)
+                    if img_array.ndim == 3 and img_array.shape[2] in [1, 3]:  # HWC
+                        img_array = np.transpose(img_array, (2, 0, 1))  # Convert to CHW
+                    elif img_array.ndim == 2:  # Grayscale
+                        img_array = np.expand_dims(img_array, axis=0)
+                    
+                    # Normalize to [0, 1]
+                    if img_array.max() > 1:
+                        img_array = img_array / 255.0
+                    
+                    train_data.append(img_array)
+                    train_labels.append(label)
+                    
+                    if (i + 1) % 10000 == 0:
+                        print(f"Processed {i + 1}/{len(train_set)} training samples")
+                
+                test_data = []
+                test_labels = []
+                for i in range(len(test_set)):
+                    img, label = test_set[i]
+                    if hasattr(img, 'numpy'):
+                        img_array = img.numpy()
+                    else:
+                        img_array = np.array(img)
+                    
+                    # Ensure proper format (CHW)
+                    if img_array.ndim == 3 and img_array.shape[2] in [1, 3]:  # HWC
+                        img_array = np.transpose(img_array, (2, 0, 1))  # Convert to CHW
+                    elif img_array.ndim == 2:  # Grayscale
+                        img_array = np.expand_dims(img_array, axis=0)
+                    
+                    # Normalize to [0, 1]
+                    if img_array.max() > 1:
+                        img_array = img_array / 255.0
+                    
+                    test_data.append(img_array)
+                    test_labels.append(label)
+                    
+                    if (i + 1) % 2000 == 0:
+                        print(f"Processed {i + 1}/{len(test_set)} test samples")
+                
+                train_data = np.array(train_data)
+                train_labels = np.array(train_labels)
+                test_data = np.array(test_data)
+                test_labels = np.array(test_labels)
+                
+                print(f"Train data shape: {train_data.shape}, Test data shape: {test_data.shape}")
+                
+                # Split validation from training
+                train_X, val_X, train_y, val_y = train_test_split(
+                    train_data, train_labels, 
+                    test_size=args.val_fraction, 
+                    random_state=42, 
+                    stratify=train_labels
+                )
+                
+                print(f"Final splits - Train: {len(train_X)}, Val: {len(val_X)}, Test: {len(test_data)}")
+                
+                # Save as (data, labels) tuples
+                save_pickle((train_X, train_y), args.train_dataset)
+                save_pickle((val_X, val_y), args.val_dataset)
+                save_pickle((test_data, test_labels), args.test_dataset)
+                
             else:
-                raise ValueError(f"Unsupported dataset: {dataset_name}")
-            # Split validation from training
-            train_len = int(len(train_set) * (1 - args.val_fraction))
-            val_len = len(train_set) - train_len
-            train_set, val_set = torch.utils.data.random_split(train_set, [train_len, val_len])
-            save_pickle(train_set, args.train_dataset)
-            save_pickle(val_set, args.val_dataset)
-            save_pickle(test_set, args.test_dataset)
+                raise ValueError("No dataset source provided. Please specify api_url, dataset_name, or local_path.")
             
-        else:
-            raise ValueError("No dataset source provided")
+            print("=== CNN DATASET LOADING COMPLETED SUCCESSFULLY ===")
+            
+        except Exception as e:
+            print(f"=== ERROR IN CNN DATASET LOADING ===")
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
     args:
       - --api_url
       - {inputValue: api_url}
       - --access_token
-      - {inputPath: access_token}
+      - {inputValue: access_token}
       - --dataset_name
       - {inputValue: dataset_name}
       - --local_path
