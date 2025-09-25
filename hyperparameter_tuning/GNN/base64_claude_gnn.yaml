@@ -1,4 +1,4 @@
-name: 7 Katib GNN Base64 Claude
+name: 8 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -53,19 +53,19 @@ inputs:
 
   - name: max_trial_count 
     type: Integer
-    default: '4'
+    default: 4
     description: Maximum number of trials
 
   - name: parallel_trial_count
-    type: String
-    default: '2'
+    type: Integer
+    default: 2
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: String
-    default: '2'
+    type: Integer
+    default: 2
     description: Maximum number of failed trials
-
+    
   - name: config_json
     type: String
    
@@ -122,8 +122,8 @@ implementation:
         parser.add_argument("--algorithm_name", type=str, required=True)
         parser.add_argument("--early_stopping_algorithm", type=str, required=True)
         parser.add_argument("--max_trial_count", type=int, required=True)
-        parser.add_argument("--parallel_trial_count", type=str, required=True)
-        parser.add_argument("--max_failed_trial_count", type=str, required=True)
+        parser.add_argument("--parallel_trial_count", type=int, required=True)
+        parser.add_argument("--max_failed_trial_count", type=int, required=True)
         parser.add_argument("--model_name", type=str, required=True)
         parser.add_argument("--projectid", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
