@@ -1,5 +1,4 @@
-
-name: 4 Katib GNN Base64 Claude
+name: 5 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -167,7 +166,7 @@ implementation:
                 "fileSystemPath": V1beta1FileSystemPath(
                     path="/katib/mnist.json",
                     kind="File",
-                    format = "JSON"
+                    format="JSON"
                 )
             },
             collector={"kind": "File"}
@@ -186,7 +185,7 @@ implementation:
         algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
         early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
 
-        # Enhanced trial template with proper volume mounts and resource management
+        # Fixed trial template with proper JSON structure
         trial_template = V1beta1TrialTemplate(
             retain=True,
             primary_container_name="training-container",
@@ -200,11 +199,12 @@ implementation:
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
                     "template": {
-                        "metadata":{
-                            "annotations":{
+                        "metadata": {
+                            "annotations": {
                                 "sidecar.istio.io/inject": "false"
-                            },
-                         "spec": {
+                            }
+                        },
+                        "spec": {
                             "containers": [
                                 {
                                     "name": "training-container",
@@ -222,8 +222,8 @@ implementation:
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
-                                  }
-                                ],
+                                }
+                            ],
                             "restartPolicy": "Never"
                         }
                     }
@@ -240,8 +240,8 @@ implementation:
             trial_template=trial_template,
             metrics_collector_spec=metrics_collector,
             max_trial_count=args.max_trial_count,
-            parallel_trial_count=args.parallel_trial_count,
-            max_failed_trial_count=args.max_failed_trial_count,
+            parallel_trial_count=int(args.parallel_trial_count),  # Convert to int
+            max_failed_trial_count=int(args.max_failed_trial_count),  # Convert to int
             early_stopping=early_stopping_spec
         )
 
@@ -254,7 +254,7 @@ implementation:
         )
 
         def auto_cast(value: str):
-            #Cast Katib param string into int, float, bool, or keep as string
+            """Cast Katib param string into int, float, bool, or keep as string"""
             if value.lower() in ["true", "false"]:
                 return value.lower() == "true"
             if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
@@ -264,13 +264,17 @@ implementation:
             except ValueError:
                 return value
 
+        print("=== CREATING KATIB EXPERIMENT ===")
         katib_client.create_experiment(experiment)
+        print(f"Created experiment: {experiment_name}")
+        
+        print("=== WAITING FOR EXPERIMENT COMPLETION ===")
         katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=3600)
-        # Get the experiment object
-        # exp = katib_client.get_experiment(experiment_name, namespace)
+        print("Experiment completed")
         
         # Fetch all trials for this experiment
         trials = katib_client.list_trials(experiment_name, namespace)
+        print(f"Found {len(trials)} trials")
 
         payload_data = []   # list to hold all trial results
 
@@ -308,18 +312,17 @@ implementation:
 
         best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
         params = best.parameter_assignments
-        hp_dict = {p.name: float(p.value) for p in params}
-        # hp_dict = {
-        #   p.name: (float(p.value) if p.value.replace('.', '', 1).isdigit() else p.value)
-        #   for p in params
-        # }
+        hp_dict = {p.name: auto_cast(p.value) for p in params}  # Use auto_cast instead of forcing float
         print("Best Hyperparameters Found:", hp_dict)
+        
         dir_path = os.path.dirname(args.best_hyperparams)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
 
         with open(args.best_hyperparams, "w") as f:
             json.dump(hp_dict, f, indent=2)
+
+        print("=== KATIB EXPERIMENT COMPLETED SUCCESSFULLY ===")
 
     args:
       - --model_name
