@@ -190,7 +190,7 @@ implementation:
                                         "--process_data_url", args.process_data_url or "",
                                         "--weights_url", args.weights_url or ""
                                     ],
-                                    "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
+                                    "resources": {"limits": {"cpu": "4", "memory": "4Gi", "nvidia.com/gpu": "1"}}
                                 }
                             ],
                             "restartPolicy": "Never"
