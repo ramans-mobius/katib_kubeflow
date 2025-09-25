@@ -1,4 +1,4 @@
-name: 5 Katib GNN Base64 Claude
+name: 6 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
