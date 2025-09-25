@@ -254,7 +254,7 @@ implementation:
         )
 
         def auto_cast(value: str):
-            """Cast Katib param string into int, float, bool, or keep as string."""
+            #Cast Katib param string into int, float, bool, or keep as string
             if value.lower() in ["true", "false"]:
                 return value.lower() == "true"
             if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
