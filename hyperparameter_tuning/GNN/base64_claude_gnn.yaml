@@ -1,4 +1,4 @@
-name: 8 Katib GNN Base64 Claude
+name: 9 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -53,17 +53,17 @@ inputs:
 
   - name: max_trial_count 
     type: Integer
-    default: 4
+    default: '4'
     description: Maximum number of trials
 
   - name: parallel_trial_count
     type: Integer
-    default: 2
+    default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
     type: Integer
-    default: 2
+    default: '2'
     description: Maximum number of failed trials
     
   - name: config_json
@@ -306,7 +306,10 @@ implementation:
         }
 
         # Save for next brick
-        os.makedirs(os.path.dirname(args.payload), exist_ok=True)
+        dir_path = os.path.dirname(args.payload)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
