@@ -1,3 +1,4 @@
+
 name: 2 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
@@ -70,7 +71,6 @@ inputs:
     type: String
    
 outputs:
-
   - name: best_hyperparams
     type: JsonArray
     description: Best parameter set found by Katib
@@ -134,6 +134,7 @@ implementation:
         parser.add_argument("--config_json", type=str, required=True)
         
         args = parser.parse_args()
+        
         print("=== KATIB EXPERIMENT SETUP ===")
         print(f"Model: {args.model_name}")
         print(f"Max trials: {args.max_trial_count}")
@@ -162,13 +163,14 @@ implementation:
         
         # Enhanced metrics collector with proper path
         metrics_collector = V1beta1MetricsCollectorSpec(
-            collector={"kind": "File"},
             source={
                 "fileSystemPath": V1beta1FileSystemPath(
                     path="/katib/mnist.json",
-                    kind="File"
+                    kind="File",
+                    format = "JSON"
                 )
-            }
+            },
+            collector={"kind": "File"}
         )
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
@@ -197,10 +199,12 @@ implementation:
                 "kind": "Job",
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
-                    "activeDeadlineSeconds": 3600,  # 1 hour timeout per trial
-                    "backoffLimit": 0,  # Don't retry failed jobs
                     "template": {
-                        "spec": {
+                        "metadata":{
+                            "annotations":{
+                                "sidecar.istio.io/inject": "false"
+                            },
+                         "spec": {
                             "containers": [
                                 {
                                     "name": "training-container",
@@ -215,34 +219,11 @@ implementation:
                                         "--weights_url", args.weights_url,
                                         "--config", cfg_b64
                                     ],
-                                    "resources": {
-                                        "requests": {"cpu": "1", "memory": "2Gi"},
+                                    "resources": {,
                                         "limits": {"cpu": "4", "memory": "4Gi"}
-                                    },
-                                    "volumeMounts": [
-                                        {
-                                            "name": "katib-metrics",
-                                            "mountPath": "/katib"
-                                        }
-                                    ],
-                                    "env": [
-                                        {
-                                            "name": "PYTHONUNBUFFERED",
-                                            "value": "1"
-                                        },
-                                        {
-                                            "name": "TRIAL_NAME",
-                                            "value": "${trialSpec.Name}"
-                                        }
-                                    ]
-                                }
-                            ],
-                            "volumes": [
-                                {
-                                    "name": "katib-metrics",
-                                    "emptyDir": {}
-                                }
-                            ],
+                                    }
+                                  }
+                                ],
                             "restartPolicy": "Never"
                         }
                     }
@@ -251,10 +232,6 @@ implementation:
         )
 
         print("Trial template created successfully")
-
-        # Adjust parallel trials for resource management
-        adjusted_parallel_trials = min(args.parallel_trial_count, 2)  # Max 2 parallel for stability
-        print(f"Using {adjusted_parallel_trials} parallel trials (adjusted from {args.parallel_trial_count})")
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
@@ -287,82 +264,36 @@ implementation:
             except ValueError:
                 return value
 
-        print("=== CREATING KATIB EXPERIMENT ===")
-        try:
-            katib_client.create_experiment(experiment)
-            print(f"✓ Created experiment: {experiment_name}")
-            
-            print("=== WAITING FOR EXPERIMENT COMPLETION ===")
-            print("This may take several minutes...")
-            
-            # Wait with enhanced error handling
-            katib_client.wait_for_experiment_condition(
-                name=experiment_name, 
-                namespace=namespace, 
-                timeout=7200,  # 2 hours
-                expected_conditions=["Succeeded", "Failed"]
-            )
-            
-            # Check final experiment status
-            exp = katib_client.get_experiment(experiment_name, namespace)
-            print(f"✓ Experiment completed with status: {exp.status.condition_types}")
-            
-        except Exception as e:
-            print(f"❌ Error in experiment execution: {e}")
-            
-            # Debug information
-            try:
-                exp = katib_client.get_experiment(experiment_name, namespace)
-                print(f"Experiment status: {exp.status}")
-                
-                trials = katib_client.list_trials(experiment_name, namespace)
-                print(f"Total trials: {len(trials)}")
-                
-                for i, trial in enumerate(trials):
-                    print(f"Trial {i+1}:")
-                    print(f"  - Status: {trial.status.condition_types}")
-                    print(f"  - Parameters: {[(p.name, p.value) for p in trial.spec.parameter_assignments]}")
-                    if trial.status.observation and trial.status.observation.metrics:
-                        print(f"  - Metrics: {[(m.name, m.latest) for m in trial.status.observation.metrics]}")
-                    else:
-                        print(f"  - Metrics: None collected")
-                        
-            except Exception as debug_e:
-                print(f"Failed to get debug info: {debug_e}")
-            
-            raise
-
-        print("=== COLLECTING RESULTS ===")
+        katib_client.create_experiment(experiment)
+        katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=3600)
+        # Get the experiment object
+        # exp = katib_client.get_experiment(experiment_name, namespace)
         
         # Fetch all trials for this experiment
         trials = katib_client.list_trials(experiment_name, namespace)
-        print(f"Processing {len(trials)} trials...")
 
-        payload_data = []
+        payload_data = []   # list to hold all trial results
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
             paramss['project_id'] = f"{args.projectid}"
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
-            
-            # Add timestamp
+            # Add timestamp (epoch milliseconds)
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
             paramss["timestamp"] = timestamp
-            
             # Add hyperparameters
             for param in trial.spec.parameter_assignments:
                 paramss[param.name] = auto_cast(param.value)
-            
             # Add metrics
             if trial.status.observation and trial.status.observation.metrics:
                 metrics_list = []
                 for metric in trial.status.observation.metrics:
                     metrics_list.append({metric.name: auto_cast(metric.latest)})
+                # Keep metrics as a list of dicts (not a string)
                 paramss["metrics_value"] = metrics_list
             else:
                 paramss["metrics_value"] = []
-                print(f"Warning: No metrics collected for trial {idx}")
         
             payload_data.append(paramss)
               
@@ -370,34 +301,25 @@ implementation:
             "data": payload_data
         }
 
-        # Save payload for next brick
+        # Save for next brick
         os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
-        print(f"✓ Saved payload to {args.payload}")
 
-        # Get best hyperparameters
-        try:
-            best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
-            params = best.parameter_assignments
-            hp_dict = {p.name: auto_cast(p.value) for p in params}
-            print(f"✓ Best Hyperparameters Found: {hp_dict}")
-            
-            dir_path = os.path.dirname(args.best_hyperparams)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
+        best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
+        params = best.parameter_assignments
+        hp_dict = {p.name: float(p.value) for p in params}
+        # hp_dict = {
+        #   p.name: (float(p.value) if p.value.replace('.', '', 1).isdigit() else p.value)
+        #   for p in params
+        # }
+        print("Best Hyperparameters Found:", hp_dict)
+        dir_path = os.path.dirname(args.best_hyperparams)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
 
-            with open(args.best_hyperparams, "w") as f:
-                json.dump(hp_dict, f, indent=2)
-            print(f"✓ Saved best hyperparameters to {args.best_hyperparams}")
-            
-        except Exception as e:
-            print(f"❌ Error getting optimal hyperparameters: {e}")
-            # Save empty dict to avoid pipeline failure
-            with open(args.best_hyperparams, "w") as f:
-                json.dump({}, f, indent=2)
-
-        print("=== KATIB EXPERIMENT COMPLETED SUCCESSFULLY ===")
+        with open(args.best_hyperparams, "w") as f:
+            json.dump(hp_dict, f, indent=2)
 
     args:
       - --model_name
