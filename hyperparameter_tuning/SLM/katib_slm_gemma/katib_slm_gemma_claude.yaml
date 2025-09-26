@@ -14,7 +14,6 @@ inputs:
 
   - name: process_data_url
     type: String
-    default: ""
     description: Optional preprocessed dataset path
 
   - name: config_json
@@ -49,17 +48,17 @@ inputs:
 
   - name: max_trial_count
     type: Integer
-    default: '4'
+    default: 4
     description: Maximum trials
 
   - name: parallel_trial_count
     type: Integer
-    default: '2'
+    default: 2
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
     type: Integer
-    default: '2'
+    default: 2
     description: Maximum failed trials
 
 outputs:
