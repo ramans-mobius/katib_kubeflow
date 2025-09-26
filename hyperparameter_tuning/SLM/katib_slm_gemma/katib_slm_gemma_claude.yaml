@@ -1,4 +1,4 @@
-name: vK Katib SLM Tuner
+name: vL Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -124,10 +124,10 @@ implementation:
         args = parser.parse_args()
 
         print("=== SLM KATIB EXPERIMENT SETUP ===")
-        print(f"Model: {args.model_name}")
-        print(f"Max trials: {args.max_trial_count}")
-        print(f"Parallel trials: {args.parallel_trial_count}")
-        print(f"Objective: {args.objective_type} {args.objective_metric_name}")
+        print("Model:", args.model_name)
+        print("Max trials:", args.max_trial_count)
+        print("Parallel trials:", args.parallel_trial_count)
+        print("Objective:", args.objective_type, args.objective_metric_name)
         print("Input configuration:")
         print(args.config_json)
 
@@ -142,10 +142,11 @@ implementation:
                 return value
 
         params_input = json.loads(args.parameters_to_tune)
-        print(f"Parameters to tune: {[p['name'] for p in params_input]}")
+        print("Parameters to tune:" )
+        print(params_input)
         
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
-        print(f"Config base64 length: {len(cfg_b64)} characters")
+        print("Config base64 length:",len(cfg_b64))
 
         parameters = [
             V1beta1ParameterSpec(
@@ -169,7 +170,7 @@ implementation:
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
-        print(f"Experiment name: {experiment_name}")
+        print("Experiment name:", experiment_name)
 
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
@@ -245,19 +246,19 @@ implementation:
 
         print("=== CREATING SLM KATIB EXPERIMENT ===")
         katib_client.create_experiment(experiment)
-        print(f"Created experiment: {experiment_name}")
+        print("Created experiment:", experiment_name)
         
         print("=== WAITING FOR EXPERIMENT COMPLETION ===")
         katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=3600)
         print("Experiment completed")
 
         trials = katib_client.list_trials(experiment_name, namespace)
-        print(f"Found {len(trials)} trials")
+        print("Found number of trials:",len(trials))
         payload_data = []
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {
-                'project_id': f"{args.projectid}", 
+                'project_id': args.projectid, 
                 'model_name': f"{args.model_name}_trial{idx}",
                 'model_type': args.model_type
             }
