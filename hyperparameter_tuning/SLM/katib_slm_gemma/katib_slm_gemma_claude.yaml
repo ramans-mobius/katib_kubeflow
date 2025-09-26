@@ -1,61 +1,61 @@
 name: Katib SLM Tuner
-description: Launches a Katib experiment to tune hyperparameters for Gemma3 SLM models.
+description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
   - name: model_name
     type: String
     default: gemma
-    description: Name of the SLM model to train (Gemma3)
-    
+    description: Name of the SLM model to train
+
   - name: projectid
     type: String
     default: slm_usecase
     description: Project ID for this experiment
-    
+
   - name: process_data_url
     type: String
     description: Optional preprocessed dataset path
-    
+
   - name: config_json
     type: String
     description: JSON configuration for SLM training parameters
-    
+
   - name: parameters_to_tune
     type: String
-    description: List of hyperparameters to tune (Katib V1beta1ParameterSpec format)
-    
+    description: List of hyperparameters to tune (Katib format)
+
   - name: objective_metric_name
     type: String
-    description: Metric Katib should optimize (e.g., best_val_loss)
-    
+    description: Metric Katib should optimize
+
   - name: objective_type
     type: String
-    description: Optimization type for the metric (e.g., minimize)
-    
+    description: Optimization type (maximize/minimize)
+
   - name: objective_goal
     type: Float
     description: Target goal value for the metric
-    
+
   - name: algorithm_name
     type: String
     default: bayesianoptimization
     description: Katib search algorithm
-    
+
   - name: early_stopping_algorithm
     type: String
     default: medianstop
     description: Early stopping algorithm
-    
+
   - name: max_trial_count
     type: Integer
     default: 4
     description: Maximum trials
-    
+
   - name: parallel_trial_count
     type: Integer
     default: 2
     description: Number of trials to run in parallel
-    
+
   - name: max_failed_trial_count
     type: Integer
     default: 2
@@ -65,7 +65,7 @@ outputs:
   - name: best_hyperparams
     type: JsonArray
     description: Best hyperparameters found by Katib
-    
+
   - name: payload
     type: String
     description: All trial results
@@ -120,23 +120,17 @@ implementation:
         parser.add_argument("--process_data_url", type=str, required=False)
         parser.add_argument("--config_json", type=str, required=True)
         
+        args = parser.parse_args()
+
         print("=== SLM KATIB EXPERIMENT SETUP ===")
         print(f"Model: {args.model_name}")
         print(f"Max trials: {args.max_trial_count}")
         print(f"Parallel trials: {args.parallel_trial_count}")
         print(f"Objective: {args.objective_type} {args.objective_metric_name}")
-        print(f"Dataset URL: {args.process_data_url}")
         print("Input configuration:")
         print(args.config_json)
-        
-        # Parse input parameters to tune
-        params_input = json.loads(args.parameters_to_tune)
-        print(f"Parameters to tune: {[p['name'] for p in params_input]}")
-        
-        cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
-        print(f"Config base64 length: {len(cfg_b64)} characters")
+
         def auto_cast(value: str):
-            """Cast Katib param string into int, float, bool, or keep as string"""
             if value.lower() in ["true", "false"]:
                 return value.lower() == "true"
             if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
@@ -145,6 +139,14 @@ implementation:
                 return float(value)
             except ValueError:
                 return value
+
+        params_input = json.loads(args.parameters_to_tune)
+        print(f"Parameters to tune: {[p['name'] for p in params_input]}")
+        
+        cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
+        print(f"Config base64 length: {len(cfg_b64)} characters")
+
+        parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
                 parameter_type=p["parameter_type"],
@@ -164,8 +166,6 @@ implementation:
             collector={"kind": "File"}
         )
 
-                
-        parameters = [
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
         print(f"Experiment name: {experiment_name}")
