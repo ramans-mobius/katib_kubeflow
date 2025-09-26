@@ -3,22 +3,22 @@ description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
   - name: model_name
-    type: string
+    type: String
     default: gemma
     description: Name of the SLM model to train
 
   - name: projectid
-    type: string
+    type: String
     default: slm_usecase
     description: Project ID for this experiment
 
   - name: process_data_url
-    type: string
+    type: String
     default: ""
     description: Optional preprocessed dataset path
 
   - name: config_json
-    type: string
+    type: String
     description: JSON configuration for SLM training parameters
 
   - name: parameters_to_tune
@@ -26,11 +26,11 @@ inputs:
     description: List of hyperparameters to tune (Katib format)
 
   - name: objective_metric_name
-    type: string
+    type: String
     description: Metric Katib should optimize
 
   - name: objective_type
-    type: string
+    type: String
     description: Optimization type (maximize/minimize)
 
   - name: objective_goal
@@ -38,28 +38,28 @@ inputs:
     description: Target goal value for the metric
 
   - name: algorithm_name
-    type: string
+    type: String
     default: bayesianoptimization
     description: Katib search algorithm
 
   - name: early_stopping_algorithm
-    type: string
+    type: String
     default: medianstop
     description: Early stopping algorithm
 
   - name: max_trial_count
     type: Integer
-    default: '4'
+    default: 4
     description: Maximum trials
 
   - name: parallel_trial_count
     type: Integer
-    default: '2'
+    default: 2
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
     type: Integer
-    default: '2'
+    default: 2
     description: Maximum failed trials
 
 outputs:
