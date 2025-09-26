@@ -1,4 +1,4 @@
-name: vB Katib SLM Tuner
+name: vC Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -72,7 +72,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/slm-image:v2
+    image: sanram00/slm-image:v3
     command:
       - python3
       - -u
@@ -196,7 +196,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v2",
+                                    "image": "sanram00/slm-image:v3",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
@@ -215,7 +215,9 @@ implementation:
                 }
             }
         )
-
+        
+        print("Trial spec:",trial_template)
+        
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
             algorithm=algorithm_spec,
