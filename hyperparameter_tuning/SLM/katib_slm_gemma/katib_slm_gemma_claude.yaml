@@ -1,4 +1,4 @@
-name: vJ Katib SLM Tuner
+name: vK Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
