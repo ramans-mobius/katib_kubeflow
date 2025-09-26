@@ -72,7 +72,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/slm-gemma-image:v1
+    image: sanram00/slm-image:v1
     command:
       - python3
       - -u
@@ -196,7 +196,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-gemma-image:v1",
+                                    "image": "sanram00/slm-image:v1",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
