@@ -67,7 +67,7 @@ outputs:
     description: Best hyperparameters found by Katib
 
   - name: payload
-    type: String
+    type: string
     description: All trial results
 
 implementation:
