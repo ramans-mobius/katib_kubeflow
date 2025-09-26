@@ -1,4 +1,4 @@
-name: vC Katib SLM Tuner
+name: vD Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -11,10 +11,6 @@ inputs:
     type: String
     default: slm_usecase
     description: Project ID for this experiment
-
-  - name: process_data_url
-    type: String
-    description: Optional preprocessed dataset path
 
   - name: config_json
     type: String
@@ -72,7 +68,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/slm-image:v3
+    image: sanram00/slm-image:v4
     command:
       - python3
       - -u
@@ -117,7 +113,6 @@ implementation:
         parser.add_argument("--model_name", type=str, required=True)
         parser.add_argument("--projectid", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
-        parser.add_argument("--process_data_url", type=str, required=False)
         parser.add_argument("--config_json", type=str, required=True)
         
         args = parser.parse_args()
@@ -196,14 +191,13 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v3",
+                                    "image": "sanram00/slm-image:v4",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
                                     ], []) + [
                                         "--model_name", args.model_name,
-                                        "--process_data_url", args.process_data_url or "",
                                         "--config_json", cfg_b64
                                     ],
                                     "resources": {"limits": {"cpu": "4", "memory": "4Gi", "nvidia.com/gpu": "1"}}
@@ -291,8 +285,6 @@ implementation:
     args:
       - --model_name
       - {inputValue: model_name}
-      - --process_data_url
-      - {inputValue: process_data_url}
       - --config_json
       - {inputValue: config_json}
       - --parameters_to_tune
