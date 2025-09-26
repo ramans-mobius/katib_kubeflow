@@ -14,7 +14,7 @@ inputs:
 
   - name: projectid
     type: String
-    default: slm_usecase
+    default: tinystories
     description: Project ID for this experiment
 
   - name: config_json
@@ -48,17 +48,17 @@ inputs:
     description: Early stopping algorithm
 
   - name: max_trial_count
-    type: String
+    type: Integer
     default: '4'
     description: Maximum trials
 
   - name: parallel_trial_count
-    type: String
+    type: Integer
     default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: String
+    type: Integer
     default: '2'
     description: Maximum failed trials
 
