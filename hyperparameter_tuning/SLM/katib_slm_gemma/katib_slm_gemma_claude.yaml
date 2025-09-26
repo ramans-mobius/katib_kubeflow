@@ -178,7 +178,7 @@ implementation:
 
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
-            goal=args.objective_goal,
+            goal=float(args.objective_goal),
             objective_metric_name=args.objective_metric_name
         )
 
