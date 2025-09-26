@@ -21,7 +21,7 @@ inputs:
     description: JSON configuration for SLM training parameters
 
   - name: parameters_to_tune
-    type: string
+    type: String
     description: List of hyperparameters to tune (Katib format)
 
   - name: objective_metric_name
