@@ -29,17 +29,17 @@ inputs:
 
   - name: objective_metric_name
     type: String
-    default: "accuracy"
+    default: "best_val_loss"
     description: Metric Katib should optimize
 
   - name: objective_type
     type: String
-    default: "maximize"
+    default: "minimize"
     description: Optimization type (maximize/minimize)
 
   - name: objective_goal
     type: String
-    default: "0.9"
+    default: "0.05"
     description: Target goal value for the metric
 
   - name: algorithm_name
@@ -53,18 +53,18 @@ inputs:
     description: Early stopping algorithm
 
   - name: max_trial_count
-    type: String
-    default: '4'
+    type: Integer
+    default: 4
     description: Maximum trials
 
   - name: parallel_trial_count
-    type: String
-    default: '2'
+    type: Integer
+    default: 2
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: String
-    default: '2'
+    type: Integer
+    default: 2
     description: Maximum failed trials
 
 outputs:
