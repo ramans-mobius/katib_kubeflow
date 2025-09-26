@@ -1,10 +1,15 @@
-name: vG Katib SLM Tuner
+name: vH Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
   - name: model_name
     type: String
     default: gemma
+    description: Name of the SLM model to train
+
+  - name: model_type
+    type: String
+    default: slm
     description: Name of the SLM model to train
 
   - name: projectid
@@ -43,7 +48,7 @@ inputs:
     description: Early stopping algorithm
 
   - name: max_trial_count
-    type: Integer
+    type: String
     default: '4'
     description: Maximum trials
 
@@ -111,6 +116,7 @@ implementation:
         parser.add_argument("--parallel_trial_count", type=int, required=True)
         parser.add_argument("--max_failed_trial_count", type=int, required=True)
         parser.add_argument("--model_name", type=str, required=True)
+        parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--projectid", type=str, required=True)
         parser.add_argument("--payload", type=str, required=True)
         parser.add_argument("--config_json", type=str, required=True)
@@ -291,6 +297,8 @@ implementation:
     args:
       - --model_name
       - {inputValue: model_name}
+      - --model_type
+      - {inputValue: model_type}
       - --config_json
       - {inputValue: config_json}
       - --parameters_to_tune
