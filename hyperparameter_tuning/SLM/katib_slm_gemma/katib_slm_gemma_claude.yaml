@@ -48,7 +48,7 @@ inputs:
     description: Early stopping algorithm
 
   - name: max_trial_count
-    type: String
+    type: Integer
     default: '4'
     description: Maximum trials
 
