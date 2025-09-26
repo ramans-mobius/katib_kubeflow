@@ -1,4 +1,4 @@
-name: 9 Katib GNN Base64 Claude
+name: 10 Katib GNN Base64 Claude
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -38,7 +38,7 @@ inputs:
     description: Objective type for Katib optimization (e.g., maximize, minimize)
 
   - name: objective_goal
-    type: Float
+    type:   String
     description: Target goal value for the metric (e.g., 0.99)
     
   - name: algorithm_name
@@ -57,12 +57,12 @@ inputs:
     description: Maximum number of trials
 
   - name: parallel_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Maximum number of failed trials
     
@@ -202,7 +202,6 @@ implementation:
                         "metadata": {
                             "annotations": {
                                 "sidecar.istio.io/inject": "false"
-                                }
                         },
                         "spec": {
                             "containers": [
@@ -240,8 +239,8 @@ implementation:
             trial_template=trial_template,
             metrics_collector_spec=metrics_collector,
             max_trial_count=args.max_trial_count,
-            parallel_trial_count=int(args.parallel_trial_count),  # Convert to int
-            max_failed_trial_count=int(args.max_failed_trial_count),  # Convert to int
+            parallel_trial_count=args.parallel_trial_count,  # Convert to int
+            max_failed_trial_count=args.max_failed_trial_count,  # Convert to int
             early_stopping=early_stopping_spec
         )
 
@@ -306,16 +305,13 @@ implementation:
         }
 
         # Save for next brick
-        dir_path = os.path.dirname(args.payload)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
+        os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
         best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
         params = best.parameter_assignments
-        hp_dict = {p.name: auto_cast(p.value) for p in params}  # Use auto_cast instead of forcing float
+        hp_dict = {p.name: float(p.value) for p in params}  # Use auto_cast instead of forcing float
         print("Best Hyperparameters Found:", hp_dict)
         
         dir_path = os.path.dirname(args.best_hyperparams)
