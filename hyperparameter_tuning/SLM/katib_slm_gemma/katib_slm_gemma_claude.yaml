@@ -63,7 +63,7 @@ inputs:
 
 outputs:
   - name: best_hyperparams
-    type: string
+    type: JsonArray
     description: Best hyperparameters found by Katib
 
   - name: payload
