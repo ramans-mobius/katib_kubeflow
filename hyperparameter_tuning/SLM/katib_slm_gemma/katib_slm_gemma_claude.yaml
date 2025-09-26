@@ -1,4 +1,4 @@
-name: vE Katib SLM Tuner
+name: vF Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -29,7 +29,7 @@ inputs:
     description: Optimization type (maximize/minimize)
 
   - name: objective_goal
-    type: Float
+    type: String
     description: Target goal value for the metric
 
   - name: algorithm_name
@@ -43,17 +43,17 @@ inputs:
     description: Early stopping algorithm
 
   - name: max_trial_count
-    type: Integer
+    type: String
     default: '4'
     description: Maximum trials
 
   - name: parallel_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Maximum failed trials
 
@@ -104,7 +104,7 @@ implementation:
         parser.add_argument("--parameters_to_tune", type=str, required=True)
         parser.add_argument("--objective_metric_name", type=str, required=True)
         parser.add_argument("--objective_type", type=str, required=True)
-        parser.add_argument("--objective_goal", type=float, required=True)
+        parser.add_argument("--objective_goal", type=str, required=True)
         parser.add_argument("--algorithm_name", type=str, required=True)
         parser.add_argument("--early_stopping_algorithm", type=str, required=True)
         parser.add_argument("--max_trial_count", type=int, required=True)
@@ -186,7 +186,11 @@ implementation:
                 "kind": "Job",
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
-                    "template": {
+                    "template": { 
+                        "metadata": {
+                            "annotations": {
+                                "sidecar.istio.io/inject": "false"
+                        },
                         "spec": {
                             "containers": [
                                 {
@@ -201,6 +205,7 @@ implementation:
                                         "--config_json", cfg_b64
                                     ],
                                     "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
+                                    }
                                 }
                             ],
                             "restartPolicy": "Never"
@@ -246,9 +251,9 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {
-                'project_id': args.projectid, 
+                'project_id': f"{args.projectid}", 
                 'model_name': f"{args.model_name}_trial{idx}",
-                'model_type': 'slm'
+                'model_type': args.model_type
             }
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
             paramss["timestamp"] = timestamp
@@ -264,14 +269,14 @@ implementation:
             payload_data.append(paramss)
 
         payload = {"data": payload_data}
-        dir_path = os.path.dirname(args.payload)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
+        
+        os.makedirs(dir_path, exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
         best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
-        hp_dict = {p.name: auto_cast(p.value) for p in best.parameter_assignments}
+        params = best.parameter_assignments
+        hp_dict = {p.name: float(p.value) for p in params}
         print("Best Hyperparameters Found:", hp_dict)
         
         dir_path = os.path.dirname(args.best_hyperparams)
