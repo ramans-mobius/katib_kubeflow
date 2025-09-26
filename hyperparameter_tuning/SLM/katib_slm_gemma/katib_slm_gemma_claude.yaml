@@ -1,4 +1,4 @@
-name: vL Katib SLM Tuner
+name: vM Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -19,22 +19,27 @@ inputs:
 
   - name: config_json
     type: String
+    default: ""
     description: JSON configuration for SLM training parameters
 
   - name: parameters_to_tune
     type: String
+    default: ""
     description: List of hyperparameters to tune (Katib format)
 
   - name: objective_metric_name
     type: String
+    default: "accuracy"
     description: Metric Katib should optimize
 
   - name: objective_type
     type: String
+    default: "maximize"
     description: Optimization type (maximize/minimize)
 
   - name: objective_goal
     type: String
+    default: "0.9"
     description: Target goal value for the metric
 
   - name: algorithm_name
@@ -124,14 +129,14 @@ implementation:
         args = parser.parse_args()
 
         print("=== SLM KATIB EXPERIMENT SETUP ===")
-        print("Model:", args.model_name)
-        print("Max trials:", args.max_trial_count)
-        print("Parallel trials:", args.parallel_trial_count)
-        print("Objective:", args.objective_type, args.objective_metric_name)
+        print("Model: " + args.model_name)
+        print("Max trials: " + str(args.max_trial_count))
+        print("Parallel trials: " + str(args.parallel_trial_count))
+        print("Objective: " + args.objective_type + " " + args.objective_metric_name)
         print("Input configuration:")
         print(args.config_json)
 
-        def auto_cast(value: str):
+        def auto_cast(value):
             if value.lower() in ["true", "false"]:
                 return value.lower() == "true"
             if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
@@ -142,11 +147,10 @@ implementation:
                 return value
 
         params_input = json.loads(args.parameters_to_tune)
-        print("Parameters to tune:" )
-        print(params_input)
+        print("Parameters to tune: " + str([p["name"] for p in params_input]))
         
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
-        print("Config base64 length:",len(cfg_b64))
+        print("Config base64 length: " + str(len(cfg_b64)) + " characters")
 
         parameters = [
             V1beta1ParameterSpec(
@@ -168,9 +172,9 @@ implementation:
             collector={"kind": "File"}
         )
 
-        experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
+        experiment_name = args.model_name + "-" + str(uuid.uuid4())[:8]
         namespace = "admin"
-        print("Experiment name:", experiment_name)
+        print("Experiment name: " + experiment_name)
 
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
@@ -197,6 +201,7 @@ implementation:
                         "metadata": {
                             "annotations": {
                                 "sidecar.istio.io/inject": "false"
+                            }
                         },
                         "spec": {
                             "containers": [
@@ -212,7 +217,6 @@ implementation:
                                         "--config_json", cfg_b64
                                     ],
                                     "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
-                                    }
                                 }
                             ],
                             "restartPolicy": "Never"
@@ -222,7 +226,7 @@ implementation:
             }
         )
         
-        print("Trial spec:",trial_template)
+        print("Trial spec:", trial_template)
         
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
@@ -246,20 +250,20 @@ implementation:
 
         print("=== CREATING SLM KATIB EXPERIMENT ===")
         katib_client.create_experiment(experiment)
-        print("Created experiment:", experiment_name)
+        print("Created experiment: " + experiment_name)
         
         print("=== WAITING FOR EXPERIMENT COMPLETION ===")
         katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=3600)
         print("Experiment completed")
 
         trials = katib_client.list_trials(experiment_name, namespace)
-        print("Found number of trials:",len(trials))
+        print("Found " + str(len(trials)) + " trials")
         payload_data = []
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {
                 'project_id': args.projectid, 
-                'model_name': f"{args.model_name}_trial{idx}",
+                'model_name': args.model_name + "_trial" + str(idx),
                 'model_type': args.model_type
             }
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
@@ -277,7 +281,6 @@ implementation:
 
         payload = {"data": payload_data}
         
-        # Save for next brick
         os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
@@ -285,7 +288,7 @@ implementation:
         best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
         params = best.parameter_assignments
         hp_dict = {p.name: float(p.value) for p in params}
-        print("Best Hyperparameters Found:", hp_dict)
+        print("Best Hyperparameters Found: " + str(hp_dict))
         
         dir_path = os.path.dirname(args.best_hyperparams)
         if dir_path:
