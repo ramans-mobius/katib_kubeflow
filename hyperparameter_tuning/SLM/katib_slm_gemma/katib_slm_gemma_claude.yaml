@@ -1,4 +1,4 @@
-name: vF Katib SLM Tuner
+name: vG Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -270,7 +270,8 @@ implementation:
 
         payload = {"data": payload_data}
         
-        os.makedirs(dir_path, exist_ok=True)
+        # Save for next brick
+        os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
