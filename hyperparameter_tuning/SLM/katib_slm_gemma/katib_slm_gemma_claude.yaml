@@ -53,12 +53,12 @@ inputs:
     description: Maximum trials
 
   - name: parallel_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Number of trials to run in parallel
 
   - name: max_failed_trial_count
-    type: Integer
+    type: String
     default: '2'
     description: Maximum failed trials
 
