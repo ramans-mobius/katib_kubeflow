@@ -1,0 +1,366 @@
+name: Katib SLM Tuner
+description: Launches a Katib experiment to tune hyperparameters for Gemma3 SLM models.
+
+inputs:
+  - name: model_name
+    type: String
+    default: gemma
+    description: Name of the SLM model to train (Gemma3)
+    
+  - name: projectid
+    type: String
+    default: slm_usecase
+    description: Project ID for this experiment
+    
+  - name: process_data_url
+    type: String
+    description: Optional preprocessed dataset path
+    
+  - name: weights_url
+    type: String
+    description: Path to load existing model weights
+    
+  - name: parameters_to_tune
+    type: String
+    description: List of hyperparameters to tune (Katib V1beta1ParameterSpec format)
+    
+  - name: objective_metric_name
+    type: String
+    description: Metric Katib should optimize (e.g., best_val_loss)
+    
+  - name: objective_type
+    type: String
+    description: Optimization type for the metric (e.g., minimize)
+    
+  - name: objective_goal
+    type: Float
+    description: Target goal value for the metric
+    
+  - name: algorithm_name
+    type: String
+    default: bayesianoptimization
+    description: Katib search algorithm
+    
+  - name: early_stopping_algorithm
+    type: String
+    default: medianstop
+    description: Early stopping algorithm
+    
+  - name: max_trial_count
+    type: Integer
+    default: 4
+    description: Maximum trials
+    
+  - name: parallel_trial_count
+    type: Integer
+    default: 2
+    description: Number of trials to run in parallel
+    
+  - name: max_failed_trial_count
+    type: Integer
+    default: 2
+    description: Maximum failed trials
+
+outputs:
+  - name: best_hyperparams
+    type: JsonArray
+    description: Best hyperparameters found by Katib
+    
+  - name: payload
+    type: string
+    description: All trial results
+
+implementation:
+  container:
+    image: sanram00/slm-gemma-image:v1
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        import uuid
+        import time
+        from kubernetes import client, config
+        import kubeflow.katib as katib
+        from kubeflow.katib import (
+            V1beta1AlgorithmSpec,
+            V1beta1Experiment,
+            V1beta1ExperimentSpec,
+            V1beta1ObjectiveSpec,
+            V1beta1ParameterSpec,
+            V1beta1EarlyStoppingSpec,
+            V1beta1TrialTemplate,
+            V1beta1MetricsCollectorSpec,
+            V1beta1FileSystemPath,
+        )
+
+        print("=== SLM KATIB EXPERIMENT SETUP ===")
+
+        try:
+            config.load_incluster_config()
+        except:
+            config.load_kube_config()
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--best_hyperparams", type=str, required=True)
+        parser.add_argument("--parameters_to_tune", type=str, required=True)
+        parser.add_argument("--objective_metric_name", type=str, required=True)
+        parser.add_argument("--objective_type", type=str, required=True)
+        parser.add_argument("--objective_goal", type=float, required=True)
+        parser.add_argument("--algorithm_name", type=str, required=True)
+        parser.add_argument("--early_stopping_algorithm", type=str, required=True)
+        parser.add_argument("--max_trial_count", type=int, required=True)
+        parser.add_argument("--parallel_trial_count", type=int, required=True)
+        parser.add_argument("--max_failed_trial_count", type=int, required=True)
+        parser.add_argument("--model_name", type=str, required=True)
+        parser.add_argument("--projectid", type=str, required=True)
+        parser.add_argument("--payload", type=str, required=True)
+        parser.add_argument("--process_data_url", type=str, default="", help="Optional preprocessed dataset path")
+        parser.add_argument("--weights_url", type=str, default="", help="Optional weights URL")
+        
+        args = parser.parse_args()
+
+        print(f"Model: {args.model_name}")
+        print(f"Project ID: {args.projectid}")
+        print(f"Max trials: {args.max_trial_count}")
+        print(f"Parallel trials: {args.parallel_trial_count}")
+        print(f"Objective: {args.objective_type} {args.objective_metric_name}")
+
+        def auto_cast(value: str):
+            """Cast Katib parameter string to appropriate type"""
+            if isinstance(value, str):
+                if value.lower() in ["true", "false"]:
+                    return value.lower() == "true"
+                try:
+                    if "." in value:
+                        return float(value)
+                    return int(value)
+                except ValueError:
+                    return value
+            return value
+
+        try:
+            params_input = json.loads(args.parameters_to_tune)
+            print(f"Parameters to tune: {[p['name'] for p in params_input]}")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing parameters_to_tune: {e}")
+            raise
+
+        parameters = [
+            V1beta1ParameterSpec(
+                name=p["name"],
+                parameter_type=p["parameter_type"],
+                feasible_space=p["feasible_space"]
+            )
+            for p in params_input
+        ]
+
+        metrics_collector = V1beta1MetricsCollectorSpec(
+            source={
+                "fileSystemPath": V1beta1FileSystemPath(
+                    path="/katib/slm_report.json",
+                    kind="File",
+                    format="JSON"
+                )
+            },
+            collector={"kind": "File"}
+        )
+
+        experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
+        namespace = "admin"
+        print(f"Experiment name: {experiment_name}")
+
+        objective_spec = V1beta1ObjectiveSpec(
+            type=args.objective_type,
+            goal=args.objective_goal,
+            objective_metric_name=args.objective_metric_name
+        )
+
+        algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
+        early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
+
+        # Build trial arguments conditionally
+        trial_args = sum([
+            ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
+            for p in params_input
+        ], []) + ["--model_name", args.model_name]
+        
+        if args.process_data_url:
+            trial_args.extend(["--process_data_url", args.process_data_url])
+        if args.weights_url:
+            trial_args.extend(["--weights_url", args.weights_url])
+
+        trial_template = V1beta1TrialTemplate(
+            retain=True,
+            primary_container_name="training-container",
+            trial_parameters=[
+                {"name": p["name"], "description": p["name"], "reference": p["name"]}
+                for p in params_input
+            ],
+            trial_spec={
+                "apiVersion": "batch/v1",
+                "kind": "Job",
+                "spec": {
+                    "ttlSecondsAfterFinished": 86400,
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "sidecar.istio.io/inject": "false"
+                            }
+                        },
+                        "spec": {
+                            "containers": [
+                                {
+                                    "name": "training-container",
+                                    "image": "sanram00/slm-gemma-image:v1",
+                                    "command": ["python", "train_slm_base64.py"],
+                                    "args": trial_args,
+                                    "resources": {
+                                        "requests": {"cpu": "2", "memory": "8Gi"},
+                                        "limits": {"cpu": "4", "memory": "16Gi", "nvidia.com/gpu": "1"}
+                                    },
+                                    "volumeMounts": [
+                                        {
+                                            "name": "katib-metrics",
+                                            "mountPath": "/katib"
+                                        }
+                                    ],
+                                    "env": [
+                                        {
+                                            "name": "PYTHONUNBUFFERED",
+                                            "value": "1"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "volumes": [
+                                {
+                                    "name": "katib-metrics",
+                                    "emptyDir": {}
+                                }
+                            ],
+                            "restartPolicy": "Never"
+                        }
+                    }
+                }
+            }
+        )
+
+        experiment_spec = V1beta1ExperimentSpec(
+            objective=objective_spec,
+            algorithm=algorithm_spec,
+            parameters=parameters,
+            trial_template=trial_template,
+            metrics_collector_spec=metrics_collector,
+            max_trial_count=args.max_trial_count,
+            parallel_trial_count=args.parallel_trial_count,
+            max_failed_trial_count=args.max_failed_trial_count,
+            early_stopping=early_stopping_spec
+        )
+
+        katib_client = katib.KatibClient(namespace=namespace)
+        experiment = V1beta1Experiment(
+            api_version="kubeflow.org/v1beta1",
+            kind="Experiment",
+            metadata=client.V1ObjectMeta(name=experiment_name, namespace=namespace),
+            spec=experiment_spec
+        )
+
+        print("=== CREATING EXPERIMENT ===")
+        try:
+            katib_client.create_experiment(experiment)
+            print(f"Created experiment: {experiment_name}")
+            
+            print("=== WAITING FOR COMPLETION ===")
+            katib_client.wait_for_experiment_condition(
+                name=experiment_name, 
+                namespace=namespace, 
+                timeout=7200  # 2 hours
+            )
+            print("Experiment completed")
+
+            trials = katib_client.list_trials(experiment_name, namespace)
+            print(f"Found {len(trials)} trials")
+            
+            payload_data = []
+
+            for idx, trial in enumerate(trials, start=1):
+                paramss = {
+                    'project_id': args.projectid, 
+                    'model_name': f"{args.model_name}_trial{idx}",
+                    'model_type': 'slm'
+                }
+                timestamp = int(time.strftime("%Y%m%d%H%M%S"))
+                paramss["timestamp"] = timestamp
+                
+                for param in trial.spec.parameter_assignments:
+                    paramss[param.name] = auto_cast(param.value)
+                
+                if trial.status.observation and trial.status.observation.metrics:
+                    metrics_list = [
+                        {m.name: auto_cast(m.latest)} 
+                        for m in trial.status.observation.metrics
+                    ]
+                    paramss["metrics_value"] = metrics_list
+                else:
+                    paramss["metrics_value"] = []
+                
+                payload_data.append(paramss)
+
+            payload = {"data": payload_data}
+            os.makedirs(os.path.dirname(args.payload), exist_ok=True)
+            with open(args.payload, "w") as f:
+                json.dump(payload, f)
+            print(f"Saved payload to {args.payload}")
+
+            best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
+            hp_dict = {p.name: auto_cast(p.value) for p in best.parameter_assignments}
+            
+            os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+            with open(args.best_hyperparams, "w") as f:
+                json.dump(hp_dict, f, indent=2)
+            print(f"Saved best hyperparameters to {args.best_hyperparams}")
+
+            print("=== SLM KATIB EXPERIMENT COMPLETED SUCCESSFULLY ===")
+
+        except Exception as e:
+            print(f"=== ERROR IN EXPERIMENT ===")
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    args:
+      - --model_name
+      - {inputValue: model_name}
+      - --process_data_url
+      - {inputValue: process_data_url}
+      - --weights_url
+      - {inputValue: weights_url}
+      - --parameters_to_tune
+      - {inputValue: parameters_to_tune}
+      - --objective_metric_name
+      - {inputValue: objective_metric_name}
+      - --objective_type
+      - {inputValue: objective_type}
+      - --objective_goal
+      - {inputValue: objective_goal}
+      - --algorithm_name
+      - {inputValue: algorithm_name}
+      - --early_stopping_algorithm
+      - {inputValue: early_stopping_algorithm}
+      - --max_trial_count
+      - {inputValue: max_trial_count}
+      - --parallel_trial_count
+      - {inputValue: parallel_trial_count}
+      - --max_failed_trial_count
+      - {inputValue: max_failed_trial_count}
+      - --projectid
+      - {inputValue: projectid}
+      - --best_hyperparams
+      - {outputPath: best_hyperparams}
+      - --payload
+      - {outputPath: payload}
