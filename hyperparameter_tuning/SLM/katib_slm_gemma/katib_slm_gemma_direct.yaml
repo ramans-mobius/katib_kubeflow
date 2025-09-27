@@ -1,20 +1,20 @@
-name: vIII Katib SLM Tuner
+name: vIV Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
   - name: model_name
     type: String
-    default: gemma
+    default: "gemma"
     description: Name of the SLM model to train
 
   - name: model_type
     type: String
-    default: slm
+    default: "slm"
     description: Name of the SLM model to train
 
   - name: projectid
     type: String
-    default: tinystories
+    default: "tinystories"
     description: Project ID for this experiment
 
   - name: config_json
@@ -44,12 +44,12 @@ inputs:
 
   - name: algorithm_name
     type: String
-    default: bayesianoptimization
+    default: "bayesianoptimization"
     description: Katib search algorithm
 
   - name: early_stopping_algorithm
     type: String
-    default: medianstop
+    default: "medianstop"
     description: Early stopping algorithm
 
   - name: max_trial_count
@@ -78,7 +78,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/slm-image:v4
+    image: sanram00/slm-image:v5
     command:
       - python3
       - -u
@@ -181,8 +181,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v4",
-                                    "command": ["python", "train_slm_base64.py"],
+                                    "image": "sanram00/slm-image:v5",
+                                    "command": ["python", "train_slm_direct.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
@@ -198,10 +198,9 @@ implementation:
                 }
             },
             metrics_collector_spec=V1beta1MetricsCollectorSpec(
-        collector={"kind": "StdOut"})
+                collector={"kind": "StdOut"}
+            )
         )
-        print('Trial template:')
-        print(trial_template)
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
@@ -246,8 +245,8 @@ implementation:
 
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
-            paramss['project_id'] = f"{args.projectid}"
-            paramss['model_name'] = f"{args.model_name}_trial{idx}"
+            paramss['project_id'] = args.projectid
+            paramss['model_name'] = args.model_name + "_trial" + str(idx)
             paramss['model_type'] = args.model_type
             
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
