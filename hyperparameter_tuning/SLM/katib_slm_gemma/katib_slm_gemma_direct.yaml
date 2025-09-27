@@ -1,4 +1,4 @@
-name: vV Katib SLM Tuner
+name: vVI Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -190,7 +190,7 @@ implementation:
                                         "--model_name", args.model_name,
                                         "--config_json", cfg_b64
                                     ],
-                                    "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
+                                    "resources": {"limits": {"cpu": "2", "memory": "2Gi", "nvidia.com/gpu": "1"}}
                                 }
                             ]
                         }
