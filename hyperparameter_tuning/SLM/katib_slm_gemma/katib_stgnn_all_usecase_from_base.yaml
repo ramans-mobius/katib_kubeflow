@@ -1,5 +1,5 @@
 
-name: saay Katib GNN Generalized 
+name: saay1 Katib GNN Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -207,7 +207,7 @@ implementation:
                                     ], []) + [
                                     "--model_name", args.model_name,
                                     "--process_data_url", args.process_data_url,
-                                    "--weights_url", args.weights_url
+                                    "--weights_url", args.weights_url,
                                     "--config", cfg_b64
                                     ],
                                     "resources": {
