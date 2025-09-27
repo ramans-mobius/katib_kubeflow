@@ -250,7 +250,7 @@ implementation:
               return value  # fallback: str
 
         katib_client.create_experiment(experiment)
-        katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=3600)
+        katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
         # Get the experiment object
         # exp = katib_client.get_experiment(experiment_name, namespace)
         
