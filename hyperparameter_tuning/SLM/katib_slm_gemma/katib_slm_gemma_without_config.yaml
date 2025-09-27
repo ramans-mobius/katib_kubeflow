@@ -1,5 +1,5 @@
 
-name: vVI Katib SLM Tuner
+name: saay Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
