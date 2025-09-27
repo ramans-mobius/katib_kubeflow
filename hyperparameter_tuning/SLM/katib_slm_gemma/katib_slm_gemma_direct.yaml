@@ -195,8 +195,17 @@ implementation:
                         }
                     }
                 }
+            },
+            trial_spec_overrides={
+                "metricsCollectorSpec": {
+                    "collector": {
+                        "kind": "StdOut"
+                    }
+                }
             }
         )
+        print('Trial template:')
+        print(trial_template)
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
