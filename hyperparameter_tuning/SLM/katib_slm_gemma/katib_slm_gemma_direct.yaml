@@ -1,4 +1,4 @@
-name: vII Katib SLM Tuner
+name: vIII Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -198,7 +198,7 @@ implementation:
                 }
             },
             metrics_collector_spec=V1beta1MetricsCollectorSpec(
-        collector={"kind": "StdOut"}
+        collector={"kind": "StdOut"})
         )
         print('Trial template:')
         print(trial_template)
