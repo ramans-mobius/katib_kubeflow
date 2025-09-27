@@ -1,4 +1,4 @@
-name: vAB Katib SLM Tuner
+name: vAC Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -175,9 +175,6 @@ implementation:
         algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
         early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
 
-        trial_template = V1beta1TrialTemplate(
-        retain=True,
-        primary_container_name="training-container",
         trial_template = V1beta1TrialTemplate(
         retain=True,
         primary_container_name="training-container",
