@@ -93,6 +93,7 @@ implementation:
         import os
         import time 
         import uuid
+        import base64
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
