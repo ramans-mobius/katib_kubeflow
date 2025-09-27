@@ -186,6 +186,7 @@ implementation:
                         "metadata": {
                             "annotations": {
                                 "sidecar.istio.io/inject": "false"
+                            }
                         },
                         "spec": {
                             "containers": [
