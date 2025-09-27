@@ -277,8 +277,6 @@ implementation:
       - {inputValue: model_name}
       - --model_type
       - {inputValue: model_type}
-      - --config_json
-      - {inputValue: config_json}
       - --parameters_to_tune
       - {inputValue: parameters_to_tune}
       - --objective_metric_name
