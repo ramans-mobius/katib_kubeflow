@@ -1,4 +1,4 @@
-name: vAA Katib SLM Tuner
+name: vAB Katib SLM Tuner
 description: Launches a Katib experiment to tune hyperparameters for SLM models.
 
 inputs:
@@ -176,9 +176,9 @@ implementation:
         early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
 
         trial_template = V1beta1TrialTemplate(
-            retain=True,
-            primary_container_name="training-container",
-            trial_parameters=[
+    retain=True,
+    primary_container_name="training-container",
+    trial_parameters=[
                 {"name": p["name"], "description": p["name"], "reference": p["name"]}
                 for p in params_input
             ],
@@ -187,12 +187,14 @@ implementation:
                 "kind": "Job",
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
-                    "template": { 
+                    "template": {
                         "metadata": {
                             "annotations": {
                                 "sidecar.istio.io/inject": "false"
+                            }
                         },
-                        "spec": {
+                        "spec": { 
+                            "restartPolicy": "Never",
                             "containers": [
                                 {
                                     "name": "training-container",
@@ -205,16 +207,20 @@ implementation:
                                         "--model_name", args.model_name,
                                         "--config_json", cfg_b64
                                     ],
-                                    "resources": {"limits": {"cpu": "4", "memory": "4Gi"}}
+                                    "resources": {
+                                        "limits": {
+                                            "cpu": "4",
+                                            "memory": "4Gi"
+                                        }
                                     }
-                                ] 
-                            },
-                            "restartPolicy": "Never"
+                                }
+                            ]
                         }
                     }
                 }
             }
         )
+
         
         print("Trial spec:", trial_template)
         
