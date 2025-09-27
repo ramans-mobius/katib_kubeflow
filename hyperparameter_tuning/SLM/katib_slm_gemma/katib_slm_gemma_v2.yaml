@@ -178,6 +178,9 @@ implementation:
         trial_template = V1beta1TrialTemplate(
     retain=True,
     primary_container_name="training-container",
+    trial_template = V1beta1TrialTemplate(
+    retain=True,
+    primary_container_name="training-container",
     trial_parameters=[
                 {"name": p["name"], "description": p["name"], "reference": p["name"]}
                 for p in params_input
@@ -193,7 +196,7 @@ implementation:
                                 "sidecar.istio.io/inject": "false"
                             }
                         },
-                        "spec": { 
+                        "spec": {
                             "restartPolicy": "Never",
                             "containers": [
                                 {
@@ -208,10 +211,7 @@ implementation:
                                         "--config_json", cfg_b64
                                     ],
                                     "resources": {
-                                        "limits": {
-                                            "cpu": "4",
-                                            "memory": "4Gi"
-                                        }
+                                        "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
                                 }
                             ]
