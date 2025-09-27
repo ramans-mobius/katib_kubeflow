@@ -176,12 +176,12 @@ implementation:
         early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
 
         trial_template = V1beta1TrialTemplate(
-    retain=True,
-    primary_container_name="training-container",
-    trial_template = V1beta1TrialTemplate(
-    retain=True,
-    primary_container_name="training-container",
-    trial_parameters=[
+        retain=True,
+        primary_container_name="training-container",
+        trial_template = V1beta1TrialTemplate(
+        retain=True,
+        primary_container_name="training-container",
+        trial_parameters=[
                 {"name": p["name"], "description": p["name"], "reference": p["name"]}
                 for p in params_input
             ],
@@ -194,7 +194,6 @@ implementation:
                         "metadata": {
                             "annotations": {
                                 "sidecar.istio.io/inject": "false"
-                            }
                         },
                         "spec": {
                             "restartPolicy": "Never",
@@ -213,7 +212,7 @@ implementation:
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
-                                }
+                                 }
                             ]
                         }
                     }
