@@ -211,7 +211,7 @@ implementation:
                                     "--config", cfg_b64
                                     ],
                                     "resources": {
-                                        "limits": {"cpu": "4", "memory": "4Gi"}
+                                        "limits": {"cpu": "4", "memory": "4Gi", "nvidia.com/gpu": "1"}
                                     }
                                 }
                             ],
