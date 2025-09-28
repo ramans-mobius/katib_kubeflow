@@ -74,7 +74,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v10
+    image: sanram00/slm-image:v11
     command:
       - python3
       - -u
@@ -142,7 +142,7 @@ implementation:
         metrics_collector = V1beta1MetricsCollectorSpec(
             source={
                 "fileSystemPath": V1beta1FileSystemPath(
-                    path="/katib/mnist.json",
+                    path="/katib/slm_tinystories.json",
                     kind="File",
                     format="JSON"
                 )
@@ -185,14 +185,14 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v10",
+                                    "image": "sanram00/slm-image:v11",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
                                     ], []) + [
                                     "--model_name", args.model_name,
-                                    "--config", cfg_b64
+                                    "--config_json", cfg_b64
                                     ],
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
