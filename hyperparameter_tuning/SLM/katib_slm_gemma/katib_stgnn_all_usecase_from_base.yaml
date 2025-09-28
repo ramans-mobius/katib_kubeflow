@@ -1,5 +1,5 @@
 
-name: saay2 Katib GNN Generalized 
+name: saay3 Katib GNN Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -82,7 +82,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/stgnn-image:v82
+    image: sanram00/stgnn-image:v100
     command:
       - python3
       - -u
@@ -199,7 +199,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/stgnn-image:v82",
+                                    "image": "sanram00/stgnn-image:v100",
                                     "command": ["python", "train_model_claude.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
