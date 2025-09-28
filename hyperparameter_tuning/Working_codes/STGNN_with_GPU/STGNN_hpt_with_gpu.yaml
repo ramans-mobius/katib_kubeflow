@@ -1,5 +1,5 @@
 
-name: saay2 GPU Katib GNN Generalized 
+name: saay GPU Katib GNN Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
