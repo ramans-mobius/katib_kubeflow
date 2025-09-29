@@ -1,5 +1,5 @@
 
-name: saayVIII Katib Gemma Generalized 
+name: saayIX Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -209,7 +209,7 @@ implementation:
                                     "--config_json", cfg_b64
                                     ],
                                     "resources": {
-                                        "limits": {"cpu": "8", "memory": "8Gi"}
+                                        "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
                                 }
                             ],
