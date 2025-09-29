@@ -1,5 +1,5 @@
 
-name: saayIII Katib Gemma Generalized 
+name: saayIV Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -74,7 +74,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v12
+    image: sanram00/slm-image:v13
     command:
       - python3
       - -u
@@ -185,7 +185,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v12",
+                                    "image": "sanram00/slm-image:v13",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
