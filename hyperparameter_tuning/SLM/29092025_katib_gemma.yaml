@@ -187,13 +187,13 @@ implementation:
                                 {
                                     "name": "training-container",
                                     "image": "sanram00/slm-image:v15",
-                                    "command": ["python", "train_slm_base64.py"],
+                                    "command": ["python", "train_slm.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
                                         for p in params_input
                                     ], []) + [
                                     "--model_name", args.model_name,
-                                    "--config_json", cfg_b64
+                                    "--config", cfg_b64
                                     ],
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
