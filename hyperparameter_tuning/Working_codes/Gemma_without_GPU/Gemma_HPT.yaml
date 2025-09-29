@@ -1,5 +1,4 @@
-
-name: saayIX Katib Gemma Generalized 
+name: saayX Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -74,7 +73,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v14
+    image: sanram00/slm-image:v15
     command:
       - python3
       - -u
@@ -137,13 +136,6 @@ implementation:
 
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
         print("Base 64 encoded configuration:",cfg_b64)
-        decoded = base64.b64decode(cfg_b64).decode("utf-8")
-        b64_cfg = json.loads(decoded)
-        print('======Configuration decoded from base64 config=====')
-        print(b64_cfg)
-        print('==============Original Configuration===============')
-        print(args.config_json)
-        
         parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
@@ -199,7 +191,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v14",
+                                    "image": "sanram00/slm-image:v15",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
