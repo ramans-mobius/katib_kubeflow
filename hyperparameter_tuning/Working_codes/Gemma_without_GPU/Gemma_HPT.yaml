@@ -137,7 +137,7 @@ implementation:
 
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
         print("Base 64 encoded configuration:",cfg_b64)
-        decoded = base64.b64decode(args.config_json).decode("utf-8")
+        decoded = base64.b64decode(cfg_b64).decode("utf-8")
         b64_cfg = json.loads(decoded)
         print('======Configuration decoded from base64 config=====')
         print(b64_cfg)
