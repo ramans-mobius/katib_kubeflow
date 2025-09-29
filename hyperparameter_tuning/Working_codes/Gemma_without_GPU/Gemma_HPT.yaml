@@ -1,5 +1,5 @@
 
-name: saayVI Katib Gemma Generalized 
+name: saayVII Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -219,6 +219,8 @@ implementation:
                 }
             }
         )
+        print('Trial Template:', trial_template)
+        print('Trial spec:', trial_template.trial_spec)
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
