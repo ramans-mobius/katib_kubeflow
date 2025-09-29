@@ -1,4 +1,4 @@
-name: saayalpha Katib Gemma Generalized 
+name: saaybeta Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -85,7 +85,6 @@ implementation:
         import time 
         import uuid
         import base64
-        import subprocess
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
@@ -100,15 +99,11 @@ implementation:
             V1beta1FileSystemPath,
         )
 
-        print("=== STARTING KATIB COMPONENT ===")
-        
         # Load K8s config
         try:
             config.load_incluster_config()
-            print("✓ Loaded in-cluster K8s config")
         except:
             config.load_kube_config()
-            print("✓ Loaded kube config")
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--best_hyperparams", type=str, required=True)
@@ -129,28 +124,12 @@ implementation:
         
         args = parser.parse_args()
 
-        print("=== INPUT PARAMETERS ===")
-        print("Model name:", args.model_name)
-        print("Model type:", args.model_type)
-        print("Project id:", args.projectid)
-        print("Objective Metric Name:", args.objective_metric_name)
-        print("Objective Type:", args.objective_type)
-        print("Objective Goal:", args.objective_goal)
-        print("Max Trial Count:", args.max_trial_count)
-        print("Parallel Trial Count:", args.parallel_trial_count)
+        print("Starting Katib experiment for:", args.model_name)
 
         # Parse input parameters to tune
-        try:
-            params_input = json.loads(args.parameters_to_tune)
-            print(f"✓ Parsed {len(params_input)} parameters to tune")
-            for i, param in enumerate(params_input):
-                print(f"  Param {i+1}: {param['name']} ({param['parameter_type']})")
-        except Exception as e:
-            print(f"❌ Failed to parse parameters_to_tune: {e}")
-            raise
+        params_input = json.loads(args.parameters_to_tune)
 
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
-        print("Base64 config length:", len(cfg_b64))
 
         parameters = [
             V1beta1ParameterSpec(
@@ -175,10 +154,6 @@ implementation:
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
 
-        print(f"=== EXPERIMENT CONFIG ===")
-        print(f"Experiment Name: {experiment_name}")
-        print(f"Namespace: {namespace}")
-
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
             goal=args.objective_goal,
@@ -188,7 +163,7 @@ implementation:
         algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
         early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
 
-        # Dynamic trial template parameters
+        # SIMPLE trial template - JUST LIKE STGNN
         trial_template = V1beta1TrialTemplate(
             retain=True,
             primary_container_name="training-container",
@@ -221,15 +196,8 @@ implementation:
                                     "--config_json", cfg_b64
                                     ],
                                     "resources": {
-                                        "limits": {"cpu": "4", "memory": "4Gi"},
-                                        "requests": {"cpu": "1", "memory": "1Gi"}
-                                    },
-                                    "env": [
-                                        {
-                                            "name": "KATIB_EXPERIMENT_NAME",
-                                            "value": experiment_name
-                                        }
-                                    ]
+                                        "limits": {"cpu": "4", "memory": "4Gi"}
+                                    }
                                 }
                             ],
                             "restartPolicy": "Never"
@@ -238,21 +206,6 @@ implementation:
                 }
             }
         )
-
-        print("=== TRIAL TEMPLATE DEBUG ===")
-        print("Primary Container:", trial_template.primary_container_name)
-        print("Trial Parameters:", [p["name"] for p in params_input])
-        
-        # Validate trial spec
-        try:
-            trial_spec_dict = trial_template.trial_spec
-            print("✓ Trial spec is valid")
-            print("  API Version:", trial_spec_dict.get("apiVersion"))
-            print("  Kind:", trial_spec_dict.get("kind"))
-            print("  Container Image:", trial_spec_dict["spec"]["template"]["spec"]["containers"][0]["image"])
-            print("  Container Command:", trial_spec_dict["spec"]["template"]["spec"]["containers"][0]["command"])
-        except Exception as e:
-            print(f"❌ Trial spec error: {e}")
 
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
@@ -265,31 +218,6 @@ implementation:
             max_failed_trial_count=args.max_failed_trial_count,
             early_stopping=early_stopping_spec
         )
-
-        # Test container before creating experiment
-        print("=== CONTAINER TEST ===")
-        try:
-            # Test if container can be accessed
-            result = subprocess.run([
-                "docker", "image", "inspect", "sanram00/slm-image:v15"
-            ], capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
-                print("✓ Container image exists locally")
-            else:
-                print("⚠ Container image not found locally (may need to pull)")
-                
-            # Test if training script exists in container
-            result = subprocess.run([
-                "docker", "run", "--rm", "sanram00/slm-image:v15",
-                "ls", "-la", "train_slm_base64.py"
-            ], capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
-                print("✓ Training script exists in container")
-            else:
-                print(f"❌ Training script NOT FOUND: {result.stderr}")
-                
-        except Exception as e:
-            print(f"Container test warning: {e}")
 
         katib_client = katib.KatibClient(namespace=namespace)
         experiment = V1beta1Experiment(
@@ -309,141 +237,56 @@ implementation:
           except ValueError:
               return value
 
-        print("=== CREATING EXPERIMENT ===")
-        try:
-            katib_client.create_experiment(experiment)
-            print(f"✓ Experiment '{experiment_name}' created successfully")
-        except Exception as e:
-            print(f"❌ Failed to create experiment: {e}")
-            raise
-
-        # Enhanced monitoring of trial creation
-        print("=== MONITORING TRIAL CREATION ===")
-        max_wait_time = 300  # 5 minutes
-        start_time = time.time()
-        trials_created = False
+        katib_client.create_experiment(experiment)
+        katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
         
-        for i in range(30):  # Check every 10 seconds for 5 minutes
-            elapsed = time.time() - start_time
-            try:
-                trials = katib_client.list_trials(experiment_name, namespace)
-                print(f"Check {i+1} ({elapsed:.0f}s): Found {len(trials)} trials")
-                
-                if len(trials) > 0:
-                    trials_created = True
-                    print("✓ TRIALS ARE BEING CREATED!")
-                    for trial in trials:
-                        condition = "Unknown"
-                        if trial.status and trial.status.condition:
-                            condition = trial.status.condition[-1].type if trial.status.condition else "No condition"
-                        print(f"  - Trial: {trial.metadata.name}, Status: {condition}")
-                    break
-                else:
-                    print("  No trials created yet...")
-                    
-            except Exception as e:
-                print(f"  Error checking trials: {e}")
-            
-            # Also check Kubernetes resources directly
-            try:
-                result = subprocess.run([
-                    "kubectl", "get", "trials", "-n", namespace, 
-                    "-l", f"experiment={experiment_name}", "--no-headers"
-                ], capture_output=True, text=True, timeout=10)
-                if result.returncode == 0 and result.stdout.strip():
-                    print(f"  K8s CLI found trials: {result.stdout.strip()}")
-            except:
-                pass
-                
-            time.sleep(10)
-
-        if not trials_created:
-            print("❌ CRITICAL: No trials created after 5 minutes!")
-            print("Possible issues:")
-            print("  1. Trial template syntax error")
-            print("  2. Container image pull issues") 
-            print("  3. Resource constraints")
-            print("  4. Katib controller problems")
-            
-            # Try to get more debug info
-            try:
-                print("=== ADDITIONAL DEBUG INFO ===")
-                result = subprocess.run([
-                    "kubectl", "get", "experiments", "-n", namespace, experiment_name, "-o", "yaml"
-                ], capture_output=True, text=True, timeout=10)
-                if result.returncode == 0:
-                    print("Experiment YAML output available")
-                else:
-                    print("Cannot get experiment details")
-            except Exception as e:
-                print(f"Debug info error: {e}")
-
-        print("=== WAITING FOR EXPERIMENT COMPLETION ===")
-        try:
-            katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
-            print("✓ Experiment completed")
-        except Exception as e:
-            print(f"Experiment wait error: {e}")
-
-        # Final trial status
+        # Fetch all trials for this experiment
         trials = katib_client.list_trials(experiment_name, namespace)
-        print(f"=== FINAL TRIAL STATUS ===")
-        print(f"Total trials: {len(trials)}")
-        
-        successful_trials = 0
-        for trial in trials:
-            status = "Unknown"
-            if trial.status and trial.status.condition:
-                status = trial.status.condition[-1].type if trial.status.condition else "No condition"
-            print(f"  - {trial.metadata.name}: {status}")
-            if status == "Succeeded":
-                successful_trials += 1
-                
-        print(f"Successful trials: {successful_trials}/{len(trials)}")
 
-        payload_data = []
+        payload_data = []   # list to hold all trial results
+
         for idx, trial in enumerate(trials, start=1):
             paramss = {}
             paramss['project_id'] = f"{args.projectid}"
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
+            # Add timestamp (epoch milliseconds)
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
             paramss["timestamp"] = timestamp
+            # Add hyperparameters
             for param in trial.spec.parameter_assignments:
                 paramss[param.name] = auto_cast(param.value)
+            # Add metrics
             if trial.status.observation and trial.status.observation.metrics:
                 metrics_list = []
                 for metric in trial.status.observation.metrics:
                     metrics_list.append({metric.name: auto_cast(metric.latest)})
+                # Keep metrics as a list of dicts (not a string)
                 paramss["metrics_value"] = metrics_list
             else:
                 paramss["metrics_value"] = []
+        
             payload_data.append(paramss)
               
-        payload = {"data": payload_data}
+        payload = {
+            "data": payload_data
+        }
 
+        # Save for next brick
         os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
-        try:
-            best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
-            params = best.parameter_assignments
-            hp_dict = {p.name: float(p.value) for p in params}
-            print("Best Hyperparameters Found:", hp_dict)
-            
-            dir_path = os.path.dirname(args.best_hyperparams)
-            if dir_path:
-                os.makedirs(dir_path, exist_ok=True)
-            with open(args.best_hyperparams, "w") as f:
-                json.dump(hp_dict, f, indent=2)
-        except Exception as e:
-            print(f"Error getting best hyperparameters: {e}")
-            # Create empty file to avoid pipeline failure
-            with open(args.best_hyperparams, "w") as f:
-                json.dump({}, f)
+        best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
+        params = best.parameter_assignments
+        hp_dict = {p.name: float(p.value) for p in params}
+        print("Best Hyperparameters Found:", hp_dict)
+        dir_path = os.path.dirname(args.best_hyperparams)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
 
-        print("=== KATIB COMPONENT COMPLETED ===")
+        with open(args.best_hyperparams, "w") as f:
+            json.dump(hp_dict, f, indent=2)
 
     args:
       - --model_name
