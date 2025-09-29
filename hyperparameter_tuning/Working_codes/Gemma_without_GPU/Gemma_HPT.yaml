@@ -1,5 +1,5 @@
 
-name: saayIV Katib Gemma Generalized 
+name: saayV Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -74,7 +74,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v13
+    image: sanram00/slm-image:v14
     command:
       - python3
       - -u
@@ -125,11 +125,25 @@ implementation:
         
         args = parser.parse_args()
 
+        print("Model name:",args.model_name)
+        print("Model type:",args.model_type)
+        print("Project id:",args.projectid)
+        print("Objective Metric Name:",args.objective_metric_name)
+        print("Objective Type:",args.objective_type)
+        print("Objective Goal:",args.objective_goal)
+
         # Parse input parameters to tune
         params_input = json.loads(args.parameters_to_tune)
 
         cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
-
+        print("Base 64 encoded configuration:",cfg_b64)
+        decoded = base64.b64decode(args.config_json).decode("utf-8")
+        b64_cfg = json.loads(decoded)
+        print('======Configuration decoded from base64 config=====')
+        print(b64_cfg)
+        print('==============Original Configuration===============')
+        print(args.config_json)
+        
         parameters = [
             V1beta1ParameterSpec(
                 name=p["name"],
@@ -185,7 +199,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v13",
+                                    "image": "sanram00/slm-image:v14",
                                     "command": ["python", "train_slm_base64.py"],
                                     "args": sum([
                                         ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
