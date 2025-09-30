@@ -1,1 +1,31 @@
 
+FROM nikhilv215/nesy-factory:v18
+
+# Check PyTorch and CUDA versions
+RUN python -c "import torch; print(f'PyTorch Version: {torch.__version__}'); print(f'CUDA Version: {torch.version.cuda}')"
+
+WORKDIR /app
+COPY train_slm.py .
+
+#RUN pip uninstall -y torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric pandas pykeen
+
+# STEP 2: Install PyG helper libraries
+#RUN pip install --no-cache-dir \
+#    torch-scatter \
+#    torch-sparse \
+#    torch-cluster \
+#    torch-spline-conv \
+#    -f https://data.pyg.org/whl/torch-2.4.1+cpu.html
+
+# STEP 3: Install main dependencies
+RUN pip install --no-cache-dir \
+    torch-geometric \
+    tqdm \
+    kubeflow \
+    kubeflow-katib \
+    pandas \
+    numpy \
+    tokenizers \
+    datasets
+
+ENTRYPOINT ["python", "train_slm.py"]
