@@ -1,4 +1,4 @@
-name: saaybeta Katib Gemma Generalized 
+name: saaytriple Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -148,6 +148,10 @@ implementation:
         print(f"DEBUG: config_json length: {len(args.config_json)}")
         print(f"DEBUG: parameters_to_tune length: {len(args.parameters_to_tune)}")
 
+        # HARDCODED NAMESPACE - admin only
+        namespace = "admin"
+        print(f"DEBUG: Using hardcoded namespace: {namespace}")
+
         try:
             # Parse and validate parameters_to_tune
             print("=== DEBUG: PARSING PARAMETERS_TO_TUNE ===")
@@ -204,9 +208,7 @@ implementation:
         )
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
-        namespace = "admin"
         print(f"DEBUG: Experiment name: {experiment_name}")
-        print(f"DEBUG: Namespace: {namespace}")
 
         print("=== DEBUG: CREATING OBJECTIVE SPEC ===")
         objective_spec = V1beta1ObjectiveSpec(
@@ -255,6 +257,9 @@ implementation:
             trial_spec={
                 "apiVersion": "batch/v1",
                 "kind": "Job",
+                "metadata": {
+                    "namespace": "admin"  # Hardcoded namespace in trial spec
+                },
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
                     "template": {
