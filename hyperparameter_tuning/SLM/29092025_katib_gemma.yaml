@@ -73,7 +73,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v15
+    image: sanram00/slm-image:v17
     command:
       - python3
       - -u
@@ -85,6 +85,7 @@ implementation:
         import time 
         import uuid
         import base64
+        import traceback
         from kubernetes import client, config
         import kubeflow.katib as katib
         from kubeflow.katib import (
@@ -99,11 +100,21 @@ implementation:
             V1beta1FileSystemPath,
         )
 
+        print("=== KATIB DEBUG: STARTING COMPONENT ===")
+        
         # Load K8s config
         try:
+            print("DEBUG: Loading Kubernetes config...")
             config.load_incluster_config()
-        except:
-            config.load_kube_config()
+            print("✓ DEBUG: Successfully loaded in-cluster config")
+        except Exception as e:
+            print(f"DEBUG: In-cluster config failed: {e}")
+            try:
+                config.load_kube_config()
+                print("✓ DEBUG: Successfully loaded kube config")
+            except Exception as e2:
+                print(f"✗ DEBUG: Kube config also failed: {e2}")
+                raise
 
         parser = argparse.ArgumentParser()
         parser.add_argument("--best_hyperparams", type=str, required=True)
@@ -124,22 +135,63 @@ implementation:
         
         args = parser.parse_args()
 
-        print("Starting Katib experiment for:", args.model_name)
+        print("=== DEBUG: PARSED ARGUMENTS ===")
+        print(f"DEBUG: model_name: {args.model_name}")
+        print(f"DEBUG: projectid: {args.projectid}")
+        print(f"DEBUG: model_type: {args.model_type}")
+        print(f"DEBUG: objective_metric_name: {args.objective_metric_name}")
+        print(f"DEBUG: objective_type: {args.objective_type}")
+        print(f"DEBUG: objective_goal: {args.objective_goal}")
+        print(f"DEBUG: algorithm_name: {args.algorithm_name}")
+        print(f"DEBUG: max_trial_count: {args.max_trial_count}")
+        print(f"DEBUG: parallel_trial_count: {args.parallel_trial_count}")
+        print(f"DEBUG: config_json length: {len(args.config_json)}")
+        print(f"DEBUG: parameters_to_tune length: {len(args.parameters_to_tune)}")
 
-        # Parse input parameters to tune
-        params_input = json.loads(args.parameters_to_tune)
+        try:
+            # Parse and validate parameters_to_tune
+            print("=== DEBUG: PARSING PARAMETERS_TO_TUNE ===")
+            params_input = json.loads(args.parameters_to_tune)
+            print(f"DEBUG: Parsed {len(params_input)} parameters:")
+            for i, param in enumerate(params_input):
+                print(f"  {i+1}. {param.get('name', 'NO_NAME')} - {param.get('parameter_type', 'NO_TYPE')}")
+                if 'feasible_space' in param:
+                    print(f"     feasible_space: {param['feasible_space']}")
+            
+        except Exception as e:
+            print(f"✗ DEBUG: Failed to parse parameters_to_tune: {e}")
+            print(f"DEBUG: parameters_to_tune content: {args.parameters_to_tune}")
+            raise
 
-        cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
+        try:
+            # Parse and validate config_json
+            print("=== DEBUG: PARSING CONFIG_JSON ===")
+            config_dict = json.loads(args.config_json)
+            print(f"DEBUG: Config keys: {list(config_dict.keys())}")
+            cfg_b64 = base64.b64encode(args.config_json.encode("utf-8")).decode("utf-8")
+            print(f"DEBUG: Base64 config length: {len(cfg_b64)}")
+        except Exception as e:
+            print(f"✗ DEBUG: Failed to parse config_json: {e}")
+            print(f"DEBUG: config_json content: {args.config_json}")
+            raise
 
-        parameters = [
-            V1beta1ParameterSpec(
-                name=p["name"],
-                parameter_type=p["parameter_type"],
-                feasible_space=p["feasible_space"]
-            )
-            for p in params_input
-        ]
+        # Create parameter specs
+        print("=== DEBUG: CREATING PARAMETER SPECS ===")
+        parameters = []
+        for p in params_input:
+            try:
+                param_spec = V1beta1ParameterSpec(
+                    name=p["name"],
+                    parameter_type=p["parameter_type"],
+                    feasible_space=p["feasible_space"]
+                )
+                parameters.append(param_spec)
+                print(f"✓ DEBUG: Created parameter: {p['name']}")
+            except Exception as e:
+                print(f"✗ DEBUG: Failed to create parameter {p.get('name', 'UNKNOWN')}: {e}")
+                raise
 
+        print("=== DEBUG: CREATING METRICS COLLECTOR ===")
         metrics_collector = V1beta1MetricsCollectorSpec(
             source={
                 "fileSystemPath": V1beta1FileSystemPath(
@@ -153,24 +205,53 @@ implementation:
 
         experiment_name = f"{args.model_name}-{str(uuid.uuid4())[:8]}"
         namespace = "admin"
+        print(f"DEBUG: Experiment name: {experiment_name}")
+        print(f"DEBUG: Namespace: {namespace}")
 
+        print("=== DEBUG: CREATING OBJECTIVE SPEC ===")
         objective_spec = V1beta1ObjectiveSpec(
             type=args.objective_type,
             goal=args.objective_goal,
             objective_metric_name=args.objective_metric_name
         )
+        print(f"DEBUG: Objective - type: {args.objective_type}, goal: {args.objective_goal}, metric: {args.objective_metric_name}")
 
+        print("=== DEBUG: CREATING ALGORITHM SPEC ===")
         algorithm_spec = V1beta1AlgorithmSpec(algorithm_name=args.algorithm_name)
-        early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
+        print(f"DEBUG: Algorithm: {args.algorithm_name}")
 
-        # SIMPLE trial template - JUST LIKE STGNN
+        print("=== DEBUG: CREATING EARLY STOPPING SPEC ===")
+        early_stopping_spec = V1beta1EarlyStoppingSpec(algorithm_name=args.early_stopping_algorithm)
+        print(f"DEBUG: Early stopping: {args.early_stopping_algorithm}")
+
+        print("=== DEBUG: CREATING TRIAL TEMPLATE ===")
+        # Build trial parameters
+        trial_parameters = []
+        trial_args = []
+        
+        for p in params_input:
+            param_name = p["name"]
+            trial_parameters.append({
+                "name": param_name,
+                "description": param_name,
+                "reference": param_name
+            })
+            trial_args.extend(["--" + param_name, "${trialParameters." + param_name + "}"])
+            print(f"DEBUG: Added trial parameter: {param_name}")
+
+        # Add fixed arguments
+        trial_args.extend([
+            "--model_name", args.model_name,
+            "--config", cfg_b64
+        ])
+        
+        print(f"DEBUG: Final trial args: {trial_args}")
+        print(f"DEBUG: Trial parameters: {trial_parameters}")
+
         trial_template = V1beta1TrialTemplate(
             retain=True,
             primary_container_name="training-container",
-            trial_parameters=[
-                {"name": p["name"], "description": p["name"], "reference": p["name"]}
-                for p in params_input
-            ],
+            trial_parameters=trial_parameters,
             trial_spec={
                 "apiVersion": "batch/v1",
                 "kind": "Job",
@@ -186,15 +267,9 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v15",
+                                    "image": "sanram00/slm-image:v17",
                                     "command": ["python", "train_slm.py"],
-                                    "args": sum([
-                                        ["--" + p["name"], "${trialParameters." + p["name"] + "}"]
-                                        for p in params_input
-                                    ], []) + [
-                                    "--model_name", args.model_name,
-                                    "--config", cfg_b64
-                                    ],
+                                    "args": trial_args,
                                     "resources": {
                                         "limits": {"cpu": "4", "memory": "4Gi"}
                                     }
@@ -207,6 +282,7 @@ implementation:
             }
         )
 
+        print("=== DEBUG: CREATING EXPERIMENT SPEC ===")
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
             algorithm=algorithm_spec,
@@ -219,7 +295,10 @@ implementation:
             early_stopping=early_stopping_spec
         )
 
+        print("=== DEBUG: CREATING KATIB CLIENT ===")
         katib_client = katib.KatibClient(namespace=namespace)
+        
+        print("=== DEBUG: CREATING EXPERIMENT OBJECT ===")
         experiment = V1beta1Experiment(
             api_version="kubeflow.org/v1beta1",
             kind="Experiment",
@@ -227,25 +306,58 @@ implementation:
             spec=experiment_spec
         )
 
+        print("=== DEBUG: CREATING EXPERIMENT IN KUBERNETES ===")
+        try:
+            katib_client.create_experiment(experiment)
+            print("✓ DEBUG: Experiment created successfully!")
+        except Exception as e:
+            print(f"✗ DEBUG: Failed to create experiment: {e}")
+            print("DEBUG: Experiment spec:")
+            print(json.dumps(experiment.to_dict(), indent=2, default=str))
+            raise
+
+        print("=== DEBUG: WAITING FOR EXPERIMENT COMPLETION ===")
+        try:
+            katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
+            print("✓ DEBUG: Experiment completed!")
+        except Exception as e:
+            print(f"✗ DEBUG: Experiment wait failed: {e}")
+            # Continue to try to get trials anyway
+
+        print("=== DEBUG: FETCHING TRIALS ===")
+        try:
+            trials = katib_client.list_trials(experiment_name, namespace)
+            print(f"DEBUG: Found {len(trials)} trials")
+            
+            if len(trials) == 0:
+                print("⚠️ DEBUG: WARNING - 0 TRIALS FOUND!")
+                print("DEBUG: Checking experiment status...")
+                exp_status = katib_client.get_experiment_status(experiment_name, namespace)
+                print(f"DEBUG: Experiment status: {exp_status}")
+                
+                # List all experiments to see if ours exists
+                all_exps = katib_client.list_experiments(namespace)
+                print(f"DEBUG: Total experiments in namespace: {len(all_exps)}")
+                for exp in all_exps:
+                    print(f"DEBUG: - {exp.metadata.name}: {exp.status.conditions if exp.status else 'NO_STATUS'}")
+        except Exception as e:
+            print(f"✗ DEBUG: Failed to list trials: {e}")
+            trials = []
+
         def auto_cast(value: str):
-          if value.lower() in ["true", "false"]:
-              return value.lower() == "true"
-          if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
-              return int(value)
-          try:
-              return float(value)
-          except ValueError:
-              return value
+            if value.lower() in ["true", "false"]:
+                return value.lower() == "true"
+            if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                return int(value)
+            try:
+                return float(value)
+            except ValueError:
+                return value
 
-        katib_client.create_experiment(experiment)
-        katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
+        payload_data = []
         
-        # Fetch all trials for this experiment
-        trials = katib_client.list_trials(experiment_name, namespace)
-
-        payload_data = []   # list to hold all trial results
-
         for idx, trial in enumerate(trials, start=1):
+            print(f"DEBUG: Processing trial {idx}")
             paramss = {}
             paramss['project_id'] = f"{args.projectid}"
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
@@ -253,18 +365,30 @@ implementation:
             # Add timestamp (epoch milliseconds)
             timestamp = int(time.strftime("%Y%m%d%H%M%S"))
             paramss["timestamp"] = timestamp
+            
             # Add hyperparameters
-            for param in trial.spec.parameter_assignments:
-                paramss[param.name] = auto_cast(param.value)
+            if hasattr(trial, 'spec') and hasattr(trial.spec, 'parameter_assignments'):
+                for param in trial.spec.parameter_assignments:
+                    paramss[param.name] = auto_cast(param.value)
+                    print(f"DEBUG: Trial {idx} param {param.name} = {param.value}")
+            else:
+                print(f"DEBUG: Trial {idx} has no parameter_assignments")
+            
             # Add metrics
-            if trial.status.observation and trial.status.observation.metrics:
+            if (hasattr(trial, 'status') and 
+                hasattr(trial.status, 'observation') and 
+                trial.status.observation and 
+                hasattr(trial.status.observation, 'metrics') and 
+                trial.status.observation.metrics):
+                
                 metrics_list = []
                 for metric in trial.status.observation.metrics:
                     metrics_list.append({metric.name: auto_cast(metric.latest)})
-                # Keep metrics as a list of dicts (not a string)
+                    print(f"DEBUG: Trial {idx} metric {metric.name} = {metric.latest}")
                 paramss["metrics_value"] = metrics_list
             else:
                 paramss["metrics_value"] = []
+                print(f"DEBUG: Trial {idx} has no metrics")
         
             payload_data.append(paramss)
               
@@ -272,21 +396,36 @@ implementation:
             "data": payload_data
         }
 
+        print(f"DEBUG: Final payload has {len(payload_data)} trials")
+
         # Save for next brick
         os.makedirs(os.path.dirname(args.payload), exist_ok=True)
         with open(args.payload, "w") as f:
             json.dump(payload, f)
 
-        best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
-        params = best.parameter_assignments
-        hp_dict = {p.name: float(p.value) for p in params}
-        print("Best Hyperparameters Found:", hp_dict)
+        print("=== DEBUG: GETTING BEST HYPERPARAMETERS ===")
+        try:
+            best = katib_client.get_optimal_hyperparameters(name=experiment_name, namespace=namespace)
+            if best and hasattr(best, 'parameter_assignments'):
+                params = best.parameter_assignments
+                hp_dict = {p.name: float(p.value) for p in params}
+                print("✓ DEBUG: Best Hyperparameters Found:", hp_dict)
+            else:
+                hp_dict = {}
+                print("⚠️ DEBUG: No optimal hyperparameters found")
+        except Exception as e:
+            print(f"✗ DEBUG: Failed to get optimal hyperparameters: {e}")
+            hp_dict = {}
+
         dir_path = os.path.dirname(args.best_hyperparams)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
 
         with open(args.best_hyperparams, "w") as f:
             json.dump(hp_dict, f, indent=2)
+
+        print("=== DEBUG: COMPONENT COMPLETED SUCCESSFULLY ===")
+        print(f"DEBUG: Results - Trials: {len(trials)}, Best params: {len(hp_dict)}")
 
     args:
       - --model_name
