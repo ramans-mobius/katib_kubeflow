@@ -73,7 +73,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/slm-image:v17
+    image: sanram00/slm-image:v18
     command:
       - python3
       - -u
@@ -269,7 +269,7 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/slm-image:v17",
+                                    "image": "sanram00/slm-image:v18",
                                     "command": ["python", "train_slm.py"],
                                     "args": trial_args,
                                     "resources": {
