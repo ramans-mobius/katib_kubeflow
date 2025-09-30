@@ -1,4 +1,4 @@
-name: saaytriple Katib Gemma Generalized 
+name: saaygamma Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -240,7 +240,7 @@ implementation:
             })
             trial_args.extend(["--" + param_name, "${trialParameters." + param_name + "}"])
             print(f"DEBUG: Added trial parameter: {param_name}")
-
+        
         # Add fixed arguments
         trial_args.extend([
             "--model_name", args.model_name,
@@ -249,7 +249,7 @@ implementation:
         
         print(f"DEBUG: Final trial args: {trial_args}")
         print(f"DEBUG: Trial parameters: {trial_parameters}")
-
+        
         trial_template = V1beta1TrialTemplate(
             retain=True,
             primary_container_name="training-container",
@@ -257,9 +257,6 @@ implementation:
             trial_spec={
                 "apiVersion": "batch/v1",
                 "kind": "Job",
-                "metadata": {
-                    "namespace": "admin"  # Hardcoded namespace in trial spec
-                },
                 "spec": {
                     "ttlSecondsAfterFinished": 86400,
                     "template": {
@@ -286,7 +283,6 @@ implementation:
                 }
             }
         )
-
         print("=== DEBUG: CREATING EXPERIMENT SPEC ===")
         experiment_spec = V1beta1ExperimentSpec(
             objective=objective_spec,
