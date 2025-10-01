@@ -1,4 +1,4 @@
-name: saayepsilon Katib Gemma Generalized 
+name: saayzeta Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -364,7 +364,7 @@ implementation:
             paramss['model_name'] = f"{args.model_name}_trial{idx}"
             paramss['model_type'] = args.model_type
             # Add timestamp (epoch milliseconds)
-            timestamp = int(time.strftime("%Y%m%d%H%M%S"))
+            timestamp = time.strftime("%Y%m%d%H%M%S")
             paramss["timestamp"] = timestamp
             
             # Add hyperparameters
