@@ -1,4 +1,4 @@
-name: saayzeta Katib Gemma Generalized 
+name: saayeta Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -273,7 +273,7 @@ implementation:
                                     "command": ["python", "train_slm.py"],
                                     "args": trial_args,
                                     "resources": {
-                                        "limits": {"cpu": "4", "memory": "4Gi"}
+                                        "limits": {"cpu": "2", "memory": "2Gi"}
                                     }
                                 }
                             ],
