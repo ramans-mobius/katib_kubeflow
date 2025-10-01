@@ -1,0 +1,136 @@
+name: CNN dataloader"
+description: Downloads and loads dataset, creates data information file
+
+inputs:
+  - name: dataset_name
+    type: String
+    default: mnist
+    description: "Name of dataset (mnist, cifar10, cifar100, fashionmnist) or URL"
+
+  - name: data_path
+    type: String
+    default: /tmp/data
+    description: "Path to save/load dataset"
+
+outputs:
+  - name: data_info
+    type: File
+    description: "Pickle file containing dataset information"
+
+  - name: raw_data_path
+    type: String
+    description: "Path to downloaded raw data"
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v18
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import urllib.request
+        import tarfile
+        import zipfile
+        from pathlib import Path
+        import torchvision
+        import pickle
+        import json
+
+        print("=== DATA LOADER ===")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--dataset_name", type=str, required=True)
+        parser.add_argument("--data_path", type=str, required=True)
+        parser.add_argument("--data_info", type=str, required=True)
+        parser.add_argument("--raw_data_path", type=str, required=True)
+        
+        args = parser.parse_args()
+
+        print(f"DEBUG: Dataset: {args.dataset_name}")
+        print(f"DEBUG: Data path: {args.data_path}")
+
+        def download_dataset(dataset_name, data_path):
+            Path(data_path).mkdir(parents=True, exist_ok=True)
+            
+            if dataset_name.startswith('http'):
+                filename = dataset_name.split('/')[-1]
+                filepath = os.path.join(data_path, filename)
+                
+                print(f"Downloading from {dataset_name}...")
+                urllib.request.urlretrieve(dataset_name, filepath)
+                
+                if filename.endswith('.tar.gz'):
+                    with tarfile.open(filepath, 'r:gz') as tar:
+                        tar.extractall(data_path)
+                elif filename.endswith('.zip'):
+                    with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                        zip_ref.extractall(data_path)
+                        
+                return os.path.join(data_path, filename.replace('.tar.gz', '').replace('.zip', ''))
+            
+            else:
+                dataset_map = {
+                    'mnist': torchvision.datasets.MNIST,
+                    'cifar10': torchvision.datasets.CIFAR10,
+                    'cifar100': torchvision.datasets.CIFAR100,
+                    'fashionmnist': torchvision.datasets.FashionMNIST
+                }
+                
+                if dataset_name not in dataset_map:
+                    raise ValueError(f"Unsupported dataset: {dataset_name}")
+                
+                print(f"Downloading {dataset_name}...")
+                dataset = dataset_map[dataset_name](
+                    root=data_path,
+                    train=True,
+                    download=True
+                )
+                
+                return data_path
+
+        data_path = download_dataset(args.dataset_name, args.data_path)
+        
+        info = {
+            'dataset_name': args.dataset_name,
+            'data_path': data_path,
+            'num_classes': 10
+        }
+        
+        if args.dataset_name == 'cifar100':
+            info['num_classes'] = 100
+        elif args.dataset_name == 'mnist':
+            info['num_classes'] = 10
+        elif args.dataset_name == 'cifar10':
+            info['num_classes'] = 10
+        elif args.dataset_name == 'fashionmnist':
+            info['num_classes'] = 10
+        
+        data_info_path = os.path.join(data_path, 'data_info.pkl')
+        with open(data_info_path, 'wb') as f:
+            pickle.dump(info, f)
+        
+        # Copy to output path
+        os.makedirs(os.path.dirname(args.data_info), exist_ok=True)
+        with open(args.data_info, 'wb') as f:
+            pickle.dump(info, f)
+        
+        # Save raw data path
+        with open(args.raw_data_path, 'w') as f:
+            f.write(data_path)
+        
+        print(f"✓ Data loading completed: {info}")
+        print(f"✓ Data info saved to: {args.data_info}")
+        print(f"✓ Raw data path: {data_path}")
+
+    args:
+      - --dataset_name
+      - {inputValue: dataset_name}
+      - --data_path
+      - {inputValue: data_path}
+      - --data_info
+      - {outputPath: data_info}
+      - --raw_data_path
+      - {outputPath: raw_data_path}
