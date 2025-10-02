@@ -1,4 +1,4 @@
-name: CNN dataloader"
+name: CNN dataloader
 description: Downloads and loads dataset, creates data information file
 
 inputs:
