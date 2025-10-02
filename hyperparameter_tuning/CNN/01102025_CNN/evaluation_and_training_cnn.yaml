@@ -1,0 +1,294 @@
+name: CNN Training and Evaluation
+description: Trains CNN model and evaluates performance
+
+inputs:
+  - name: processed_data_path
+    type: String
+    description: "Path to processed data"
+
+  - name: model_config
+    type: String
+    description: "JSON configuration for CNN model"
+
+outputs:
+  - name: trained_model
+    type: File
+    description: "Trained model file"
+
+  - name: training_results
+    type: JsonObject
+    description: "Training results and metrics"
+
+  - name: final_predictions
+    type: File
+    description: "Model predictions on test set"
+
+implementation:
+  container:
+    image: sanram00/slm-image:v18
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        import pickle
+        from pathlib import Path
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        from sklearn.metrics import accuracy_score, f1_score
+
+        print("=== BRICK 3: MODEL TRAINING & EVALUATION ===")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--processed_data_path", type=str, required=True)
+        parser.add_argument("--model_config", type=str, required=True)
+        parser.add_argument("--trained_model", type=str, required=True)
+        parser.add_argument("--training_results", type=str, required=True)
+        parser.add_argument("--final_predictions", type=str, required=True)
+        
+        args = parser.parse_args()
+
+        print(f"DEBUG: Processed data path: {args.processed_data_path}")
+
+        class DynamicCNN(nn.Module):
+            def __init__(self, config, input_shape, num_classes):
+                super(DynamicCNN, self).__init__()
+                
+                self.config = config
+                self.input_shape = input_shape
+                self.num_classes = num_classes
+                
+                conv_layers = []
+                in_channels = input_shape[0]
+                
+                for layer_cfg in config['layers']:
+                    if layer_cfg['type'] == 'conv':
+                        conv_layers.append(nn.Conv2d(
+                            in_channels,
+                            layer_cfg['out_channels'],
+                            kernel_size=layer_cfg['kernel_size'],
+                            stride=layer_cfg.get('stride', 1),
+                            padding=layer_cfg.get('padding', 0)
+                        ))
+                        
+                        if layer_cfg.get('batch_norm', False):
+                            conv_layers.append(nn.BatchNorm2d(layer_cfg['out_channels']))
+                        
+                        conv_layers.append(nn.ReLU())
+                        
+                        if layer_cfg.get('dropout', 0) > 0:
+                            conv_layers.append(nn.Dropout2d(layer_cfg['dropout']))
+                        
+                        in_channels = layer_cfg['out_channels']
+                        
+                    elif layer_cfg['type'] == 'maxpool':
+                        conv_layers.append(nn.MaxPool2d(
+                            kernel_size=layer_cfg['kernel_size'],
+                            stride=layer_cfg.get('stride', layer_cfg['kernel_size'])
+                        ))
+                
+                self.conv = nn.Sequential(*conv_layers)
+                self.adaptive_pool = nn.AdaptiveAvgPool2d((4, 4))
+                self.flatten = nn.Flatten()
+                
+                with torch.no_grad():
+                    x = torch.zeros(1, *input_shape)
+                    x = self.conv(x)
+                    x = self.adaptive_pool(x)
+                    flattened_size = x.view(1, -1).size(1)
+                
+                fc_layers = []
+                in_features = flattened_size
+                
+                for fc_units in config.get('fc_layers', [128]):
+                    fc_layers.append(nn.Linear(in_features, fc_units))
+                    fc_layers.append(nn.ReLU())
+                    fc_layers.append(nn.Dropout(config.get('fc_dropout', 0.5)))
+                    in_features = fc_units
+                
+                fc_layers.append(nn.Linear(in_features, num_classes))
+                self.fc = nn.Sequential(*fc_layers)
+            
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.adaptive_pool(x)
+                x = self.flatten(x)
+                x = self.fc(x)
+                return x
+
+        def train_model(model, train_loader, val_loader, config, device):
+            criterion = nn.CrossEntropyLoss()
+            
+            optim_config = config['optimizer']
+            if optim_config['type'] == 'adam':
+                optimizer = optim.Adam(model.parameters(), lr=optim_config['lr'])
+            elif optim_config['type'] == 'sgd':
+                optimizer = optim.SGD(model.parameters(), lr=optim_config['lr'], 
+                                    momentum=optim_config.get('momentum', 0.9))
+            
+            best_val_acc = 0
+            history = {'train_loss': [], 'val_acc': []}
+            
+            for epoch in range(config.get('epochs', 10)):
+                model.train()
+                train_loss = 0
+                for batch_idx, (data, target) in enumerate(train_loader):
+                    data, target = data.to(device), target.to(device)
+                    
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    train_loss += loss.item()
+                
+                model.eval()
+                val_preds = []
+                val_targets = []
+                with torch.no_grad():
+                    for data, target in val_loader:
+                        data, target = data.to(device), target.to(device)
+                        output = model(data)
+                        pred = output.argmax(dim=1)
+                        val_preds.extend(pred.cpu().numpy())
+                        val_targets.extend(target.cpu().numpy())
+                
+                val_acc = accuracy_score(val_targets, val_preds)
+                history['train_loss'].append(train_loss / len(train_loader))
+                history['val_acc'].append(val_acc)
+                
+                print(f'Epoch {epoch+1}/{config.get("epochs", 10)} - '
+                      f'Train Loss: {train_loss/len(train_loader):.4f}, '
+                      f'Val Acc: {val_acc:.4f}')
+                
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    torch.save(model.state_dict(), 'best_model.pth')
+            
+            return history, best_val_acc
+
+        def evaluate_model(model, test_loader, device):
+            model.eval()
+            test_preds = []
+            test_targets = []
+            test_probs = []
+            
+            with torch.no_grad():
+                for data, target in test_loader:
+                    data, target = data.to(device), target.to(device)
+                    output = model(data)
+                    prob = torch.softmax(output, dim=1)
+                    pred = output.argmax(dim=1)
+                    
+                    test_preds.extend(pred.cpu().numpy())
+                    test_targets.extend(target.cpu().numpy())
+                    test_probs.extend(prob.cpu().numpy())
+            
+            accuracy = accuracy_score(test_targets, test_preds)
+            f1 = f1_score(test_targets, test_preds, average='weighted')
+            
+            return {
+                'accuracy': accuracy,
+                'f1_score': f1,
+                'predictions': test_preds,
+                'targets': test_targets,
+                'probabilities': test_probs
+            }
+
+        # Load data info
+        with open(os.path.join(args.processed_data_path, 'data_info.pkl'), 'rb') as f:
+            data_info = pickle.load(f)
+        
+        # Load data loaders
+        train_loader = torch.load(os.path.join(args.processed_data_path, 'train_loader.pth'))
+        val_loader = torch.load(os.path.join(args.processed_data_path, 'val_loader.pth'))
+        test_loader = torch.load(os.path.join(args.processed_data_path, 'test_loader.pth'))
+        
+        # Setup device
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Using device: {device}")
+        
+        # Parse model configuration
+        model_config = json.loads(args.model_config)
+        print(f"Model config - {len(model_config.get('layers', []))} layers")
+        
+        # Create model
+        model = DynamicCNN(
+            config=model_config,
+            input_shape=data_info['input_shape'],
+            num_classes=data_info['num_classes']
+        ).to(device)
+        
+        print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
+        
+        # Train model
+        print("=== TRAINING PROGRESS ===")
+        history, best_val_acc = train_model(model, train_loader, val_loader, model_config, device)
+        
+        # Load best model and evaluate
+        model.load_state_dict(torch.load('best_model.pth'))
+        results = evaluate_model(model, test_loader, device)
+        
+        # Save outputs
+        torch.save(model.state_dict(), args.trained_model)
+        
+        results_dict = {
+            'test_accuracy': results['accuracy'],
+            'test_f1_score': results['f1_score'],
+            'best_val_accuracy': best_val_acc,
+            'history': history,
+            'dataset': data_info['dataset_name'],
+            'input_shape': data_info['input_shape'],
+            'num_classes': data_info['num_classes']
+        }
+        
+        with open(args.training_results, 'w') as f:
+            json.dump(results_dict, f, indent=2)
+        
+        with open(args.final_predictions, 'wb') as f:
+            pickle.dump({
+                'predictions': results['predictions'],
+                'targets': results['targets'],
+                'probabilities': results['probabilities']
+            }, f)
+        
+        # DISPLAY RESULTS
+        print("\\n" + "="*50)
+        print("=== FINAL TRAINING RESULTS ===")
+        print("="*50)
+        print(f"Dataset: {data_info['dataset_name']}")
+        print(f"Model: DynamicCNN with {len(model_config.get('layers', []))} layers")
+        print(f"Input Shape: {data_info['input_shape']}")
+        print(f"Number of Classes: {data_info['num_classes']}")
+        print(f"Best Validation Accuracy: {best_val_acc:.4f}")
+        print(f"Test Accuracy: {results['accuracy']:.4f}")
+        print(f"Test F1 Score: {results['f1_score']:.4f}")
+        print(f"Final Training Loss: {history['train_loss'][-1]:.4f}")
+        print("="*50)
+        
+        # Display training history summary
+        print("\\n=== TRAINING HISTORY SUMMARY ===")
+        print(f"Epochs completed: {len(history['train_loss'])}")
+        print(f"Initial training loss: {history['train_loss'][0]:.4f}")
+        print(f"Final training loss: {history['train_loss'][-1]:.4f}")
+        print(f"Initial validation accuracy: {history['val_acc'][0]:.4f}")
+        print(f"Final validation accuracy: {history['val_acc'][-1]:.4f}")
+        
+        print("\\n✓ Training completed successfully!")
+
+    args:
+      - --processed_data_path
+      - {inputValue: processed_data_path}
+      - --model_config
+      - {inputValue: model_config}
+      - --trained_model
+      - {outputPath: trained_model}
+      - --training_results
+      - {outputPath: training_results}
+      - --final_predictions
+      - {outputPath: final_predictions}
