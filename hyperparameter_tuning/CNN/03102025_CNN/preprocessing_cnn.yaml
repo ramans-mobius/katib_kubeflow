@@ -1,4 +1,4 @@
-name: Data Preprocessing
+name: CNN Data Preprocessing
 description: Universal data preprocessing for any dataset structure
 
 inputs:
