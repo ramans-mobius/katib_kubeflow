@@ -4,21 +4,21 @@ description: "Preprocesses data with transforms, creates train/val/test splits a
 inputs:
   - name: dataset_name
     type: String
-    description: "Name of dataset"
+    description: Name of dataset
 
   - name: data_path
     type: String
-    description: "Path to raw data"
+    description: Path to raw data
 
   - name: batch_size
     type: Integer
     default: 64
-    description: "Batch size for data loaders"
+    description: Batch size for data loaders
 
   - name: validation_split
     type: Float
     default: 0.2
-    description: "Fraction of training data for validation"
+    description: Fraction of training data for validation
 
 outputs:
   - name: processed_data_path
