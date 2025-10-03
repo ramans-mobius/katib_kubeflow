@@ -1,0 +1,230 @@
+name: Data Loading Brick
+description: Universal data loading brick for datasets and URLs
+
+inputs:
+  - name: dataset_name
+    type: String
+    description: Dataset name (e.g., 'cifar10', 'mnist') or URL
+    default: mnist
+    
+  - name: data_path
+    type: String  
+    description: Path to store/download data
+    default: /tmp/data
+
+outputs:
+  - name: data_info
+    type: JsonObject
+    description: Data information dictionary with dataset metadata
+
+implementation:
+  container:
+    image: sanram00/stgnn-image:v101
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import urllib.request
+        import tarfile
+        import zipfile
+        import json
+        import pickle
+        from pathlib import Path
+        import torchvision
+        import argparse
+        
+        # Argument parsing
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--dataset_name", type=str, required=True)
+        parser.add_argument("--data_path", type=str, required=True)
+        parser.add_argument("--data_info", type=str, required=True)
+        args = parser.parse_args()
+        
+        def download_dataset(dataset_name, data_path):
+            Path(data_path).mkdir(parents=True, exist_ok=True)
+            
+            if dataset_name.startswith('http'):
+                filename = dataset_name.split('/')[-1]
+                filepath = os.path.join(data_path, filename)
+                
+                print(f"Downloading from {dataset_name}...")
+                urllib.request.urlretrieve(dataset_name, filepath)
+                print(f"Download completed: {filepath}")
+                
+                extracted_path = data_path
+                if any(filename.endswith(ext) for ext in ['.tar.gz', '.tgz', '.tar', '.zip']):
+                    extracted_path = extract_archive(filepath, data_path, filename)
+                else:
+                    print(f"File {filename} is not a recognized archive format, using as-is")
+                    extracted_path = data_path
+                
+                return extracted_path
+            
+            else:
+                try:
+                    dataset_class_name = dataset_name.upper()
+                    if hasattr(torchvision.datasets, dataset_class_name):
+                        dataset_class = getattr(torchvision.datasets, dataset_class_name)
+                        print(f"Downloading {dataset_name}...")
+                        dataset = dataset_class(root=data_path, train=True, download=True)
+                        return data_path
+                    else:
+                        raise ValueError(f"Dataset {dataset_name} not found in torchvision")
+                except Exception as e:
+                    print(f"Could not load {dataset_name} as torchvision dataset: {e}")
+                    return data_path
+
+        def extract_archive(filepath, data_path, filename):
+            print(f"Extracting {filename}...")
+            
+            if filename.endswith('.tar.gz') or filename.endswith('.tgz'):
+                with tarfile.open(filepath, 'r:gz') as tar:
+                    tar.extractall(data_path)
+            elif filename.endswith('.tar'):
+                with tarfile.open(filepath, 'r:') as tar:
+                    tar.extractall(data_path)
+            elif filename.endswith('.zip'):
+                with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                    zip_ref.extractall(data_path)
+            
+            extracted_path = find_extracted_folder(data_path, filename)
+            
+            try:
+                os.remove(filepath)
+                print(f"Cleaned up archive: {filepath}")
+            except:
+                print(f"Could not remove archive: {filepath}")
+            
+            return extracted_path
+
+        def find_extracted_folder(base_path, filename):
+            base_name = filename.replace('.tar.gz', '').replace('.tgz', '').replace('.tar', '').replace('.zip', '')
+            expected_path = os.path.join(base_path, base_name)
+            
+            if os.path.exists(expected_path) and os.path.isdir(expected_path):
+                return expected_path
+            
+            current_dirs = [d for d in os.listdir(base_path) 
+                           if os.path.isdir(os.path.join(base_path, d))]
+            
+            if current_dirs:
+                return os.path.join(base_path, current_dirs[0])
+            
+            return base_path
+
+        def detect_num_classes(data_path, dataset_name):
+            print(f"Detecting number of classes in: {data_path}")
+            
+            existing_info = load_data_info(data_path)
+            if existing_info and 'num_classes' in existing_info:
+                print(f"Using pre-existing num_classes: {existing_info['num_classes']}")
+                return existing_info['num_classes']
+            
+            train_path = os.path.join(data_path, 'train')
+            if os.path.exists(train_path):
+                classes = [d for d in os.listdir(train_path) 
+                          if os.path.isdir(os.path.join(train_path, d))]
+                if classes:
+                    print(f"Found {len(classes)} classes in train directory")
+                    return len(classes)
+            
+            classes = [d for d in os.listdir(data_path) 
+                      if os.path.isdir(os.path.join(data_path, d))]
+            if classes:
+                print(f"Found {len(classes)} classes in root directory")
+                return len(classes)
+            
+            dataset_files = [f for f in os.listdir(data_path) 
+                            if f.endswith(('.json', '.pkl', '.pickle'))]
+            
+            for file in dataset_files:
+                file_path = os.path.join(data_path, file)
+                try:
+                    if file.endswith('.json'):
+                        with open(file_path, 'r') as f:
+                            data = json.load(f)
+                    else:
+                        with open(file_path, 'rb') as f:
+                            data = pickle.load(f)
+                    
+                    if isinstance(data, dict) and 'num_classes' in data:
+                        print(f"Found num_classes in {file}: {data['num_classes']}")
+                        return data['num_classes']
+                    elif isinstance(data, dict) and 'classes' in data:
+                        num_classes = len(data['classes'])
+                        print(f"Found {num_classes} classes in {file}")
+                        return num_classes
+                        
+                except Exception as e:
+                    print(f"Could not read {file}: {e}")
+            
+            print("Could not detect number of classes, using default: 10")
+            return 10
+
+        def load_data_info(data_path):
+            json_path = os.path.join(data_path, 'data_info.json')
+            pkl_path = os.path.join(data_path, 'data_info.pkl')
+            
+            if os.path.exists(json_path):
+                print("Loading data info from JSON...")
+                with open(json_path, 'r') as f:
+                    return json.load(f)
+            elif os.path.exists(pkl_path):
+                print("Loading data info from PKL...")
+                with open(pkl_path, 'rb') as f:
+                    return pickle.load(f)
+            else:
+                print("No data info file found, creating new one")
+                return None
+
+        def save_data_info(data_path, info, format='both'):
+            if format in ['json', 'both']:
+                json_path = os.path.join(data_path, 'data_info.json')
+                with open(json_path, 'w') as f:
+                    json.dump(info, f, indent=2)
+                print(f"Saved data info to JSON: {json_path}")
+            
+            if format in ['pkl', 'both']:
+                pkl_path = os.path.join(data_path, 'data_info.pkl')
+                with open(pkl_path, 'wb') as f:
+                    pickle.dump(info, f)
+                print(f"Saved data info to PKL: {pkl_path}")
+
+        def load_data(dataset_name, data_path='/tmp/data', output_format='both'):
+            data_path = download_dataset(dataset_name, data_path)
+            num_classes = detect_num_classes(data_path, dataset_name)
+            
+            info = {
+                'dataset_name': dataset_name,
+                'data_path': data_path,
+                'num_classes': num_classes,
+                'dataset_type': 'torchvision' if not dataset_name.startswith('http') else 'custom_url',
+                'loaded_at': str(Path(data_path).stat().st_mtime) if os.path.exists(data_path) else 'new'
+            }
+            
+            save_data_info(data_path, info, format=output_format)
+            
+            print(f" Data loading completed!")
+            print(f"   Dataset: {dataset_name}")
+            print(f"   Path: {data_path}")
+            print(f"   Classes: {num_classes}")
+            
+            return info
+
+        # Main execution
+        data_info = load_data(args.dataset_name, args.data_path)
+        
+        # Save output
+        with open(args.data_info, 'w') as f:
+            json.dump(data_info, f, indent=2)
+        
+        print("Data loading brick completed successfully!")
+    args:
+      - --dataset_name
+      - {inputValue: dataset_name}
+      - --data_path
+      - {inputValue: data_path}
+      - --data_info
+      - {outputPath: data_info}
