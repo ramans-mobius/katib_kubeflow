@@ -19,7 +19,7 @@ outputs:
 
 implementation:
   container:
-    image: sanram00/stgnn-image:v101
+    image: nikhilv215/nesy-factory:v18
     command:
       - python3
       - -u
