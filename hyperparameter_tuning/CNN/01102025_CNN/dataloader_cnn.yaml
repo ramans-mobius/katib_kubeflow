@@ -5,21 +5,21 @@ inputs:
   - name: dataset_name
     type: String
     default: mnist
-    description: "Name of dataset (mnist, cifar10, cifar100, fashionmnist) or URL"
+    description: Name of dataset (mnist, cifar10, cifar100, fashionmnist) or URL
 
   - name: data_path
     type: String
     default: /tmp/data
-    description: "Path to save/load dataset"
+    description: Path to save/load dataset
 
 outputs:
   - name: data_info
     type: File
-    description: "Pickle file containing dataset information"
+    description: Pickle file containing dataset information
 
   - name: raw_data_path
     type: String
-    description: "Path to downloaded raw data"
+    description: Path to downloaded raw data
 
 implementation:
   container:
