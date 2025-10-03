@@ -1,4 +1,4 @@
-name: Data Loading Brick
+name: CNN Data Loading
 description: Universal data loading brick for datasets and URLs
 
 inputs:
