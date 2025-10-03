@@ -22,7 +22,7 @@ inputs:
 
 outputs:
   - name: processed_data_path
-    type: string
+    type: String
     description: "Path to processed data"
 
   - name: updated_data_info
