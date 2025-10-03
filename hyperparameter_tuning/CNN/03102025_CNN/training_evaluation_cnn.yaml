@@ -1,4 +1,4 @@
-name: CNN Training & Evaluation Brick
+name: CNN Training & Evaluation
 description: Universal CNN training and evaluation
 
 inputs:
