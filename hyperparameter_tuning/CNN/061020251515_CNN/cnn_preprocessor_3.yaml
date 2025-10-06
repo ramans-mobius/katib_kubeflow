@@ -21,19 +21,14 @@ inputs:
     default: "224,224"
     
 outputs:
-  - name: data_info
-    type: dict
-    description: Dictionary containing dataset information including path and num_classes
-  - name: raw_data_path
+  - name: processed_data_path
     type: string
-    description: Path to raw downloaded/extracted data
+    description: Path to processed data and data loaders
 
-implementation:
-  language: "python"
-  source: |
-    import os
-    import urllib.request
-    import tarfile
-    import zipfile
-    import json
-    import pickle
+  - name: num_classes
+    type: integer
+    description: Number of classes detected
+
+  - name: input_shape
+    type: string
+    description: Input shape as "channels,height,width"
