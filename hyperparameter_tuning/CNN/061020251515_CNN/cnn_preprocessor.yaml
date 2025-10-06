@@ -1,0 +1,30 @@
+name: universal_cnn_preprocessor
+description: Universal preprocessing for any dataset structure with automatic detection
+
+inputs:
+  - name: data_info
+    type: dict
+    description: Data information from data loader
+  - name: dataset_name
+    type: string
+    description: Original dataset name for torchvision datasets
+  - name: batch_size
+    type: integer
+    description: Batch size for data loaders
+    default: 64
+  - name: validation_split
+    type: float
+    description: Fraction of data to use for validation
+    default: 0.2
+  - name: input_size
+    type: list
+    description: Input image size as [height, width]
+    default: [224, 224]  # Quotes needed because of brackets
+
+outputs:
+  - name: processed_data_path
+    type: string
+    description: Path to preprocessed data with loaders
+  - name: preprocessing_info
+    type: dict
+    description: Information about preprocessing results including input_shape
