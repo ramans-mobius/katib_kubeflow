@@ -24,7 +24,7 @@ inputs:
 
 outputs:
   - name: processed_data_path
-    type: String
+    type: string
     description: Path to processed data and data loaders
 
   - name: data_info
