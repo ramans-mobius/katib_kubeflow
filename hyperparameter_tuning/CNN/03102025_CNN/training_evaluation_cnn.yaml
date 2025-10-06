@@ -6,19 +6,35 @@ inputs:
     type: String
     description: Preprocessed data path from preprocessing brick
     
-  - name: config
-    type: JsonObject
-    description: Model configuration dictionary
+  - name: num_classes
+    type: Integer
+    description: Number of classes
     
-  - name: output_path
+  - name: input_shape
     type: String
-    description: Path to save results
-    default: /tmp/output
+    description: Input shape as "channels,height,width"
+    
+  - name: model_config
+    type: String
+    description: Complete model configuration as JSON string
+    default: "{\"layers\": [{\"type\": \"conv\", \"out_channels\": 32, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.1}, {\"type\": \"maxpool\", \"kernel_size\": 2}, {\"type\": \"conv\", \"out_channels\": 64, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.2}, {\"type\": \"maxpool\", \"kernel_size\": 2}, {\"type\": \"conv\", \"out_channels\": 128, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.3}, {\"type\": \"maxpool\", \"kernel_size\": 2}], \"fc_layers\": [256, 128], \"fc_dropout\": 0.5, \"optimizer\": {\"type\": \"adam\", \"lr\": 0.001}, \"epochs\": 10, \"batch_size\": 64, \"dataset\": \"mnist\", \"validation_split\": 0.2, \"task_type\": \"classification\"}"
 
 outputs:
-  - name: training_results
-    type: JsonObject
-    description: Training results with metrics and model info
+  - name: test_accuracy
+    type: Float
+    description: Final test accuracy
+    
+  - name: test_f1_score
+    type: Float
+    description: Final test F1 score
+    
+  - name: best_val_accuracy
+    type: Float
+    description: Best validation accuracy
+    
+  - name: model_path
+    type: string
+    description: Path to saved model
 
 implementation:
   container:
@@ -41,13 +57,24 @@ implementation:
         # Argument parsing
         parser = argparse.ArgumentParser()
         parser.add_argument("--data_path", type=str, required=True)
-        parser.add_argument("--config", type=str, required=True)
-        parser.add_argument("--output_path", type=str, required=True)
-        parser.add_argument("--training_results", type=str, required=True)
+        parser.add_argument("--num_classes", type=int, required=True)
+        parser.add_argument("--input_shape", type=str, required=True)
+        parser.add_argument("--model_config", type=str, required=True)
+        parser.add_argument("--test_accuracy", type=str, required=True)
+        parser.add_argument("--test_f1_score", type=str, required=True)
+        parser.add_argument("--best_val_accuracy", type=str, required=True)
+        parser.add_argument("--model_path", type=str, required=True)
         args = parser.parse_args()
         
-        # Parse config from JSON string
-        config = json.loads(args.config)
+        # Parse configurations
+        config = json.loads(args.model_config)
+        input_shape = tuple(map(int, args.input_shape.split(',')))
+        
+        print("=== CNN TRAINING & EVALUATION ===")
+        print(f"Data path: {args.data_path}")
+        print(f"Number of classes: {args.num_classes}")
+        print(f"Input shape: {input_shape}")
+        print(f"Model config: {config}")
         
         class DynamicCNN(nn.Module):
             def __init__(self, config, input_shape, num_classes):
@@ -90,6 +117,7 @@ implementation:
                 self.adaptive_pool = nn.AdaptiveAvgPool2d((4, 4))
                 self.flatten = nn.Flatten()
                 
+                # Calculate flattened size
                 with torch.no_grad():
                     x = torch.zeros(1, *input_shape)
                     x = self.conv(x)
@@ -115,60 +143,32 @@ implementation:
                 x = self.fc(x)
                 return x
 
-        def load_data_info(data_path):
-            json_path = os.path.join(data_path, 'data_info.json')
-            pkl_path = os.path.join(data_path, 'data_info.pkl')
-            
-            if os.path.exists(json_path):
-                print("Loading data info from JSON...")
-                with open(json_path, 'r') as f:
-                    return json.load(f)
-            elif os.path.exists(pkl_path):
-                print("Loading data info from PKL...")
-                with open(pkl_path, 'rb') as f:
-                    return pickle.load(f)
-            else:
-                raise FileNotFoundError(f"No data info file found in {data_path}")
-
         def load_data_loaders(data_path):
-            loader_files = {}
+            """Load data loaders from preprocessed directory"""
+            train_loader_path = os.path.join(data_path, 'train_loader.pth')
+            val_loader_path = os.path.join(data_path, 'val_loader.pth')
+            test_loader_path = os.path.join(data_path, 'test_loader.pth')
             
-            for file in os.listdir(data_path):
-                if file.endswith('.pth'):
-                    if 'train' in file:
-                        loader_files['train'] = os.path.join(data_path, file)
-                    elif 'val' in file or 'validation' in file:
-                        loader_files['val'] = os.path.join(data_path, file)
-                    elif 'test' in file:
-                        loader_files['test'] = os.path.join(data_path, file)
+            if not os.path.exists(train_loader_path):
+                raise FileNotFoundError(f"Train loader not found: {train_loader_path}")
+            if not os.path.exists(test_loader_path):
+                raise FileNotFoundError(f"Test loader not found: {test_loader_path}")
             
-            standard_names = {
-                'train': os.path.join(data_path, 'train_loader.pth'),
-                'val': os.path.join(data_path, 'val_loader.pth'), 
-                'test': os.path.join(data_path, 'test_loader.pth')
-            }
+            train_loader = torch.load(train_loader_path)
+            test_loader = torch.load(test_loader_path)
             
-            for key, path in standard_names.items():
-                if key not in loader_files and os.path.exists(path):
-                    loader_files[key] = path
+            # Load validation loader if exists, else use test loader
+            if os.path.exists(val_loader_path):
+                val_loader = torch.load(val_loader_path)
+            else:
+                print("Warning: Validation loader not found, using test loader for validation")
+                val_loader = test_loader
             
-            loaders = {}
-            for key, path in loader_files.items():
-                print(f"Loading {key} loader from: {path}")
-                loaders[key] = torch.load(path)
-            
-            if 'train' not in loaders:
-                raise FileNotFoundError("No train loader found")
-            if 'test' not in loaders:
-                raise FileNotFoundError("No test loader found")
-            
-            if 'val' not in loaders:
-                print("Warning: No validation loader found, using test loader for validation")
-                loaders['val'] = loaders['test']
-            
-            return loaders['train'], loaders['val'], loaders['test']
+            print(f"Loaded data loaders: train={len(train_loader)}, val={len(val_loader)}, test={len(test_loader)}")
+            return train_loader, val_loader, test_loader
 
         def train_model(model, train_loader, val_loader, config, device):
+            """Train the model"""
             criterion = nn.CrossEntropyLoss()
             
             optim_config = config['optimizer']
@@ -177,16 +177,19 @@ implementation:
             elif optim_config['type'] == 'sgd':
                 optimizer = optim.SGD(model.parameters(), lr=optim_config['lr'], 
                                     momentum=optim_config.get('momentum', 0.9))
+            else:
+                raise ValueError(f"Unsupported optimizer: {optim_config['type']}")
             
-            best_val_acc = 0
-            history = {'train_loss': [], 'val_acc': []}
             epochs = config.get('epochs', 10)
+            best_val_acc = 0.0
+            history = {'train_loss': [], 'val_acc': []}
             
             print(f"Starting training for {epochs} epochs...")
             
             for epoch in range(epochs):
+                # Training phase
                 model.train()
-                train_loss = 0
+                train_loss = 0.0
                 for batch_idx, (data, target) in enumerate(train_loader):
                     data, target = data.to(device), target.to(device)
                     
@@ -198,6 +201,7 @@ implementation:
                     
                     train_loss += loss.item()
                 
+                # Validation phase
                 model.eval()
                 val_preds = []
                 val_targets = []
@@ -210,11 +214,13 @@ implementation:
                         val_targets.extend(target.cpu().numpy())
                 
                 val_acc = accuracy_score(val_targets, val_preds)
-                history['train_loss'].append(train_loss / len(train_loader))
+                avg_train_loss = train_loss / len(train_loader)
+                
+                history['train_loss'].append(avg_train_loss)
                 history['val_acc'].append(val_acc)
                 
                 print(f'Epoch {epoch+1}/{epochs} - '
-                      f'Train Loss: {train_loss/len(train_loader):.4f}, '
+                      f'Train Loss: {avg_train_loss:.4f}, '
                       f'Val Acc: {val_acc:.4f}')
                 
                 if val_acc > best_val_acc:
@@ -225,116 +231,128 @@ implementation:
             return history, best_val_acc
 
         def evaluate_model(model, test_loader, device):
+            """Evaluate the model on test set"""
             model.eval()
             test_preds = []
             test_targets = []
-            test_probs = []
             
-            print("Running evaluation...")
+            print("Running evaluation on test set...")
             
             with torch.no_grad():
                 for data, target in test_loader:
                     data, target = data.to(device), target.to(device)
                     output = model(data)
-                    prob = torch.softmax(output, dim=1)
                     pred = output.argmax(dim=1)
-                    
                     test_preds.extend(pred.cpu().numpy())
                     test_targets.extend(target.cpu().numpy())
-                    test_probs.extend(prob.cpu().numpy())
             
             accuracy = accuracy_score(test_targets, test_preds)
             f1 = f1_score(test_targets, test_preds, average='weighted')
             
-            return {
-                'accuracy': accuracy,
-                'f1_score': f1,
-                'predictions': test_preds,
-                'targets': test_targets,
-                'probabilities': test_probs
+            print(f"Test Accuracy: {accuracy:.4f}")
+            print(f"Test F1 Score: {f1:.4f}")
+            
+            return accuracy, f1
+
+        # Main training execution
+        try:
+            # Set device
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            print(f"Using device: {device}")
+            
+            # Load data loaders
+            train_loader, val_loader, test_loader = load_data_loaders(args.data_path)
+            
+            # Create model
+            model = DynamicCNN(
+                config=config,
+                input_shape=input_shape,
+                num_classes=args.num_classes
+            ).to(device)
+            
+            print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
+            
+            # Train model
+            history, best_val_acc = train_model(model, train_loader, val_loader, config, device)
+            
+            # Load best model and evaluate
+            print("Loading best model for final evaluation...")
+            model.load_state_dict(torch.load('best_model.pth'))
+            test_accuracy, test_f1 = evaluate_model(model, test_loader, device)
+            
+            # Save model and results
+            output_dir = '/tmp/output'
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            
+            model_save_path = os.path.join(output_dir, 'trained_model.pth')
+            torch.save(model.state_dict(), model_save_path)
+            
+            # Save training results
+            results = {
+                'test_accuracy': test_accuracy,
+                'test_f1_score': test_f1,
+                'best_val_accuracy': best_val_acc,
+                'history': history,
+                'model_config': config,
+                'input_shape': input_shape,
+                'num_classes': args.num_classes
             }
-
-        def train_and_evaluate(data_path, config, output_path='/tmp/output'):
-            print("=== UNIVERSAL MODEL TRAINING ===")
-            print(f"Data path: {data_path}")
-            print(f"Output path: {output_path}")
             
-            Path(output_path).mkdir(parents=True, exist_ok=True)
+            with open(os.path.join(output_dir, 'training_results.json'), 'w') as f:
+                json.dump(results, f, indent=2)
             
-            try:
-                data_info = load_data_info(data_path)
-                print(f"Loaded data info: {data_info}")
-                
-                train_loader, val_loader, test_loader = load_data_loaders(data_path)
-                print(f"Loaded data loaders: train={len(train_loader)}, val={len(val_loader)}, test={len(test_loader)}")
-                
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                print(f"Using device: {device}")
-                
-                model = DynamicCNN(
-                    config=config,
-                    input_shape=data_info['input_shape'],
-                    num_classes=data_info['num_classes']
-                ).to(device)
-                
-                print(f"Model created with {sum(p.numel() for p in model.parameters())} parameters")
-                
-                history, best_val_acc = train_model(model, train_loader, val_loader, config, device)
-                
-                print("Loading best model for evaluation...")
-                model.load_state_dict(torch.load('best_model.pth'))
-                results = evaluate_model(model, test_loader, device)
-                
-                torch.save(model.state_dict(), os.path.join(output_path, 'model.pth'))
-                
-                results_dict = {
-                    'test_accuracy': results['accuracy'],
-                    'test_f1_score': results['f1_score'],
-                    'best_val_accuracy': best_val_acc,
-                    'history': history,
-                    'dataset_info': data_info,
-                    'model_config': config
-                }
-                
-                with open(os.path.join(output_path, 'results.json'), 'w') as f:
-                    json.dump(results_dict, f, indent=2)
-                
-                with open(os.path.join(output_path, 'results.pkl'), 'wb') as f:
-                    pickle.dump(results_dict, f)
-                
-                with open(os.path.join(output_path, 'predictions.pkl'), 'wb') as f:
-                    pickle.dump({
-                        'predictions': results['predictions'],
-                        'targets': results['targets'],
-                        'probabilities': results['probabilities']
-                    }, f)
-                
-                print(f"   Training completed successfully!")
-                print(f"   Test Accuracy: {results['accuracy']:.4f}")
-                print(f"   Test F1 Score: {results['f1_score']:.4f}")
-                print(f"   Best Val Accuracy: {best_val_acc:.4f}")
-                print(f"   Results saved to: {output_path}")
-                
-                return results_dict
-                
-            except Exception as e:
-                print(f" Training failed: {e}")
-                raise
-
-        # Main execution
-        training_results = train_and_evaluate(args.data_path, config, args.output_path)
-        
-        # Save output
-        with open(args.training_results, 'w') as f:
-            json.dump(training_results, f, indent=2)
+            # Save outputs for pipeline
+            with open(args.test_accuracy, 'w') as f:
+                f.write(f"{test_accuracy:.6f}")
+            
+            with open(args.test_f1_score, 'w') as f:
+                f.write(f"{test_f1:.6f}")
+            
+            with open(args.best_val_accuracy, 'w') as f:
+                f.write(f"{best_val_acc:.6f}")
+            
+            with open(args.model_path, 'w') as f:
+                f.write(model_save_path)
+            
+            print("=== TRAINING COMPLETED SUCCESSFULLY ===")
+            print(f"   Test Accuracy: {test_accuracy:.4f}")
+            print(f"   Test F1 Score: {test_f1:.4f}")
+            print(f"   Best Val Accuracy: {best_val_acc:.4f}")
+            print(f"   Model saved to: {model_save_path}")
+            
+        except Exception as e:
+            print(f"=== TRAINING FAILED ===")
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Save failure outputs
+            with open(args.test_accuracy, 'w') as f:
+                f.write("0.0")
+            with open(args.test_f1_score, 'w') as f:
+                f.write("0.0")
+            with open(args.best_val_accuracy, 'w') as f:
+                f.write("0.0")
+            with open(args.model_path, 'w') as f:
+                f.write("/tmp/failed_model.pth")
+            
+            raise
         
         print("Training & evaluation brick completed successfully!")
     args:
       - --data_path
       - {inputValue: data_path}
-      - --config
-      - {inputValue: config}
-      - --output_path
-      - {inputValue: output_path}
-      - --training_results
-      - {outputPath: training_results}
+      - --num_classes
+      - {inputValue: num_classes}
+      - --input_shape
+      - {inputValue: input_shape}
+      - --model_config
+      - {inputValue: model_config}
+      - --test_accuracy
+      - {outputPath: test_accuracy}
+      - --test_f1_score
+      - {outputPath: test_f1_score}
+      - --best_val_accuracy
+      - {outputPath: best_val_accuracy}
+      - --model_path
+      - {outputPath: model_path}
