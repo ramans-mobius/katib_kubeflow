@@ -5,15 +5,15 @@ inputs:
   - name: data_info
     type: dict
   - name: dataset_name
-    type: string
+    type: String
   - name: batch_size
-    type: integer
+    type: Integer
     default: 64
   - name: validation_split
-    type: float
+    type: Float
     default: 0.2
   - name: input_size
-    type: list
+    type: List
     default: [224, 224]
 
 outputs:
