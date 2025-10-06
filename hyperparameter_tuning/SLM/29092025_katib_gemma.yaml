@@ -273,7 +273,7 @@ implementation:
                                     "command": ["python", "train_slm.py"],
                                     "args": trial_args,
                                     "resources": {
-                                        "limits": {"cpu": 2", "memory": "2Gi"}
+                                        "limits": {"cpu": "2", "memory": "2Gi"}
                                     }
                                 }
                             ],
