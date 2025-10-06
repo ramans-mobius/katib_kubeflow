@@ -1,0 +1,28 @@
+name: universal_cnn_preprocessor
+description: Universal data loader supporting torchvision datasets, URLs, and multiple archive formats
+
+inputs:
+  - name: data_info
+    type: dict
+    description: Dictionary containing dataset information including path and num_classes
+  - name: raw_data_path
+    type: String
+    description: Path to raw downloaded/extracted data
+
+outputs:
+  - name: data_info
+    type: dict
+    description: Dictionary containing dataset information including path and num_classes
+  - name: raw_data_path
+    type: string
+    description: Path to raw downloaded/extracted data
+
+implementation:
+  language: "python"
+  source: |
+    import os
+    import urllib.request
+    import tarfile
+    import zipfile
+    import json
+    import pickle
