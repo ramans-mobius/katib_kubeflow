@@ -1,0 +1,133 @@
+name: universal_cnn_preprocessor
+description: Universal preprocessing for any dataset structure
+
+inputs:
+  - name: data_info
+    type: dict
+  - name: dataset_name
+    type: string
+  - name: batch_size
+    type: integer
+    default: 64
+  - name: validation_split
+    type: float
+    default: 0.2
+  - name: input_size
+    type: list
+    default: [224, 224]
+
+outputs:
+  - name: processed_data_path
+    type: string
+  - name: preprocessing_info
+    type: dict
+
+implementation:
+  language: python
+  source: |
+    import os
+    import pickle
+    from pathlib import Path
+    import torch
+    from torch.utils.data import DataLoader, random_split
+    import torchvision.transforms as transforms
+    import torchvision
+
+    def execute(inputs):
+        data_info = inputs["data_info"]
+        dataset_name = inputs["dataset_name"]
+        batch_size = inputs["batch_size"]
+        validation_split = inputs["validation_split"]
+        input_size = tuple(inputs["input_size"])
+        
+        data_path = data_info['data_path']
+        
+        print("Starting preprocessing...")
+        
+        # Simple transform
+        train_transform = transforms.Compose([
+            transforms.Resize(input_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5])
+        ])
+        
+        test_transform = transforms.Compose([
+            transforms.Resize(input_size),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5])
+        ])
+        
+        # Load dataset based on name
+        dataset_name_lower = dataset_name.lower()
+        if dataset_name_lower == 'mnist':
+            train_dataset = torchvision.datasets.MNIST(data_path, train=True, download=False, transform=train_transform)
+            test_dataset = torchvision.datasets.MNIST(data_path, train=False, download=False, transform=test_transform)
+            num_classes = 10
+        elif dataset_name_lower == 'cifar10':
+            train_dataset = torchvision.datasets.CIFAR10(data_path, train=True, download=False, transform=train_transform)
+            test_dataset = torchvision.datasets.CIFAR10(data_path, train=False, download=False, transform=test_transform)
+            num_classes = 10
+        elif dataset_name_lower == 'cifar100':
+            train_dataset = torchvision.datasets.CIFAR100(data_path, train=True, download=False, transform=train_transform)
+            test_dataset = torchvision.datasets.CIFAR100(data_path, train=False, download=False, transform=test_transform)
+            num_classes = 100
+        else:
+            # Fallback to ImageFolder
+            train_path = os.path.join(data_path, 'train')
+            test_path = os.path.join(data_path, 'test')
+            
+            if os.path.exists(train_path):
+                train_dataset = torchvision.datasets.ImageFolder(train_path, transform=train_transform)
+                num_classes = len(train_dataset.classes)
+            else:
+                train_dataset = torchvision.datasets.ImageFolder(data_path, transform=train_transform)
+                num_classes = len(train_dataset.classes)
+            
+            if os.path.exists(test_path):
+                test_dataset = torchvision.datasets.ImageFolder(test_path, transform=test_transform)
+            else:
+                # Split train for test
+                train_size = int(0.8 * len(train_dataset))
+                test_size = len(train_dataset) - train_size
+                train_dataset, test_dataset = random_split(train_dataset, [train_size, test_size])
+        
+        # Create validation split
+        val_size = int(validation_split * len(train_dataset))
+        train_size = len(train_dataset) - val_size
+        train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
+        
+        # Create data loaders
+        train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        
+        # Save processed data
+        output_path = os.path.join(data_path, 'preprocessed')
+        Path(output_path).mkdir(parents=True, exist_ok=True)
+        
+        torch.save(train_loader, os.path.join(output_path, 'train_loader.pth'))
+        torch.save(val_loader, os.path.join(output_path, 'val_loader.pth'))
+        torch.save(test_loader, os.path.join(output_path, 'test_loader.pth'))
+        
+        # Update data info
+        sample_batch = next(iter(train_loader))
+        data_info['input_shape'] = sample_batch[0].shape[1:]
+        data_info['num_classes'] = num_classes
+        data_info['preprocessed_path'] = output_path
+        
+        with open(os.path.join(output_path, 'data_info.pkl'), 'wb') as f:
+            pickle.dump(data_info, f)
+        
+        preprocessing_info = {
+            "num_classes": num_classes,
+            "input_shape": data_info['input_shape'],
+            "train_samples": len(train_subset),
+            "val_samples": len(val_subset),
+            "test_samples": len(test_dataset)
+        }
+        
+        return {
+            "processed_data_path": output_path,
+            "preprocessing_info": preprocessing_info
+        }
