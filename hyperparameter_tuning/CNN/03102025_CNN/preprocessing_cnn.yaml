@@ -28,7 +28,7 @@ inputs:
 
 outputs:
   - name: processed_data_path
-    type: String
+    type: string
     description: Path to processed data and data loaders
 
   - name: num_classes
@@ -36,7 +36,7 @@ outputs:
     description: Number of classes detected
 
   - name: input_shape
-    type: String
+    type: string
     description: Input shape as "channels,height,width"
 
 implementation:
