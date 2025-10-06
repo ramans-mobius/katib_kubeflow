@@ -16,10 +16,9 @@ inputs:
     default: "{\"layers\": [{\"type\": \"conv\", \"out_channels\": 32, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.1}, {\"type\": \"maxpool\", \"kernel_size\": 2}, {\"type\": \"conv\", \"out_channels\": 64, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.2}, {\"type\": \"maxpool\", \"kernel_size\": 2}, {\"type\": \"conv\", \"out_channels\": 128, \"kernel_size\": 3, \"padding\": 1, \"batch_norm\": true, \"dropout\": 0.3}, {\"type\": \"maxpool\", \"kernel_size\": 2}], \"fc_layers\": [256, 128], \"fc_dropout\": 0.5, \"optimizer\": {\"type\": \"adam\", \"lr\": 0.001}, \"epochs\": 10, \"batch_size\": 64, \"dataset\": \"mnist\", \"validation_split\": 0.2, \"task_type\": \"classification\"}"
 
   - name: input_size
-    type: List
-    description: Size of the input
-    default: 
-
+    type: String
+    description: Input image size as "width,height"
+    default: "224,224"
     
 outputs:
   - name: data_info
