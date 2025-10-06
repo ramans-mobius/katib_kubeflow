@@ -1,36 +1,35 @@
 name: CNN Data Preprocessing
-description: Universal data preprocessing for any dataset structure
+description: Universal data preprocessing for CNN models using nesy_factory.cnn
 
 inputs:
+  - name: data_path
+    type: String
+    description: Path to raw data from data loading brick
+    
   - name: dataset_name
     type: String
-    description: Dataset name
-    default: mnist
+    description: Name of the dataset (for torchvision datasets)
+    default: ""
     
-  - name: data_path
-    type: String  
-    description: Path from data loading brick
-    default: /tmp/data
-    
-  - name: batch_size
-    type: Integer
-    description: Batch size for data loaders
-    default: 64
-    
-  - name: validation_split
-    type: Float
-    description: Validation split ratio
-    default: 0.2
-    
-  - name: input_size
-    type: String
-    description: Input image size as JSON string, e.g., "[224, 224]"
-    default: "[224, 224]"
+  - name: preprocessing_config
+    type: JsonObject
+    description: Preprocessing configuration dictionary
+    default: {
+        "input_size": [224, 224],
+        "batch_size": 64,
+        "validation_split": 0.2,
+        "augmentation": true,
+        "normalize": true
+      }
 
 outputs:
-  - name: processed_data_info
+  - name: processed_data_path
+    type: String
+    description: Path to processed data and data loaders
+
+  - name: data_info
     type: JsonObject
-    description: Preprocessed data information with loader paths
+    description: Updated data information with preprocessing details
 
 implementation:
   container:
@@ -41,59 +40,186 @@ implementation:
       - -c
       - |
         import os
+        import json
         import pickle
         from pathlib import Path
         import torch
-        from torch.utils.data import DataLoader, random_split
-        import torchvision.transforms as transforms
-        import torchvision
-        from PIL import Image
-        import numpy as np
-        import json
+        import sys
+        
+        # Add nesy_factory to path
+        sys.path.append('/workspace/nesy-factory')
+        
+        # Import your universal preprocessing functions
+        from nesy_factory.cnn.preprocessing import (
+            preprocess_data, 
+            get_universal_transforms,
+            detect_dataset_structure,
+            load_any_dataset,
+            get_num_classes_from_dataset,
+            load_torchvision_dataset
+        )
+        
         import argparse
-
+        
         # Argument parsing
         parser = argparse.ArgumentParser()
-        parser.add_argument("--dataset_name", type=str, required=True)
         parser.add_argument("--data_path", type=str, required=True)
-        parser.add_argument("--batch_size", type=int, required=True)
-        parser.add_argument("--validation_split", type=float, required=True)
-        parser.add_argument("--input_size", type=str, required=True)
-        parser.add_argument("--processed_data_info", type=str, required=True)
+        parser.add_argument("--dataset_name", type=str, required=True)
+        parser.add_argument("--preprocessing_config", type=str, required=True)
+        parser.add_argument("--processed_data_path", type=str, required=True)
+        parser.add_argument("--data_info", type=str, required=True)
         args = parser.parse_args()
-
-        # Parse input_size from JSON string
-        input_size = json.loads(args.input_size)
-
-        # --- (rest of your preprocessing code stays the same) ---
-        # Use 'input_size' as a tuple where needed
-        input_size = tuple(input_size)
-
+        
+        # Parse config from JSON string
+        config = json.loads(args.preprocessing_config)
+        
+        def load_existing_data_info(data_path):
+            """Load existing data info from data loading brick"""
+            json_path = os.path.join(data_path, 'data_info.json')
+            pkl_path = os.path.join(data_path, 'data_info.pkl')
+            
+            if os.path.exists(json_path):
+                print("Loading data info from JSON...")
+                with open(json_path, 'r') as f:
+                    return json.load(f)
+            elif os.path.exists(pkl_path):
+                print("Loading data info from PKL...")
+                with open(pkl_path, 'rb') as f:
+                    return pickle.load(f)
+            else:
+                print("No existing data info found, creating new one")
+                return {
+                    'dataset_name': args.dataset_name,
+                    'data_path': args.data_path,
+                    'original_structure': detect_dataset_structure(args.data_path)
+                }
+        
+        def run_universal_preprocessing(data_path, dataset_name, config):
+            """Run the universal preprocessing pipeline"""
+            print("=== UNIVERSAL CNN PREPROCESSING ===")
+            print(f"Data path: {data_path}")
+            print(f"Dataset name: {dataset_name}")
+            print(f"Config: {config}")
+            
+            # Extract preprocessing parameters
+            input_size = tuple(config.get('input_size', [224, 224]))
+            batch_size = config.get('batch_size', 64)
+            validation_split = config.get('validation_split', 0.2)
+            
+            # Use your universal preprocessing function
+            data_info = preprocess_data(
+                dataset_name=dataset_name,
+                data_path=data_path,
+                batch_size=batch_size,
+                validation_split=validation_split,
+                input_size=input_size
+            )
+            
+            return data_info
+        
+        def save_preprocessed_outputs(data_info, output_path):
+            """Save all preprocessing outputs in standardized format"""
+            Path(output_path).mkdir(parents=True, exist_ok=True)
+            
+            # Save data loaders (already saved by preprocess_data)
+            preprocessed_path = data_info.get('preprocessed_path', output_path)
+            
+            # Verify data loaders exist
+            required_files = ['train_loader.pth', 'val_loader.pth', 'test_loader.pth', 'data_info.pkl']
+            for file in required_files:
+                file_path = os.path.join(preprocessed_path, file)
+                if not os.path.exists(file_path):
+                    raise FileNotFoundError(f"Required file missing: {file_path}")
+            
+            print(f"Preprocessed data verified in: {preprocessed_path}")
+            
+            # Create comprehensive data info for next stage
+            comprehensive_info = {
+                # Original data info
+                'dataset_name': data_info.get('dataset_name', 'unknown'),
+                'data_path': data_info.get('data_path', ''),
+                'num_classes': data_info.get('num_classes', 2),
+                'input_shape': data_info.get('input_shape', (3, 224, 224)),
+                
+                # Preprocessing info
+                'preprocessed_path': preprocessed_path,
+                'preprocessing_config': config,
+                'dataset_structure': data_info.get('dataset_structure', 'unknown'),
+                'input_size': config.get('input_size', [224, 224]),
+                'batch_size': config.get('batch_size', 64),
+                
+                # Statistics
+                'total_samples': data_info.get('total_samples', 0),
+                'class_distribution': data_info.get('class_distribution', {}),
+                
+                # Timestamp
+                'preprocessing_timestamp': str(os.path.getmtime(preprocessed_path)) if os.path.exists(preprocessed_path) else 'unknown'
+            }
+            
+            # Save comprehensive info
+            info_path = os.path.join(output_path, 'preprocessing_info.json')
+            with open(info_path, 'w') as f:
+                json.dump(comprehensive_info, f, indent=2)
+            
+            # Also save as pickle for compatibility
+            pkl_path = os.path.join(output_path, 'preprocessing_info.pkl')
+            with open(pkl_path, 'wb') as f:
+                pickle.dump(comprehensive_info, f)
+            
+            print(f"Preprocessing outputs saved to: {output_path}")
+            return comprehensive_info, preprocessed_path
+        
         # Main execution
-        # Call your preprocess_data function here
-        processed_data_info = preprocess_data(
-            args.dataset_name, 
-            args.data_path, 
-            args.batch_size, 
-            args.validation_split, 
-            input_size
-        )
-
-        # Save output
-        with open(args.processed_data_info, 'w') as f:
-            json.dump(processed_data_info, f, indent=2)
-
-        print("Data preprocessing brick completed successfully!")
+        try:
+            print("Starting universal preprocessing brick...")
+            
+            # Load existing data info from data loading stage
+            existing_info = load_existing_data_info(args.data_path)
+            print(f"Loaded existing data info: {existing_info}")
+            
+            # Run universal preprocessing
+            processed_info = run_universal_preprocessing(
+                args.data_path, 
+                args.dataset_name, 
+                config
+            )
+            
+            # Save outputs
+            final_info, processed_path = save_preprocessed_outputs(
+                processed_info, 
+                args.processed_data_path
+            )
+            
+            # Save outputs for pipeline
+            with open(args.processed_data_path, 'w') as f:
+                f.write(processed_path)
+            
+            with open(args.data_info, 'w') as f:
+                json.dump(final_info, f, indent=2)
+            
+            print("=== PREPROCESSING BRICK COMPLETED SUCCESSFULLY ===")
+            print(f"   Dataset: {final_info['dataset_name']}")
+            print(f"   Classes: {final_info['num_classes']}")
+            print(f"   Input shape: {final_info['input_shape']}")
+            print(f"   Processed path: {processed_path}")
+            print(f"   Output path: {args.processed_data_path}")
+            
+        except Exception as e:
+            print(f"=== PREPROCESSING BRICK FAILED ===")
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        print("Preprocessing brick execution completed!")
     args:
-      - --dataset_name
-      - {inputValue: dataset_name}
       - --data_path
       - {inputValue: data_path}
-      - --batch_size
-      - {inputValue: batch_size}
-      - --validation_split
-      - {inputValue: validation_split}
-      - --input_size
-      - {inputValue: input_size}
-      - --processed_data_info
-      - {outputPath: processed_data_info}
+      - --dataset_name
+      - {inputValue: dataset_name}
+      - --preprocessing_config
+      - {inputValue: preprocessing_config}
+      - --processed_data_path
+      - {outputPath: processed_data_path}
+      - --data_info
+      - {outputPath: data_info}
