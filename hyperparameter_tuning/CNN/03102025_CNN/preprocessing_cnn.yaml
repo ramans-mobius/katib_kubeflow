@@ -32,7 +32,7 @@ outputs:
     description: Path to processed data and data loaders
 
   - name: num_classes
-    type: Integer
+    type: integer
     description: Number of classes detected
 
   - name: input_shape
@@ -83,7 +83,6 @@ implementation:
         print(f"Validation split: {args.validation_split}")
         
         def get_transforms(input_size, is_training=True):
-            """Create transforms for training and validation"""
             transform_list = []
             
             if is_training:
@@ -106,7 +105,6 @@ implementation:
             return transforms.Compose(transform_list)
         
         def detect_dataset_structure(data_path):
-            """Auto-detect dataset structure"""
             if not os.path.exists(data_path):
                 raise ValueError(f"Data path does not exist: {data_path}")
                 
@@ -120,7 +118,6 @@ implementation:
                 return 'unknown'
         
         def load_datasets(data_path, input_size):
-            """Load datasets based on detected structure"""
             structure = detect_dataset_structure(data_path)
             print(f"Dataset structure: {structure}")
             
@@ -166,29 +163,25 @@ implementation:
             
             return train_dataset, test_dataset, num_classes
         
-        # Main preprocessing logic
         try:
-            # Load datasets
+          
             train_dataset, test_dataset, num_classes = load_datasets(args.data_path, input_size)
             print(f"Loaded datasets - Train: {len(train_dataset)}, Test: {len(test_dataset)}")
             print(f"Number of classes: {num_classes}")
             
-            # Split train into train/validation
+      
             val_size = int(len(train_dataset) * args.validation_split)
             train_size = len(train_dataset) - val_size
             train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
-            
-            # Create data loaders
+   
             train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True, num_workers=2)
             val_loader = DataLoader(val_subset, batch_size=args.batch_size, shuffle=False, num_workers=2)
             test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
             
-            # Get input shape
             sample_batch, _ = next(iter(train_loader))
             input_shape = sample_batch.shape[1:]  # (channels, height, width)
             input_shape_str = f"{input_shape[0]},{input_shape[1]},{input_shape[2]}"
-            
-            # Save processed data
+
             output_path = os.path.join(args.data_path, 'preprocessed')
             Path(output_path).mkdir(parents=True, exist_ok=True)
             
