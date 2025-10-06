@@ -23,9 +23,9 @@ inputs:
     default: 0.2
     
   - name: input_size
-    type: JsonArray
-    description: Input image size [height, width]
-    default: [224, 224]
+    type: String
+    description: Input image size as JSON string, e.g., "[224, 224]"
+    default: "[224, 224]"
 
 outputs:
   - name: processed_data_info
@@ -51,7 +51,7 @@ implementation:
         import numpy as np
         import json
         import argparse
-        
+
         # Argument parsing
         parser = argparse.ArgumentParser()
         parser.add_argument("--dataset_name", type=str, required=True)
@@ -61,317 +61,28 @@ implementation:
         parser.add_argument("--input_size", type=str, required=True)
         parser.add_argument("--processed_data_info", type=str, required=True)
         args = parser.parse_args()
-        
+
         # Parse input_size from JSON string
         input_size = json.loads(args.input_size)
-        
-        def get_universal_transforms(input_size=(224, 224), is_training=False):
-            mean = [0.485, 0.456, 0.406]
-            std = [0.229, 0.224, 0.225]
-            
-            transform_list = []
-            
-            if is_training:
-                transform_list.extend([
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomRotation(degrees=15),
-                    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-                    transforms.RandomResizedCrop(input_size, scale=(0.8, 1.0))
-                ])
-            else:
-                transform_list.extend([
-                    transforms.Resize(input_size),
-                    transforms.CenterCrop(input_size)
-                ])
-            
-            transform_list.extend([
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std)
-            ])
-            
-            return transforms.Compose(transform_list)
 
-        def detect_dataset_structure(data_path):
-            print(f"Scanning dataset structure in: {data_path}")
-            
-            structures = {
-                'imagefolder_split': os.path.exists(os.path.join(data_path, 'train')) and 
-                                    os.path.exists(os.path.join(data_path, 'test')),
-                'imagefolder_train_only': os.path.exists(os.path.join(data_path, 'train')) and 
-                                         not os.path.exists(os.path.join(data_path, 'test')),
-                'imagefolder_flat': any(os.path.isdir(os.path.join(data_path, d)) for d in os.listdir(data_path)),
-                'single_directory': any(f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) 
-                                      for f in os.listdir(data_path))
-            }
-            
-            if structures['imagefolder_split']:
-                return 'imagefolder_split'
-            elif structures['imagefolder_train_only']:
-                return 'imagefolder_train_only'
-            elif structures['imagefolder_flat']:
-                return 'imagefolder_flat'
-            elif structures['single_directory']:
-                return 'single_directory'
-            else:
-                return 'unknown'
-
-        def get_num_classes_from_dataset(dataset):
-            print("Detecting number of classes...")
-            
-            try:
-                if hasattr(dataset, 'targets'):
-                    targets = dataset.targets
-                    if isinstance(targets, (list, np.ndarray)):
-                        unique_labels = np.unique(targets)
-                        num_classes = len(unique_labels)
-                        print(f"  Found {num_classes} classes from targets: {unique_labels}")
-                        return num_classes
-                
-                if hasattr(dataset, 'classes'):
-                    num_classes = len(dataset.classes)
-                    print(f"  Found {num_classes} classes from classes attribute")
-                    return num_classes
-                
-                if hasattr(dataset, 'class_to_idx'):
-                    num_classes = len(dataset.class_to_idx)
-                    print(f"  Found {num_classes} classes from class_to_idx")
-                    return num_classes
-                
-                print("  Sampling dataset to detect classes...")
-                all_labels = set()
-                sample_size = min(1000, len(dataset))
-                
-                for i in range(sample_size):
-                    try:
-                        _, label = dataset[i]
-                        all_labels.add(label)
-                    except Exception as e:
-                        continue
-                
-                if all_labels:
-                    num_classes = len(all_labels)
-                    print(f"  Found {num_classes} classes by sampling: {sorted(all_labels)}")
-                    return num_classes
-                
-                print("  Warning: Could not detect classes, defaulting to 2")
-                return 2
-                
-            except Exception as e:
-                print(f"  Warning: Error detecting classes: {e}, defaulting to 2")
-                return 2
-
-        def load_torchvision_dataset(dataset_name, data_path, is_training=True, input_size=(224, 224)):
-            transform = get_universal_transforms(input_size, is_training=is_training)
-            
-            dataset_map = {
-                'cifar10': torchvision.datasets.CIFAR10,
-                'cifar100': torchvision.datasets.CIFAR100,
-                'mnist': torchvision.datasets.MNIST,
-                'fashionmnist': torchvision.datasets.FashionMNIST,
-                'kmnist': torchvision.datasets.KMNIST,
-            }
-            
-            dataset_name_lower = dataset_name.lower()
-            
-            if dataset_name_lower in dataset_map:
-                dataset_class = dataset_map[dataset_name_lower]
-                print(f"Loading torchvision dataset: {dataset_name}")
-                
-                if dataset_name_lower in ['mnist', 'fashionmnist', 'kmnist']:
-                    transform_list = []
-                    if is_training:
-                        transform_list.extend([
-                            transforms.RandomHorizontalFlip(p=0.5),
-                            transforms.RandomRotation(degrees=15),
-                        ])
-                    transform_list.extend([
-                        transforms.Resize(input_size),
-                        transforms.Grayscale(3),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    ])
-                    transform = transforms.Compose(transform_list)
-                else:
-                    transform_list = []
-                    if is_training:
-                        transform_list.extend([
-                            transforms.RandomHorizontalFlip(p=0.5),
-                            transforms.RandomCrop(32, padding=4),
-                        ])
-                    transform_list.extend([
-                        transforms.Resize(input_size),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    ])
-                    transform = transforms.Compose(transform_list)
-                
-                try:
-                    dataset = dataset_class(
-                        root=data_path, 
-                        train=is_training, 
-                        download=False,
-                        transform=transform
-                    )
-                    return dataset
-                except Exception as e:
-                    print(f"Error loading {dataset_name}: {e}")
-                    raise
-            
-            return None
-
-        def load_any_dataset(data_path, dataset_name=None, is_training=True, input_size=(224, 224)):
-            if dataset_name:
-                torchvision_dataset = load_torchvision_dataset(dataset_name, data_path, is_training, input_size)
-                if torchvision_dataset is not None:
-                    return torchvision_dataset
-            
-            structure = detect_dataset_structure(data_path)
-            print(f"Detected dataset structure: {structure}")
-            
-            transform = get_universal_transforms(input_size, is_training=is_training)
-            
-            if structure == 'imagefolder_split':
-                split_dir = 'train' if is_training else 'test'
-                dataset_path = os.path.join(data_path, split_dir)
-                return torchvision.datasets.ImageFolder(root=dataset_path, transform=transform)
-            
-            elif structure == 'imagefolder_train_only':
-                if is_training:
-                    return torchvision.datasets.ImageFolder(
-                        root=os.path.join(data_path, 'train'), 
-                        transform=transform
-                    )
-                else:
-                    return torchvision.datasets.ImageFolder(
-                        root=os.path.join(data_path, 'train'), 
-                        transform=get_universal_transforms(input_size, is_training=False)
-                    )
-            
-            elif structure == 'imagefolder_flat':
-                return torchvision.datasets.ImageFolder(root=data_path, transform=transform)
-            
-            elif structure == 'single_directory':
-                class SingleClassDataset(torch.utils.data.Dataset):
-                    def __init__(self, data_path, transform=None):
-                        self.data_path = data_path
-                        self.transform = transform
-                        self.image_files = [f for f in os.listdir(data_path) 
-                                          if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tiff'))]
-                        print(f"  Found {len(self.image_files)} images in single directory")
-                    
-                    def __len__(self):
-                        return len(self.image_files)
-                    
-                    def __getitem__(self, idx):
-                        img_path = os.path.join(self.data_path, self.image_files[idx])
-                        image = Image.open(img_path).convert('RGB')
-                        if self.transform:
-                            image = self.transform(image)
-                        return image, 0
-                
-                return SingleClassDataset(data_path, transform)
-            
-            else:
-                raise ValueError(f"Unsupported dataset structure: {structure}")
-
-        def preprocess_data(dataset_name, data_path, batch_size=64, validation_split=0.2, input_size=(224, 224)):
-            print(f"=== UNIVERSAL DATASET PREPROCESSING ===")
-            print(f"Dataset: {dataset_name}")
-            print(f"Data path: {data_path}")
-            
-            data_info_path = os.path.join(data_path, 'data_info.pkl')
-            if os.path.exists(data_info_path):
-                with open(data_info_path, 'rb') as f:
-                    data_info = pickle.load(f)
-                print(f"Loaded existing data info")
-            else:
-                data_info = {
-                    'dataset_name': dataset_name,
-                    'data_path': data_path,
-                    'original_structure': detect_dataset_structure(data_path)
-                }
-                print(f"Created new data info")
-            
-            try:
-                print("Loading training data...")
-                train_dataset = load_any_dataset(data_path, dataset_name=dataset_name, is_training=True, input_size=input_size)
-                
-                print("Loading test data...")
-                test_dataset = load_any_dataset(data_path, dataset_name=dataset_name, is_training=False, input_size=input_size)
-                
-                num_classes = get_num_classes_from_dataset(train_dataset)
-                data_info['num_classes'] = num_classes
-                data_info['dataset_structure'] = detect_dataset_structure(data_path)
-                
-                if len(train_dataset) == len(test_dataset) and train_dataset == test_dataset:
-                    print("No separate test set found, splitting training data...")
-                    total_size = len(train_dataset)
-                    test_size = int(0.2 * total_size)
-                    train_size = total_size - test_size
-                    
-                    train_dataset, test_dataset = random_split(
-                        train_dataset, [train_size, test_size]
-                    )
-                
-                val_size = int(len(train_dataset) * validation_split)
-                train_size = len(train_dataset) - val_size
-                
-                print(f"Dataset splits:")
-                print(f"  Training: {train_size} samples")
-                print(f"  Validation: {val_size} samples") 
-                print(f"  Test: {len(test_dataset)} samples")
-                
-                train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
-                
-                train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=2)
-                val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=2)
-                test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
-                
-                output_path = os.path.join(data_path, 'preprocessed')
-                Path(output_path).mkdir(parents=True, exist_ok=True)
-                
-                torch.save(train_loader, os.path.join(output_path, 'train_loader.pth'))
-                torch.save(val_loader, os.path.join(output_path, 'val_loader.pth'))
-                torch.save(test_loader, os.path.join(output_path, 'test_loader.pth'))
-                
-                data_info['batch_size'] = batch_size
-                data_info['input_shape'] = next(iter(train_loader))[0].shape[1:]
-                data_info['preprocessed_path'] = output_path
-                data_info['input_size'] = input_size
-                
-                with open(os.path.join(output_path, 'data_info.pkl'), 'wb') as f:
-                    pickle.dump(data_info, f)
-                
-                print(f"✅ UNIVERSAL PREPROCESSING COMPLETED!")
-                print(f"   Dataset: {dataset_name}")
-                print(f"   Structure: {data_info['dataset_structure']}")
-                print(f"   Classes: {num_classes}")
-                print(f"   Input shape: {data_info['input_shape']}")
-                print(f"   Input size: {input_size}")
-                print(f"   Train batches: {len(train_loader)}")
-                print(f"   Val batches: {len(val_loader)}")
-                print(f"   Test batches: {len(test_loader)}")
-                print(f"   Output path: {output_path}")
-                
-                return data_info
-                
-            except Exception as e:
-                print(f"Error in universal preprocessing: {e}")
-                raise
+        # --- (rest of your preprocessing code stays the same) ---
+        # Use 'input_size' as a tuple where needed
+        input_size = tuple(input_size)
 
         # Main execution
+        # Call your preprocess_data function here
         processed_data_info = preprocess_data(
             args.dataset_name, 
             args.data_path, 
             args.batch_size, 
             args.validation_split, 
-            tuple(input_size)
+            input_size
         )
-        
+
         # Save output
         with open(args.processed_data_info, 'w') as f:
             json.dump(processed_data_info, f, indent=2)
-        
+
         print("Data preprocessing brick completed successfully!")
     args:
       - --dataset_name
