@@ -1,4 +1,4 @@
-name: saaytheta Katib Gemma Generalized 
+name: saayalpha Katib Gemma Generalized 
 description: Launches a Katib experiment for GNNS using a predefined objective function.
 
 inputs:
@@ -273,7 +273,7 @@ implementation:
                                     "command": ["python", "train_slm.py"],
                                     "args": trial_args,
                                     "resources": {
-                                        "limits": {"cpu": "4", "memory": "4Gi"}
+                                        "limits": {"cpu": 2", "memory": "2Gi"}
                                     }
                                 }
                             ],
@@ -319,7 +319,7 @@ implementation:
 
         print("=== DEBUG: WAITING FOR EXPERIMENT COMPLETION ===")
         try:
-            katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=7200)
+            katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=10800)
             print("✓ DEBUG: Experiment completed!")
         except Exception as e:
             print(f"✗ DEBUG: Experiment wait failed: {e}")
