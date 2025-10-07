@@ -1,4 +1,4 @@
-name: Test Preprocessing
+name:2 Test Preprocessing
 description: Test brick
 
 inputs:
@@ -15,8 +15,21 @@ implementation:
   container:
     image: python:3.9
     command:
-    - echo
-    - "Hello World"
+    - python3
+    - -c
+    - |
+      import os
+      import sys
+      print("=== SIMPLE PREPROCESSING ===")
+      data_path = sys.argv[1]
+      output_file = sys.argv[2]
+      print(f"Data path: {data_path}")
+      output_path = os.path.join(data_path, 'processed')
+      os.makedirs(output_path, exist_ok=True)
+      with open(output_file, 'w') as f:
+          f.write(output_path)
+      print(f"Output path: {output_path}")
+      print("=== COMPLETED ===")
     
     args:
     - --data_path
