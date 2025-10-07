@@ -9,6 +9,10 @@ inputs:
   - name: dataset_name
     type: String
     description: Name of the dataset
+    
+  - name: batch_size
+    type: Integer
+    description: Batch size for data loaders
 
 outputs:
   - name: output_path
@@ -28,12 +32,13 @@ implementation:
       print("=== CNN DATA PREPROCESSING ===")
       print(f"Data path: {sys.argv[1]}")
       print(f"Dataset name: {sys.argv[2]}")
-      print(f"Output file: {sys.argv[3]}")
+      print(f"Batch size: {sys.argv[3]}")
+      print(f"Output file: {sys.argv[4]}")
       
       output_path = os.path.join(sys.argv[1], 'preprocessed')
       os.makedirs(output_path, exist_ok=True)
       
-      with open(sys.argv[3], 'w') as f:
+      with open(sys.argv[4], 'w') as f:
           f.write(output_path)
           
       print(f"Created output path: {output_path}")
@@ -44,5 +49,7 @@ implementation:
     - {inputValue: data_path}
     - --dataset_name
     - {inputValue: dataset_name}
+    - --batch_size
+    - {inputValue: batch_size}
     - --output_path  
     - {outputPath: output_path}
