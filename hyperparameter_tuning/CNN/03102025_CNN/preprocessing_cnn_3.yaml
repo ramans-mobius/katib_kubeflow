@@ -9,7 +9,6 @@ inputs:
   - name: dataset_name
     type: String
     description: Name of the dataset
-    default: ""
 
 outputs:
   - name: output_path
