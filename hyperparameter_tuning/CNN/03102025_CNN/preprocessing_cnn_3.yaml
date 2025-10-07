@@ -1,25 +1,15 @@
-name: CNN Data Preprocessing
-description: Universal data preprocessing for CNN models
+name: Test Preprocessing
+description: Test brick
 
 inputs:
   - name: data_path
     type: String
-    description: Path to raw data
-    
-  - name: dataset_name
-    type: String
-    description: Name of the dataset
-    default: ""
-    
-  - name: batch_size
-    type: Integer
-    description: Batch size for data loaders
-    default: 64
+    description: Path to data
 
 outputs:
-  - name: processed_data_path
+  - name: output_path
     type: string
-    description: Path to processed data
+    description: Output path
 
 implementation:
   container:
@@ -31,39 +21,21 @@ implementation:
     - |
       import os
       import sys
-      import argparse
-      from pathlib import Path
+      print("=== TEST PREPROCESSING ===")
+      print(f"Data path: {sys.argv[1]}")
+      print(f"Output file: {sys.argv[2]}")
       
-      print("=== CNN DATA PREPROCESSING ===")
+      output_path = os.path.join(sys.argv[1], 'processed')
+      os.makedirs(output_path, exist_ok=True)
       
-      parser = argparse.ArgumentParser()
-      parser.add_argument("--data_path", type=str, required=True)
-      parser.add_argument("--dataset_name", type=str, required=True)
-      parser.add_argument("--batch_size", type=int, required=True)
-      parser.add_argument("--processed_data_path", type=str, required=True)
-      args = parser.parse_args()
-      
-      print(f"Data path: {args.data_path}")
-      print(f"Dataset name: {args.dataset_name}")
-      print(f"Batch size: {args.batch_size}")
-      
-      # Create output directory
-      output_path = os.path.join(args.data_path, 'preprocessed')
-      Path(output_path).mkdir(parents=True, exist_ok=True)
-      
-      # Write output
-      with open(args.processed_data_path, 'w') as f:
+      with open(sys.argv[2], 'w') as f:
           f.write(output_path)
-      
+          
       print(f"Created output path: {output_path}")
-      print("=== PREPROCESSING COMPLETED ===")
+      print("=== COMPLETED ===")
     
     args:
     - --data_path
     - {inputValue: data_path}
-    - --dataset_name
-    - {inputValue: dataset_name}
-    - --batch_size
-    - {inputValue: batch_size}
-    - --processed_data_path
-    - {outputPath: processed_data_path}
+    - --output_path  
+    - {outputPath: output_path}
