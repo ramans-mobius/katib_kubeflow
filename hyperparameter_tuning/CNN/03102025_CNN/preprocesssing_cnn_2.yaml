@@ -1,53 +1,25 @@
-name: Simple Data Preprocessing
-description: Basic data preprocessing for testing
+name: Test Preprocessing
+description: Test brick
 
 inputs:
   - name: data_path
     type: String
     description: Path to data
-    
-  - name: batch_size
-    type: Integer
-    description: Batch size
-    default: 32
 
 outputs:
-  - name: processed_data_path
+  - name: output_path
     type: string
-    description: Path to processed data
+    description: Output path
 
 implementation:
   container:
     image: python:3.9
     command:
-      - python3
-      - -c
-      - |
-        import os
-        import argparse
-
-        print("=== SIMPLE PREPROCESSING ===")
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--data_path")
-        parser.add_argument("--batch_size")
-        parser.add_argument("--processed_data_path")
-        args = parser.parse_args()
-
-        print(f"Data path: {args.data_path}")
-        print(f"Batch size: {args.batch_size}")
-
-        output_path = os.path.join(args.data_path, 'processed')
-        os.makedirs(output_path, exist_ok=True)
-
-        with open(args.processed_data_path, 'w') as f:
-            f.write(output_path)
-
-        print(f"Output path: {output_path}")
-        print("=== COMPLETED ===")
+    - echo
+    - "Hello World"
+    
     args:
-      - --data_path
-      - {inputValue: data_path}
-      - --batch_size
-      - {inputValue: batch_size}
-      - --processed_data_path
-      - {outputPath: processed_data_path}
+    - --data_path
+    - {inputValue: data_path}
+    - --output_path  
+    - {outputPath: output_path}
