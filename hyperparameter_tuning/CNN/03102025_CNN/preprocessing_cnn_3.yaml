@@ -1,4 +1,4 @@
-name: 3 CNN Data Preprocessing
+name: 4 CNN Data Preprocessing
 description: Universal data preprocessing for CNN models
 
 inputs:
@@ -60,6 +60,38 @@ implementation:
       
       print(f"Batch size from config: {batch_size}")
       print(f"Validation split from config: {validation_split}")
+      
+      # Add dataset structure detection
+      def detect_dataset_structure(data_path):
+          print(f"Scanning dataset structure in: {data_path}")
+          
+          if not os.path.exists(data_path):
+              raise ValueError(f"Data path does not exist: {data_path}")
+          
+          structures = {
+              'imagefolder_split': os.path.exists(os.path.join(data_path, 'train')) and 
+                                  os.path.exists(os.path.join(data_path, 'test')),
+              'imagefolder_train_only': os.path.exists(os.path.join(data_path, 'train')) and 
+                                       not os.path.exists(os.path.join(data_path, 'test')),
+              'imagefolder_flat': any(os.path.isdir(os.path.join(data_path, d)) for d in os.listdir(data_path) if not d.startswith('.')),
+              'single_directory': any(f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')) 
+                                    for f in os.listdir(data_path))
+          }
+          
+          if structures['imagefolder_split']:
+              return 'imagefolder_split'
+          elif structures['imagefolder_train_only']:
+              return 'imagefolder_train_only'
+          elif structures['imagefolder_flat']:
+              return 'imagefolder_flat'
+          elif structures['single_directory']:
+              return 'single_directory'
+          else:
+              return 'unknown'
+      
+      # Detect structure
+      structure = detect_dataset_structure(data_path)
+      print(f"Detected dataset structure: {structure}")
       
       # Create output directory
       output_path = os.path.join(data_path, 'preprocessed')
