@@ -1,20 +1,15 @@
-name: CNN Data Preprocessing
-description: Universal data preprocessing for CNN models
+name: Test Preprocessing
+description: Test brick
 
 inputs:
   - name: data_path
     type: String
-    description: Path to raw data
-    
-  - name: dataset_name
-    type: String
-    description: Name of the dataset
-    default: ""
+    description: Path to data
 
 outputs:
-  - name: processed_data_path
+  - name: output_path
     type: string
-    description: Path to processed data
+    description: Output path
 
 implementation:
   container:
@@ -26,31 +21,21 @@ implementation:
     - |
       import os
       import sys
+      print("=== TEST PREPROCESSING ===")
+      print(f"Data path: {sys.argv[1]}")
+      print(f"Output file: {sys.argv[2]}")
       
-      print("=== CNN DATA PREPROCESSING ===")
-      
-      data_path = sys.argv[1]
-      dataset_name = sys.argv[2]
-      output_file = sys.argv[3]
-      
-      print(f"Data path: {data_path}")
-      print(f"Dataset name: {dataset_name}")
-      
-      # Create output directory
-      output_path = os.path.join(data_path, 'preprocessed')
+      output_path = os.path.join(sys.argv[1], 'processed')
       os.makedirs(output_path, exist_ok=True)
       
-      # Write output
-      with open(output_file, 'w') as f:
+      with open(sys.argv[2], 'w') as f:
           f.write(output_path)
-      
+          
       print(f"Created output path: {output_path}")
-      print("=== PREPROCESSING COMPLETED ===")
+      print("=== COMPLETED ===")
     
     args:
     - --data_path
     - {inputValue: data_path}
-    - --dataset_name
-    - {inputValue: dataset_name}
-    - --processed_data_path
-    - {outputPath: processed_data_path}
+    - --output_path  
+    - {outputPath: output_path}
