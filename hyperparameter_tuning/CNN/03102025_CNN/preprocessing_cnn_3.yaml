@@ -1,10 +1,15 @@
 name: CNN Data Preprocessing
-description: Test brick
+description: Universal data preprocessing for CNN models
 
 inputs:
   - name: data_path
     type: String
     description: Path to data
+    
+  - name: dataset_name
+    type: String
+    description: Name of the dataset
+    default: ""
 
 outputs:
   - name: output_path
@@ -21,14 +26,15 @@ implementation:
     - |
       import os
       import sys
-      print("=== TEST PREPROCESSING ===")
+      print("=== CNN DATA PREPROCESSING ===")
       print(f"Data path: {sys.argv[1]}")
-      print(f"Output file: {sys.argv[2]}")
+      print(f"Dataset name: {sys.argv[2]}")
+      print(f"Output file: {sys.argv[3]}")
       
-      output_path = os.path.join(sys.argv[1], 'processed')
+      output_path = os.path.join(sys.argv[1], 'preprocessed')
       os.makedirs(output_path, exist_ok=True)
       
-      with open(sys.argv[2], 'w') as f:
+      with open(sys.argv[3], 'w') as f:
           f.write(output_path)
           
       print(f"Created output path: {output_path}")
@@ -37,5 +43,7 @@ implementation:
     args:
     - --data_path
     - {inputValue: data_path}
+    - --dataset_name
+    - {inputValue: dataset_name}
     - --output_path  
     - {outputPath: output_path}
