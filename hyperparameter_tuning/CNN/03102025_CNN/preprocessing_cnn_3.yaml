@@ -1,4 +1,4 @@
-name: 2 CNN Data Preprocessing
+name: 3 CNN Data Preprocessing
 description: Universal data preprocessing for CNN models
 
 inputs:
@@ -15,9 +15,17 @@ inputs:
     description: JSON string with model configuration
 
 outputs:
-  - name: output_path
+  - name: processed_data_path
     type: string
-    description: Output path
+    description: Path to processed data
+
+  - name: num_classes
+    type: Integer
+    description: Number of classes detected
+
+  - name: input_shape
+    type: string
+    description: Input shape as "channels,height,width"
 
 implementation:
   container:
@@ -30,29 +38,51 @@ implementation:
       import os
       import sys
       import json
+      import pickle
+      from pathlib import Path
       
       print("=== CNN DATA PREPROCESSING ===")
-      print(f"Data path: {sys.argv[1]}")
-      print(f"Dataset name: {sys.argv[2]}")
-      print(f"Model config: {sys.argv[3]}")
-      print(f"Output file: {sys.argv[4]}")
+      
+      data_path = sys.argv[1]
+      dataset_name = sys.argv[2]
+      model_config_str = sys.argv[3]
+      processed_data_file = sys.argv[4]
+      num_classes_file = sys.argv[5]
+      input_shape_file = sys.argv[6]
+      
+      print(f"Data path: {data_path}")
+      print(f"Dataset name: {dataset_name}")
       
       # Parse model config
-      config = json.loads(sys.argv[3])
+      config = json.loads(model_config_str)
       batch_size = config.get('batch_size', 64)
       validation_split = config.get('validation_split', 0.2)
       
       print(f"Batch size from config: {batch_size}")
       print(f"Validation split from config: {validation_split}")
       
-      output_path = os.path.join(sys.argv[1], 'preprocessed')
-      os.makedirs(output_path, exist_ok=True)
+      # Create output directory
+      output_path = os.path.join(data_path, 'preprocessed')
+      Path(output_path).mkdir(parents=True, exist_ok=True)
       
-      with open(sys.argv[4], 'w') as f:
+      # For now, use dummy values - we'll add real preprocessing next
+      num_classes = 10
+      input_shape = "3,224,224"
+      
+      # Write outputs
+      with open(processed_data_file, 'w') as f:
           f.write(output_path)
-          
+      
+      with open(num_classes_file, 'w') as f:
+          f.write(str(num_classes))
+      
+      with open(input_shape_file, 'w') as f:
+          f.write(input_shape)
+      
       print(f"Created output path: {output_path}")
-      print("=== COMPLETED ===")
+      print(f"Number of classes: {num_classes}")
+      print(f"Input shape: {input_shape}")
+      print("=== PREPROCESSING COMPLETED ===")
     
     args:
     - --data_path
@@ -61,5 +91,9 @@ implementation:
     - {inputValue: dataset_name}
     - --model_config
     - {inputValue: model_config}
-    - --output_path  
-    - {outputPath: output_path}
+    - --processed_data_path
+    - {outputPath: processed_data_path}
+    - --num_classes
+    - {outputPath: num_classes}
+    - --input_shape
+    - {outputPath: input_shape}
