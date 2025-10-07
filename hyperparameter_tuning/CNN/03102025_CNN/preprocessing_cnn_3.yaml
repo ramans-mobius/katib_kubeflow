@@ -1,14 +1,14 @@
-name: CNN Data Preprocessing
-description: Universal data preprocessing for CNN models
+name: saay CNN Data Preprocessing
+description: Universal data preprocessing for CNN models - handles any dataset structure
 
 inputs:
   - name: data_path
     type: String
-    description: Path to data
+    description: Path to raw data
     
   - name: dataset_name
     type: String
-    description: Name of the dataset
+    description: Name of the dataset (for torchvision datasets)
     
   - name: model_config
     type: String
@@ -17,7 +17,7 @@ inputs:
 outputs:
   - name: processed_data_path
     type: string
-    description: Path to processed data
+    description: Path to processed data and data loaders
 
   - name: num_classes
     type: Integer
@@ -47,7 +47,7 @@ implementation:
       import numpy as np
       from PIL import Image
       
-      print("=== CNN DATA PREPROCESSING ===")
+      print("=== UNIVERSAL CNN DATA PREPROCESSING ===")
       
       data_path = sys.argv[1]
       dataset_name = sys.argv[2]
@@ -177,13 +177,16 @@ implementation:
           with open(num_classes_file, 'w') as f: f.write(str(num_classes))
           with open(input_shape_file, 'w') as f: f.write(input_shape_str)
           
-          print(f"Output path: {output_path}")
-          print(f"Number of classes: {num_classes}")
-          print(f"Input shape: {input_shape_str}")
-          print("=== PREPROCESSING COMPLETED ===")
+          print(f"✓ Output path: {output_path}")
+          print(f"✓ Number of classes: {num_classes}")
+          print(f"✓ Input shape: {input_shape_str}")
+          print(f"✓ Train batches: {len(train_loader)}")
+          print(f"✓ Val batches: {len(val_loader)}")
+          print(f"✓ Test batches: {len(test_loader)}")
+          print("🎉 PREPROCESSING COMPLETED SUCCESSFULLY!")
           
       except Exception as e:
-          print(f"Error during preprocessing: {e}")
+          print(f"❌ PREPROCESSING FAILED: {e}")
           import traceback
           traceback.print_exc()
           sys.exit(1)
