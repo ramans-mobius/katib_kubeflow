@@ -10,21 +10,6 @@ inputs:
     type: String
     description: Name of the dataset
     default: ""
-    
-  - name: batch_size
-    type: Integer
-    description: Batch size for data loaders
-    default: 64
-    
-  - name: validation_split
-    type: Float
-    description: Fraction of data to use for validation
-    default: 0.2
-    
-  - name: input_size
-    type: String
-    description: Input image size as "width,height"
-    default: "224,224"
 
 outputs:
   - name: processed_data_path
@@ -46,16 +31,10 @@ implementation:
       
       data_path = sys.argv[1]
       dataset_name = sys.argv[2]
-      batch_size = sys.argv[3]
-      validation_split = sys.argv[4]
-      input_size = sys.argv[5]
-      output_file = sys.argv[6]
+      output_file = sys.argv[3]
       
       print(f"Data path: {data_path}")
       print(f"Dataset name: {dataset_name}")
-      print(f"Batch size: {batch_size}")
-      print(f"Validation split: {validation_split}")
-      print(f"Input size: {input_size}")
       
       # Create output directory
       output_path = os.path.join(data_path, 'preprocessed')
@@ -73,11 +52,5 @@ implementation:
     - {inputValue: data_path}
     - --dataset_name
     - {inputValue: dataset_name}
-    - --batch_size
-    - {inputValue: batch_size}
-    - --validation_split
-    - {inputValue: validation_split}
-    - --input_size
-    - {inputValue: input_size}
     - --processed_data_path
     - {outputPath: processed_data_path}
