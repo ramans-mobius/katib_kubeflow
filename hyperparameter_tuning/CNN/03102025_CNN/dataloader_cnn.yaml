@@ -19,7 +19,7 @@ outputs:
 
 implementation:
   container:
-    image: python 3.9
+    image: python:3.9
     command:
       - python3
       - -u
