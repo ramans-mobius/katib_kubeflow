@@ -49,7 +49,6 @@ implementation:
       - |
         import os
         import sys
-        import json
         import pickle
         import argparse
         from pathlib import Path
@@ -247,7 +246,7 @@ implementation:
             """Load any dataset regardless of structure"""
             
             # Try torchvision datasets first
-            if dataset_name:
+            if dataset_name and dataset_name != "":
                 torchvision_dataset = load_torchvision_dataset(dataset_name, data_path, is_training, input_size)
                 if torchvision_dataset is not None:
                     return torchvision_dataset
@@ -302,7 +301,107 @@ implementation:
                 raise ValueError(f"Unsupported dataset structure: {structure}")
         
         # ============================================================
-        # MAIN PREPROCESSING
+        # MAIN PREPROCESSING FUNCTION
+        # ============================================================
+        def preprocess_data(dataset_name, data_path, batch_size=64, validation_split=0.2, input_size=(224, 224)):
+            """
+            Universal preprocessing for ANY dataset
+            Automatically detects structure and number of classes
+            """
+            print(f"=== UNIVERSAL DATASET PREPROCESSING ===")
+            print(f"Dataset: {dataset_name}")
+            print(f"Data path: {data_path}")
+            
+            # Load data info if exists
+            data_info_path = os.path.join(data_path, 'data_info.pkl')
+            if os.path.exists(data_info_path):
+                with open(data_info_path, 'rb') as f:
+                    data_info = pickle.load(f)
+                print(f"Loaded existing data info")
+            else:
+                # Create new data info
+                data_info = {
+                    'dataset_name': dataset_name,
+                    'data_path': data_path,
+                    'original_structure': detect_dataset_structure(data_path)
+                }
+                print(f"Created new data info")
+            
+            # Load datasets - pass dataset_name for torchvision datasets
+            print("Loading training data...")
+            train_dataset = load_any_dataset(data_path, dataset_name=dataset_name, 
+                                            is_training=True, input_size=input_size)
+            
+            print("Loading test data...")
+            test_dataset = load_any_dataset(data_path, dataset_name=dataset_name,
+                                           is_training=False, input_size=input_size)
+            
+            # Auto-detect number of classes
+            num_classes = get_num_classes_from_dataset(train_dataset)
+            data_info['num_classes'] = num_classes
+            data_info['dataset_structure'] = detect_dataset_structure(data_path)
+            
+            # Handle case where train and test are the same (no separate test set)
+            if len(train_dataset) == len(test_dataset):
+                print("No separate test set found, splitting training data...")
+                total_size = len(train_dataset)
+                test_size = int(0.2 * total_size)
+                train_size = total_size - test_size
+                train_dataset, test_dataset = random_split(train_dataset, [train_size, test_size])
+            
+            # Split train into train and validation
+            val_size = int(len(train_dataset) * validation_split)
+            train_size = len(train_dataset) - val_size
+            
+            print(f"Dataset splits:")
+            print(f"  Training: {train_size} samples")
+            print(f"  Validation: {val_size} samples")
+            print(f"  Test: {len(test_dataset)} samples")
+            print(f"  Classes: {num_classes}")
+            
+            train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
+            
+            # Create data loaders
+            train_loader = DataLoader(train_subset, batch_size=batch_size, 
+                                     shuffle=True, num_workers=2)
+            val_loader = DataLoader(val_subset, batch_size=batch_size,
+                                   shuffle=False, num_workers=2)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size,
+                                    shuffle=False, num_workers=2)
+            
+            # Save processed data
+            output_path = os.path.join(data_path, 'preprocessed')
+            Path(output_path).mkdir(parents=True, exist_ok=True)
+            
+            torch.save(train_loader, os.path.join(output_path, 'train_loader.pth'))
+            torch.save(val_loader, os.path.join(output_path, 'val_loader.pth'))
+            torch.save(test_loader, os.path.join(output_path, 'test_loader.pth'))
+            
+            # Update data info
+            data_info['batch_size'] = batch_size
+            data_info['input_shape'] = next(iter(train_loader))[0].shape[1:]
+            data_info['preprocessed_path'] = output_path
+            data_info['input_size'] = input_size
+            
+            # Save updated data info
+            with open(os.path.join(output_path, 'data_info.pkl'), 'wb') as f:
+                pickle.dump(data_info, f)
+            
+            print(f"UNIVERSAL PREPROCESSING COMPLETED!")
+            print(f"   Dataset: {dataset_name}")
+            print(f"   Structure: {data_info['dataset_structure']}")
+            print(f"   Classes: {num_classes} (auto-detected)")
+            print(f"   Input shape: {data_info['input_shape']}")
+            print(f"   Input size: {input_size}")
+            print(f"   Train batches: {len(train_loader)}")
+            print(f"   Val batches: {len(val_loader)}")
+            print(f"   Test batches: {len(test_loader)}")
+            print(f"   Output path: {output_path}")
+            
+            return data_info
+        
+        # ============================================================
+        # ARGUMENT PARSING AND EXECUTION
         # ============================================================
         parser = argparse.ArgumentParser()
         parser.add_argument("--data_path", type=str, required=True)
@@ -327,90 +426,31 @@ implementation:
             input_size = tuple(map(int, args.input_size.split(',')))
             print(f"Parsed input size: {input_size}")
             
-            # Load datasets
-            print("\nLoading training data...")
-            train_dataset = load_any_dataset(args.data_path, dataset_name=args.dataset_name, 
-                                            is_training=True, input_size=input_size)
-            
-            print("\nLoading test data...")
-            test_dataset = load_any_dataset(args.data_path, dataset_name=args.dataset_name,
-                                           is_training=False, input_size=input_size)
-            
-            # Auto-detect number of classes
-            num_classes = get_num_classes_from_dataset(train_dataset)
-            
-            # Handle case where train and test are the same
-            if len(train_dataset) == len(test_dataset):
-                print("\nNo separate test set found, splitting training data...")
-                total_size = len(train_dataset)
-                test_size = int(0.2 * total_size)
-                train_size = total_size - test_size
-                train_dataset, test_dataset = random_split(train_dataset, [train_size, test_size])
-            
-            # Split train into train and validation
-            val_size = int(len(train_dataset) * args.validation_split)
-            train_size = len(train_dataset) - val_size
-            
-            print(f"\nDataset splits:")
-            print(f"  Training: {train_size} samples")
-            print(f"  Validation: {val_size} samples")
-            print(f"  Test: {len(test_dataset)} samples")
-            print(f"  Classes: {num_classes}")
-            
-            train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
-            
-            # Create data loaders
-            train_loader = DataLoader(train_subset, batch_size=args.batch_size, 
-                                     shuffle=True, num_workers=2)
-            val_loader = DataLoader(val_subset, batch_size=args.batch_size,
-                                   shuffle=False, num_workers=2)
-            test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                                    shuffle=False, num_workers=2)
-            
-            # Get input shape from sample batch
-            sample_batch, _ = next(iter(train_loader))
-            input_shape = sample_batch.shape[1:]
-            input_shape_str = f"{input_shape[0]},{input_shape[1]},{input_shape[2]}"
-            
-            # Save processed data
-            output_path = os.path.join(args.data_path, 'preprocessed')
-            Path(output_path).mkdir(parents=True, exist_ok=True)
-            
-            torch.save(train_loader, os.path.join(output_path, 'train_loader.pth'))
-            torch.save(val_loader, os.path.join(output_path, 'val_loader.pth'))
-            torch.save(test_loader, os.path.join(output_path, 'test_loader.pth'))
-            
-            # Save data info
-            data_info = {
-                'dataset_name': args.dataset_name,
-                'data_path': args.data_path,
-                'num_classes': num_classes,
-                'input_shape': input_shape,
-                'batch_size': args.batch_size,
-                'input_size': input_size,
-                'preprocessed_path': output_path
-            }
-            
-            with open(os.path.join(output_path, 'data_info.pkl'), 'wb') as f:
-                pickle.dump(data_info, f)
+            # Run preprocessing
+            data_info = preprocess_data(
+                dataset_name=args.dataset_name,
+                data_path=args.data_path,
+                batch_size=args.batch_size,
+                validation_split=args.validation_split,
+                input_size=input_size
+            )
             
             # Write outputs for pipeline
             with open(args.processed_data_path, 'w') as f:
-                f.write(output_path)
+                f.write(data_info['preprocessed_path'])
             
             with open(args.num_classes, 'w') as f:
-                f.write(str(num_classes))
+                f.write(str(data_info['num_classes']))
             
+            input_shape = data_info['input_shape']
+            input_shape_str = f"{input_shape[0]},{input_shape[1]},{input_shape[2]}"
             with open(args.input_shape, 'w') as f:
                 f.write(input_shape_str)
             
             print("\n=== PREPROCESSING COMPLETED ===")
-            print(f"Output path: {output_path}")
-            print(f"Number of classes: {num_classes}")
+            print(f"Output path: {data_info['preprocessed_path']}")
+            print(f"Number of classes: {data_info['num_classes']}")
             print(f"Input shape: {input_shape_str}")
-            print(f"Train batches: {len(train_loader)}")
-            print(f"Val batches: {len(val_loader)}")
-            print(f"Test batches: {len(test_loader)}")
             
         except Exception as e:
             print(f"\n=== PREPROCESSING FAILED ===")
