@@ -1,4 +1,4 @@
-name: CNN Data Preprocessing
+name: 2 CNN Data Preprocessing
 description: Universal data preprocessing for CNN models
 
 inputs:
@@ -10,17 +10,9 @@ inputs:
     type: String
     description: Name of the dataset
     
-  - name: batch_size
-    type: Integer
-    description: Batch size for data loaders
-    
-  - name: validation_split
-    type: Float
-    description: Fraction of data to use for validation
-    
-  - name: input_size
+  - name: model_config
     type: String
-    description: Input image size as "width,height"
+    description: JSON string with model configuration
 
 outputs:
   - name: output_path
@@ -37,18 +29,26 @@ implementation:
     - |
       import os
       import sys
+      import json
+      
       print("=== CNN DATA PREPROCESSING ===")
       print(f"Data path: {sys.argv[1]}")
       print(f"Dataset name: {sys.argv[2]}")
-      print(f"Batch size: {sys.argv[3]}")
-      print(f"Validation split: {sys.argv[4]}")
-      print(f"Input size: {sys.argv[5]}")
-      print(f"Output file: {sys.argv[6]}")
+      print(f"Model config: {sys.argv[3]}")
+      print(f"Output file: {sys.argv[4]}")
+      
+      # Parse model config
+      config = json.loads(sys.argv[3])
+      batch_size = config.get('batch_size', 64)
+      validation_split = config.get('validation_split', 0.2)
+      
+      print(f"Batch size from config: {batch_size}")
+      print(f"Validation split from config: {validation_split}")
       
       output_path = os.path.join(sys.argv[1], 'preprocessed')
       os.makedirs(output_path, exist_ok=True)
       
-      with open(sys.argv[6], 'w') as f:
+      with open(sys.argv[4], 'w') as f:
           f.write(output_path)
           
       print(f"Created output path: {output_path}")
@@ -59,11 +59,7 @@ implementation:
     - {inputValue: data_path}
     - --dataset_name
     - {inputValue: dataset_name}
-    - --batch_size
-    - {inputValue: batch_size}
-    - --validation_split
-    - {inputValue: validation_split}
-    - --input_size
-    - {inputValue: input_size}
+    - --model_config
+    - {inputValue: model_config}
     - --output_path  
     - {outputPath: output_path}
