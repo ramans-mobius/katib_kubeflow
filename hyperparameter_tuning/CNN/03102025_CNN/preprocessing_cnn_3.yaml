@@ -23,7 +23,7 @@ outputs:
 
 implementation:
   container:
-    image: python:3.9
+    image: nikhilv215/nesy-factory:v18
     command:
     - python3
     - -u
