@@ -1,4 +1,4 @@
-name:2 Test Preprocessing
+name: 2 Test Preprocessing
 description: Test brick
 
 inputs:
@@ -13,22 +13,25 @@ outputs:
 
 implementation:
   container:
-    image: python:3.9
+    image: nikhilv215/nesy-factory:v18
     command:
     - python3
+    - -u
     - -c
     - |
       import os
       import sys
-      print("=== SIMPLE PREPROCESSING ===")
-      data_path = sys.argv[1]
-      output_file = sys.argv[2]
-      print(f"Data path: {data_path}")
-      output_path = os.path.join(data_path, 'processed')
+      print("=== TEST PREPROCESSING ===")
+      print(f"Data path: {sys.argv[1]}")
+      print(f"Output file: {sys.argv[2]}")
+      
+      output_path = os.path.join(sys.argv[1], 'processed')
       os.makedirs(output_path, exist_ok=True)
-      with open(output_file, 'w') as f:
+      
+      with open(sys.argv[2], 'w') as f:
           f.write(output_path)
-      print(f"Output path: {output_path}")
+          
+      print(f"Created output path: {output_path}")
       print("=== COMPLETED ===")
     
     args:
