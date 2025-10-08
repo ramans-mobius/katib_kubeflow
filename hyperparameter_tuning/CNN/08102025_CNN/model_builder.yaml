@@ -1,0 +1,138 @@
+name: CNN Model Builder
+description: Builds CNN model from configuration using NeSy Factory
+
+inputs:
+  - name: model_config
+    type: String
+    description: JSON string with model configuration
+    
+  - name: input_shape
+    type: String
+    description: Input shape as "channels,height,width"
+
+outputs:
+  - name: model_path
+    type: String
+    description: Path to saved model file
+    
+  - name: model_info
+    type: String
+    description: JSON string with model information
+    
+  - name: num_parameters
+    type: Integer
+    description: Number of trainable parameters
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v18
+    command:
+    - python3
+    - -u
+    - -c
+    - |
+      import os
+      import sys
+      import json
+      import torch
+      import pickle
+      from pathlib import Path
+      
+      print("=== CNN MODEL BUILDER ===")
+      
+      model_config_str = sys.argv[1]
+      input_shape_str = sys.argv[2]
+      model_path_file = sys.argv[3]
+      model_info_file = sys.argv[4]
+      num_parameters_file = sys.argv[5]
+      
+      # Parse inputs
+      model_config = json.loads(model_config_str)
+      channels, height, width = map(int, input_shape_str.split(','))
+      
+      # Update config with actual input shape
+      model_config['input_channels'] = channels
+      model_config['input_size'] = (height, width)
+      
+      print(f"Input shape: {channels}x{height}x{width}")
+      print(f"Model config: {json.dumps(model_config, indent=2)}")
+      
+      # Add CNN factory to path
+      sys.path.insert(0, '/app/nesy_factory_cnn')
+      
+      try:
+          from nesy_factory_cnn import BaseCNN
+          
+          class ConfigurableCNN(BaseCNN):
+              def forward(self, x):
+                  for conv_block in self.conv_blocks:
+                      x = conv_block(x)
+                      x = self.pool(x)
+                  x = x.view(x.size(0), -1)
+                  x = self.classifier(x)
+                  return x
+          
+          # Build model
+          print("Building model...")
+          model = ConfigurableCNN(model_config)
+          
+          # Model information
+          model_info = {
+              'model_class': 'ConfigurableCNN',
+              'input_shape': (channels, height, width),
+              'output_dim': model_config.get('output_dim', 10),
+              'num_parameters': model.get_num_parameters(),
+              'architecture': {
+                  'num_blocks': model_config.get('num_blocks', 4),
+                  'base_channels': model_config.get('base_channels', 64),
+                  'hidden_dims': model_config.get('hidden_dims', [512, 256])
+              },
+              'training_config': {
+                  'optimizer': model_config.get('optimizer', 'adam'),
+                  'learning_rate': model_config.get('learning_rate', 0.001),
+                  'dropout_rate': model_config.get('dropout_rate', 0.5)
+              }
+          }
+          
+          # Save model
+          output_dir = Path('/tmp/model_builder_output')
+          output_dir.mkdir(exist_ok=True)
+          model_file = output_dir / 'built_model.pth'
+          
+          torch.save({
+              'model_state_dict': model.state_dict(),
+              'model_config': model_config,
+              'model_class': 'ConfigurableCNN'
+          }, str(model_file))
+          
+          # Write outputs
+          with open(model_path_file, 'w') as f:
+              f.write(str(model_file))
+          with open(model_info_file, 'w') as f:
+              json.dump(model_info, f)
+          with open(num_parameters_file, 'w') as f:
+              f.write(str(model_info['num_parameters']))
+          
+          print(f"✓ Model built successfully!")
+          print(f"✓ Parameters: {model_info['num_parameters']:,}")
+          print(f"✓ Output dim: {model_info['output_dim']}")
+          print(f"✓ Model saved to: {model_file}")
+          print("MODEL BUILDING COMPLETED SUCCESSFULLY!")
+          
+      except Exception as e:
+          print(f"MODEL BUILDING FAILED: {e}")
+          import traceback
+          traceback.print_exc()
+          sys.exit(1)
+    
+    args:
+    - --model_config
+    - {inputValue: model_config}
+    - --input_shape
+    - {inputValue: input_shape}
+    - --model_path
+    - {outputPath: model_path}
+    - --model_info
+    - {outputPath: model_info}
+    - --num_parameters
+    - {outputPath: num_parameters}
