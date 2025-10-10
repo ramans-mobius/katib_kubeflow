@@ -2,9 +2,9 @@ name: Load UI Components JSON Dataset
 description: Fetches UI components dataset from API with base64 images and prepares train/test splits.
 inputs:
   - {name: api_url, type: String, description: 'API URL to fetch JSON dataset'}
-  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
-  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)', default: '0.7'}
-  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling', default: '42'}
+  - {name: access_token, type: String, description: 'Bearer access token for API auth'}
+  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
+  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
 outputs:
   - {name: train_data, type: Dataset}
   - {name: test_data, type: Dataset}
