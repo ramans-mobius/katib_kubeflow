@@ -1,4 +1,4 @@
-name: 4 Load UI Components from CDN ZIP
+name: 5 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
