@@ -1,4 +1,4 @@
-name: 5 Load UI Components from CDN ZIP
+name: 6 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
@@ -70,8 +70,8 @@ implementation:
             try:
                 # Handle URL encoding - decode %24%24 back to $$
                 decoded_url = unquote(url)
-                logger.info(f"📦 Original URL: {url}")
-                logger.info(f"📦 Decoded URL: {decoded_url}")
+                logger.info(f"Original URL: {url}")
+                logger.info(f"Decoded URL: {decoded_url}")
                 
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -81,12 +81,12 @@ implementation:
                 response = session.get(decoded_url, headers=headers, stream=True, timeout=30)
                 response.raise_for_status()
                 
-                logger.info(f"✅ Download successful! Status: {response.status_code}, Size: {len(response.content)} bytes")
+                logger.info(f"Download successful! Status: {response.status_code}, Size: {len(response.content)} bytes")
                 
                 # Verify it's a ZIP file
                 content_type = response.headers.get('content-type', '').lower()
                 if 'zip' not in content_type and not decoded_url.endswith('.zip'):
-                    logger.warning(f"⚠️ Content-Type is {content_type}, but proceeding as ZIP")
+                    logger.warning(f"Content-Type is {content_type}, but proceeding as ZIP")
                 
                 # Extract from ZIP
                 zip_content = io.BytesIO(response.content)
@@ -94,7 +94,7 @@ implementation:
                 
                 with zipfile.ZipFile(zip_content, 'r') as zip_file:
                     file_list = zip_file.namelist()
-                    logger.info(f"📁 Found {len(file_list)} files in ZIP")
+                    logger.info(f"Found {len(file_list)} files in ZIP")
                     
                     # Count files by type
                     png_files = [f for f in file_list if f.lower().endswith('.png')]
@@ -128,33 +128,33 @@ implementation:
                                             'image_size': image.size if hasattr(image, 'size') else 'unknown'
                                         })
                                     except Exception as img_error:
-                                        logger.warning(f"⚠️ Skipping invalid image {file_path}: {img_error}")
+                                        logger.warning(f"Skipping invalid image {file_path}: {img_error}")
                                         continue
                                         
                             except Exception as e:
-                                logger.warning(f"⚠️ Error processing {file_path}: {e}")
+                                logger.warning(f"Error processing {file_path}: {e}")
                                 continue
                 
-                logger.info(f"✅ Successfully processed {len(dataset)} valid images")
+                logger.info(f"Successfully processed {len(dataset)} valid images")
                 return dataset
                 
             except zipfile.BadZipFile:
-                logger.error("❌ Downloaded file is not a valid ZIP archive")
+                logger.error("Downloaded file is not a valid ZIP archive")
                 # Save for debugging
                 with open('debug_downloaded_file.bin', 'wb') as f:
                     f.write(response.content)
-                logger.info("💾 Raw content saved as 'debug_downloaded_file.bin'")
+                logger.info("Raw content saved as 'debug_downloaded_file.bin'")
                 raise
             except Exception as e:
-                logger.error(f"❌ Error processing ZIP: {e}")
+                logger.error(f"Error processing ZIP: {e}")
                 raise
 
         # Download and extract dataset
-        print("🚀 Starting dataset download...")
+        print("Starting dataset download")
         raw_data = download_and_extract_zip(args.cdn_url)
 
         if not raw_data:
-            raise Exception("❌ No valid images found in the ZIP file")
+            raise Exception("No valid images found in the ZIP file")
 
         # Extract dataset information
         labels = [item['label'] for item in raw_data]
@@ -178,7 +178,7 @@ implementation:
             'cdn_url': args.cdn_url
         }
 
-        print(f"📊 Dataset Info:")
+        print(f"Dataset Info:")
         print(f"   Total samples: {len(raw_data)}")
         print(f"   Classes: {unique_labels}")
         print(f"   Label distribution: {dict(label_distribution)}")
@@ -188,7 +188,7 @@ implementation:
         train_size = int(args.train_split * len(raw_data))
         test_size = len(raw_data) - train_size
 
-        print(f"🔀 Splitting data: {train_size} train, {test_size} test")
+        print(f"Splitting data: {train_size} train, {test_size} test")
 
         # Split the data
         train_data, test_data = random_split(
@@ -215,7 +215,7 @@ implementation:
         with open(args.dataset_info, "wb") as f:
             pickle.dump(dataset_info, f)
 
-        print(f"✅ Dataset loading complete!")
+        print(f"Dataset loading complete!")
         print(f"   Train samples: {len(train_data_list)}")
         print(f"   Test samples: {len(test_data_list)}")
         print(f"   Classes: {unique_labels}")
