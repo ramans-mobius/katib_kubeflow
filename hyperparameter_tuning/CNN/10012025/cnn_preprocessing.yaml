@@ -1,4 +1,4 @@
-name: 3 Preprocess UI Components Dataset
+name: Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -26,7 +26,8 @@ implementation:
         set -e
         pip install torch torchvision Pillow pandas scikit-learn numpy
         
-        python3 -c "
+        # Write the Python script to a file
+        cat > preprocess_script.py << 'EOF'
         import argparse
         import os
         import pickle
@@ -115,7 +116,7 @@ implementation:
             try:
                 resnet_config = json.loads(args.resnet_config)
                 print('✅ Loaded resnet_config as JSON string')
-                print(f'   Model: {resnet_config[\"model\"][\"architecture\"]}-{resnet_config[\"model\"][\"variant\"]}')
+                print(f'   Model: {resnet_config["model"]["architecture"]}-{resnet_config["model"]["variant"]}')
             except json.JSONDecodeError as e:
                 raise ValueError(f'resnet_config must be a valid JSON string: {e}')
             
@@ -134,7 +135,7 @@ implementation:
                 dataset_info = pickle.load(f)
             
             print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
-            print(f'Classes: {dataset_info[\"classes\"]}')
+            print(f'Classes: {dataset_info["classes"]}')
             
             train_transform, val_transform = create_resnet_transforms(image_size, resnet_config)
             
@@ -201,7 +202,10 @@ implementation:
         
         if __name__ == '__main__':
             main()
-        " -- \
+        EOF
+        
+        # Run the Python script with arguments
+        python preprocess_script.py \
           --train_data "$0" \
           --test_data "$1" \
           --dataset_info "$2" \
