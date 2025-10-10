@@ -1,4 +1,4 @@
-name: Preprocess UI Components Dataset
+name: 2 Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -30,6 +30,26 @@ implementation:
         import torchvision.transforms as transforms
         from torch.utils.data import DataLoader, Dataset
         
+        print('Number of arguments received:', len(sys.argv))
+        for i, arg in enumerate(sys.argv):
+            print(f'  Argument {i}: {arg}')
+        
+        # Get args - FIXED: Check argument count first
+        if len(sys.argv) < 7:
+            raise ValueError(f'Expected 7 arguments, got {len(sys.argv)}')
+        
+        train_path = sys.argv[1]
+        test_path = sys.argv[2]
+        info_path = sys.argv[3]
+        config_str = sys.argv[4]
+        out_path = sys.argv[5]
+        weight_path = sys.argv[6]
+        
+        print('Starting preprocessing...')
+        print(f'Train path: {train_path}')
+        print(f'Test path: {test_path}')
+        print(f'Config: {config_str[:100]}...')
+        
         # Simple classes
         class CustomJSONDataset(Dataset):
             def __init__(self, data, transform=None):
@@ -43,18 +63,20 @@ implementation:
         class DataWrapper:
             def __init__(self, data_dict): self.__dict__.update(data_dict)
         
-        # Get args
-        train_path, test_path, info_path, config_str, out_path, weight_path = sys.argv[1:7]
-        
         # Load config
         config = json.loads(config_str)
         batch_size = config.get('training', {}).get('batch_size', 16)
         image_size = config.get('preprocessing', {}).get('image_size', 224)
         
+        print(f'Batch size: {batch_size}, Image size: {image_size}')
+        
         # Load data
         with open(train_path, 'rb') as f: train_data = pickle.load(f)
         with open(test_path, 'rb') as f: test_data = pickle.load(f)
         with open(info_path, 'rb') as f: dataset_info = pickle.load(f)
+        
+        print(f'Loaded {len(train_data)} train, {len(test_data)} test samples')
+        print(f'Classes: {dataset_info[\"classes\"]}')
         
         # Create transforms
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -98,11 +120,12 @@ implementation:
         }
         
         os.makedirs(os.path.dirname(weight_path) or '.', exist_ok=True)
-        with open(weight_path, 'w') as f: json.dump(weight_config, f)
+        with open(weight_path, 'w') as f: json.dump(weight_config, f, indent=2)
         
-        print('Preprocessing complete')
-        " 
-        "$0" "$1" "$2" "$3" "$4" "$5"
+        print('Preprocessing complete!')
+        print(f'Output saved to: {out_path}')
+        print(f'Config saved to: {weight_path}')
+        " "$0" "$1" "$2" "$3" "$4" "$5"
     args:
       - {inputPath: train_data}
       - {inputPath: test_data}
