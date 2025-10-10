@@ -1,0 +1,215 @@
+name: Preprocess UI Components Dataset
+description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
+inputs:
+  - name: train_data
+    type: Dataset
+  - name: test_data
+    type: Dataset
+  - name: dataset_info
+    type: DatasetInfo
+  - name: resnet_config
+    type: String
+    description: 'ResNet configuration as JSON string'
+  - name: image_size
+    type: Integer
+    default: '224'
+    description: 'Target image size for ResNet'
+  - name: batch_size
+    type: Integer
+    default: '16'
+    description: 'Batch size for data loaders'
+outputs:
+  - name: processed_data_pickle
+    type: Dataset
+  - name: weight_out
+    type: String
+    description: "ResNet preprocessing config as JSON string"
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        pip install torch torchvision Pillow pandas scikit-learn numpy
+        
+        python3 -c "
+        import argparse
+        import os
+        import pickle
+        import json
+        import base64
+        import io
+        import numpy as np
+        from PIL import Image
+        import torch
+        import torchvision.transforms as transforms
+        from torch.utils.data import DataLoader, Dataset
+        
+        class CustomJSONDataset(Dataset):
+            def __init__(self, data, transform=None):
+                self.data = data
+                self.transform = transform
+                
+            def __len__(self):
+                return len(self.data)
+            
+            def __getitem__(self, idx):
+                item = self.data[idx]
+                image_data = base64.b64decode(item['image_data'])
+                image = Image.open(io.BytesIO(image_data)).convert('RGB')
+                if self.transform:
+                    image = self.transform(image)
+                label = item['label']
+                return image, label
+        
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
+        
+        def create_resnet_transforms(image_size=224, config=None):
+            if config and 'preprocessing' in config and 'normalization' in config['preprocessing']:
+                norm_config = config['preprocessing']['normalization']
+                normalize = transforms.Normalize(
+                    mean=norm_config.get('mean', [0.485, 0.456, 0.406]),
+                    std=norm_config.get('std', [0.229, 0.224, 0.225])
+                )
+            else:
+                normalize = transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+            
+            train_augmentation = config.get('preprocessing', {}).get('train_transforms', {}) if config else {}
+            
+            train_transform = transforms.Compose([
+                transforms.Resize((image_size + 20, image_size + 20)),
+                transforms.RandomCrop(image_size),
+                transforms.RandomHorizontalFlip(p=train_augmentation.get('random_horizontal_flip', 0.5)),
+                transforms.RandomRotation(degrees=train_augmentation.get('random_rotation', 15)),
+                transforms.ColorJitter(
+                    brightness=train_augmentation.get('brightness', 0.3),
+                    contrast=train_augmentation.get('contrast', 0.3),
+                    saturation=train_augmentation.get('saturation', 0.3),
+                    hue=train_augmentation.get('hue', 0.1)
+                ),
+                transforms.ToTensor(),
+                normalize
+            ])
+            
+            val_transform = transforms.Compose([
+                transforms.Resize((image_size, image_size)),
+                transforms.CenterCrop(image_size),
+                transforms.ToTensor(),
+                normalize
+            ])
+            
+            return train_transform, val_transform
+        
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--train_data', type=str, required=True)
+            parser.add_argument('--test_data', type=str, required=True)
+            parser.add_argument('--dataset_info', type=str, required=True)
+            parser.add_argument('--resnet_config', type=str, required=True)
+            parser.add_argument('--image_size', type=int, default=224)
+            parser.add_argument('--batch_size', type=int, default=16)
+            parser.add_argument('--processed_data_pickle', type=str, required=True)
+            parser.add_argument('--weight_out', type=str, required=True)
+            args = parser.parse_args()
+            
+            print('=== RESNET PREPROCESSING STARTED ===')
+            
+            with open(args.resnet_config, 'r') as f:
+                resnet_config = json.load(f)
+            
+            with open(args.train_data, 'rb') as f:
+                train_data = pickle.load(f)
+            with open(args.test_data, 'rb') as f:
+                test_data = pickle.load(f)
+            with open(args.dataset_info, 'rb') as f:
+                dataset_info = pickle.load(f)
+            
+            print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
+            
+            train_transform, val_transform = create_resnet_transforms(args.image_size, resnet_config)
+            
+            train_dataset = CustomJSONDataset(train_data, transform=train_transform)
+            test_dataset = CustomJSONDataset(test_data, transform=val_transform)
+            
+            label_to_idx = dataset_info['label_to_idx']
+            
+            class LabeledDataset(Dataset):
+                def __init__(self, dataset, label_to_idx):
+                    self.dataset = dataset
+                    self.label_to_idx = label_to_idx
+                
+                def __len__(self):
+                    return len(self.dataset)
+                
+                def __getitem__(self, idx):
+                    image, label_str = self.dataset[idx]
+                    label_idx = self.label_to_idx[label_str]
+                    return image, label_idx
+            
+            train_labeled = LabeledDataset(train_dataset, label_to_idx)
+            test_labeled = LabeledDataset(test_dataset, label_to_idx)
+            
+            train_loader = DataLoader(train_labeled, batch_size=args.batch_size, shuffle=True, num_workers=0)
+            test_loader = DataLoader(test_labeled, batch_size=args.batch_size, shuffle=False, num_workers=0)
+            
+            data_dict = {
+                'train_loader': train_loader,
+                'test_loader': test_loader,
+                'num_classes': len(dataset_info['classes']),
+                'class_names': dataset_info['classes'],
+                'label_to_idx': label_to_idx,
+                'idx_to_label': dataset_info['idx_to_label'],
+                'image_size': args.image_size,
+                'batch_size': args.batch_size,
+                'dataset_info': dataset_info,
+                'preprocessing_config': resnet_config.get('preprocessing', {})
+            }
+            
+            data_wrapper = DataWrapper(data_dict)
+            
+            os.makedirs(os.path.dirname(args.processed_data_pickle) or '.', exist_ok=True)
+            with open(args.processed_data_pickle, 'wb') as f:
+                pickle.dump(data_wrapper, f)
+            
+            weight_config = {
+                'preprocessing_complete': True,
+                'image_size': args.image_size,
+                'batch_size': args.batch_size,
+                'num_classes': len(dataset_info['classes']),
+                'classes': dataset_info['classes'],
+                'original_config': resnet_config
+            }
+            
+            os.makedirs(os.path.dirname(args.weight_out) or '.', exist_ok=True)
+            with open(args.weight_out, 'w') as f:
+                json.dump(weight_config, f, indent=2)
+            
+            print('✅ Preprocessing complete!')
+        
+        if __name__ == '__main__':
+            main()
+        " -- \
+          --train_data "$0" \
+          --test_data "$1" \
+          --dataset_info "$2" \
+          --resnet_config "$3" \
+          --image_size "$4" \
+          --batch_size "$5" \
+          --processed_data_pickle "$6" \
+          --weight_out "$7"
+    args:
+      - {inputPath: train_data}
+      - {inputPath: test_data}
+      - {inputPath: dataset_info}
+      - {inputPath: resnet_config}
+      - {inputValue: image_size}
+      - {inputValue: batch_size}
+      - {outputPath: processed_data_pickle}
+      - {outputPath: weight_out}
