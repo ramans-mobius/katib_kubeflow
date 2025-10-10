@@ -1,4 +1,4 @@
-name: 2 Preprocess UI Components Dataset
+name: saay Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -26,14 +26,15 @@ implementation:
         set -e
         pip install torch torchvision Pillow pandas scikit-learn numpy
         
-        # Create a simple Python script
-        cat > /tmp/preprocess.py << "ENDOFFILE"
+        # Write the Python script to a file
+        cat > preprocess_script.py << 'EOF'
         import argparse
         import os
         import pickle
         import json
         import base64
         import io
+        import numpy as np
         from PIL import Image
         import torch
         import torchvision.transforms as transforms
@@ -109,11 +110,22 @@ implementation:
             parser.add_argument('--weight_out', type=str, required=True)
             args = parser.parse_args()
             
-            print('Starting preprocessing...')
+            print('=== RESNET PREPROCESSING STARTED ===')
             
-            model_config = json.loads(args.model_config)
+            # Parse model_config as JSON string directly
+            try:
+                model_config = json.loads(args.model_config)
+                print('✅ Loaded model_config as JSON string')
+                print(f'   Model: {model_config["model"]["architecture"]}-{model_config["model"]["variant"]}')
+            except json.JSONDecodeError as e:
+                raise ValueError(f'model_config must be a valid JSON string: {e}')
+            
+            # Extract batch_size and image_size from config
             batch_size = model_config.get('training', {}).get('batch_size', 16)
             image_size = model_config.get('preprocessing', {}).get('image_size', 224)
+            
+            print(f'   Batch size: {batch_size}')
+            print(f'   Image size: {image_size}')
             
             with open(args.train_data, 'rb') as f:
                 train_data = pickle.load(f)
@@ -121,6 +133,9 @@ implementation:
                 test_data = pickle.load(f)
             with open(args.dataset_info, 'rb') as f:
                 dataset_info = pickle.load(f)
+            
+            print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
+            print(f'Classes: {dataset_info["classes"]}')
             
             train_transform, val_transform = create_resnet_transforms(image_size, model_config)
             
@@ -180,14 +195,17 @@ implementation:
             with open(args.weight_out, 'w') as f:
                 json.dump(weight_config, f, indent=2)
             
-            print('Preprocessing complete!')
+            print('✅ Preprocessing complete!')
+            print(f'   Train loader: {len(train_loader)} batches')
+            print(f'   Test loader: {len(test_loader)} batches')
+            print(f'   Output saved to: {args.processed_data_pickle}')
         
         if __name__ == '__main__':
             main()
-        ENDOFFILE
+        EOF
         
         # Run the Python script with arguments
-        python /tmp/preprocess.py \
+        python preprocess_script.py \
           --train_data "$0" \
           --test_data "$1" \
           --dataset_info "$2" \
