@@ -1,9 +1,9 @@
-name: 3 Load UI Components from CDN ZIP
+name: 4 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
-  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)', default: '0.7'}
-  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling', default: '42'}
+  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
+  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
 outputs:
   - {name: train_data, type: Dataset}
   - {name: test_data, type: Dataset}
