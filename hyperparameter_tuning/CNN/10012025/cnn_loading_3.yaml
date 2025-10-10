@@ -1,4 +1,4 @@
-name: 9 Load UI Components from CDN ZIP
+name: 10 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
@@ -15,45 +15,31 @@ implementation:
       - sh
       - -c
       - |
-        python3 -c "
-        import argparse
-        import os
-        import pickle
-        import json
-        import base64
-        import io
-        import zipfile
+        python -c "
+        import sys, os, pickle, json, base64, io, zipfile
         from collections import Counter
         from torch.utils.data import random_split
         import torch
         import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
-        import logging
         from urllib.parse import unquote
-
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--cdn_url', type=str, required=True)
-        parser.add_argument('--train_split', type=float, default=0.7)
-        parser.add_argument('--shuffle_seed', type=int, default=42)
-        parser.add_argument('--train_data', type=str, required=True)
-        parser.add_argument('--test_data', type=str, required=True)
-        parser.add_argument('--dataset_info', type=str, required=True)
-        args = parser.parse_args()
-
-        # Setup session with retry logic
-        session = requests.Session()
-        retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retries)
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-
+        
+        # Get args directly from command line
+        cdn_url = sys.argv[1]
+        train_split = float(sys.argv[2])
+        shuffle_seed = int(sys.argv[3])
+        train_data_path = sys.argv[4]
+        test_data_path = sys.argv[5]
+        dataset_info_path = sys.argv[6]
+        
+        print('Starting dataset download...')
+        
+        # Download and extract function
         def download_and_extract_zip(url):
             decoded_url = unquote(url)
             print(f'Downloading from: {decoded_url}')
             
             headers = {'User-Agent': 'Mozilla/5.0'}
-            response = session.get(decoded_url, headers=headers, timeout=30)
+            response = requests.get(decoded_url, headers=headers, timeout=30)
             response.raise_for_status()
             
             zip_content = io.BytesIO(response.content)
@@ -61,6 +47,7 @@ implementation:
             
             with zipfile.ZipFile(zip_content, 'r') as zip_file:
                 png_files = [f for f in zip_file.namelist() if f.lower().endswith('.png')]
+                print(f'Found {len(png_files)} PNG files')
                 
                 for file_path in png_files:
                     parts = file_path.split('/')
@@ -77,16 +64,15 @@ implementation:
                                 'filename': file_path
                             })
             
-            print(f'Processed {len(dataset)} images')
             return dataset
 
         # Download and process
-        raw_data = download_and_extract_zip(args.cdn_url)
+        raw_data = download_and_extract_zip(cdn_url)
         
         if not raw_data:
-            raise Exception('No images found')
+            raise Exception('No images found in ZIP file')
 
-        # Create dataset info and splits (same as before)
+        # Create dataset info
         labels = [item['label'] for item in raw_data]
         unique_labels = sorted(list(set(labels)))
         label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
@@ -97,46 +83,47 @@ implementation:
             'classes': unique_labels,
             'class_distribution': dict(label_distribution),
             'label_to_idx': label_to_idx,
-            'output_dim': len(unique_labels)
+            'output_dim': len(unique_labels),
+            'train_split_ratio': train_split,
+            'shuffle_seed': shuffle_seed
         }
 
+        print(f'Dataset: {len(raw_data)} samples, {len(unique_labels)} classes: {unique_labels}')
+
         # Split data
-        train_size = int(args.train_split * len(raw_data))
+        train_size = int(train_split * len(raw_data))
         test_size = len(raw_data) - train_size
         
         train_data, test_data = random_split(
             raw_data, [train_size, test_size],
-            generator=torch.Generator().manual_seed(args.shuffle_seed)
+            generator=torch.Generator().manual_seed(shuffle_seed)
         )
 
-        # Save outputs
+        # Convert to lists and save
         train_data_list = [raw_data[i] for i in train_data.indices]
         test_data_list = [raw_data[i] for i in test_data.indices]
 
-        os.makedirs(os.path.dirname(args.train_data) or '.', exist_ok=True)
-        with open(args.train_data, 'wb') as f:
+        os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+        with open(train_data_path, 'wb') as f:
             pickle.dump(train_data_list, f)
 
-        os.makedirs(os.path.dirname(args.test_data) or '.', exist_ok=True)
-        with open(args.test_data, 'wb') as f:
+        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+        with open(test_data_path, 'wb') as f:
             pickle.dump(test_data_list, f)
 
-        os.makedirs(os.path.dirname(args.dataset_info) or '.', exist_ok=True)
-        with open(args.dataset_info, 'wb') as f:
+        os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+        with open(dataset_info_path, 'wb') as f:
             pickle.dump(dataset_info, f)
 
         print('Dataset loading complete!')
-        "
+        print(f'Train samples: {len(train_data_list)}')
+        print(f'Test samples: {len(test_data_list)}')
+        " 
+        "$0" "$1" "$2" "$3" "$4" "$5"
     args:
-      - --cdn_url
       - {inputValue: cdn_url}
-      - --train_split
       - {inputValue: train_split}
-      - --shuffle_seed
       - {inputValue: shuffle_seed}
-      - --train_data
       - {outputPath: train_data}
-      - --test_data
       - {outputPath: test_data}
-      - --dataset_info
       - {outputPath: dataset_info}
