@@ -1,0 +1,143 @@
+name: 8 Load UI Components from CDN ZIP
+description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
+inputs:
+  - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
+  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
+  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
+outputs:
+  - {name: train_data, type: Dataset}
+  - {name: test_data, type: Dataset}
+  - {name: dataset_info, type: DatasetInfo}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        pip install --quiet requests torch
+        python3 -c "
+        import argparse
+        import os
+        import pickle
+        import json
+        import base64
+        import io
+        import zipfile
+        from collections import Counter
+        from torch.utils.data import random_split
+        import torch
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        import logging
+        from urllib.parse import unquote
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--cdn_url', type=str, required=True)
+        parser.add_argument('--train_split', type=float, default=0.7)
+        parser.add_argument('--shuffle_seed', type=int, default=42)
+        parser.add_argument('--train_data', type=str, required=True)
+        parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--dataset_info', type=str, required=True)
+        args = parser.parse_args()
+
+        # Setup session with retry logic
+        session = requests.Session()
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+
+        def download_and_extract_zip(url):
+            decoded_url = unquote(url)
+            print(f'Downloading from: {decoded_url}')
+            
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = session.get(decoded_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            zip_content = io.BytesIO(response.content)
+            dataset = []
+            
+            with zipfile.ZipFile(zip_content, 'r') as zip_file:
+                png_files = [f for f in zip_file.namelist() if f.lower().endswith('.png')]
+                
+                for file_path in png_files:
+                    parts = file_path.split('/')
+                    if len(parts) >= 3 and parts[0] == 'Classification_dataset':
+                        label = parts[1]
+                        
+                        with zip_file.open(file_path) as image_file:
+                            image_data = image_file.read()
+                            base64_image = base64.b64encode(image_data).decode('utf-8')
+                            
+                            dataset.append({
+                                'image_data': base64_image,
+                                'label': label,
+                                'filename': file_path
+                            })
+            
+            print(f'Processed {len(dataset)} images')
+            return dataset
+
+        # Download and process
+        raw_data = download_and_extract_zip(args.cdn_url)
+        
+        if not raw_data:
+            raise Exception('No images found')
+
+        # Create dataset info and splits (same as before)
+        labels = [item['label'] for item in raw_data]
+        unique_labels = sorted(list(set(labels)))
+        label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
+        label_distribution = Counter(labels)
+
+        dataset_info = {
+            'total_samples': len(raw_data),
+            'classes': unique_labels,
+            'class_distribution': dict(label_distribution),
+            'label_to_idx': label_to_idx,
+            'output_dim': len(unique_labels)
+        }
+
+        # Split data
+        train_size = int(args.train_split * len(raw_data))
+        test_size = len(raw_data) - train_size
+        
+        train_data, test_data = random_split(
+            raw_data, [train_size, test_size],
+            generator=torch.Generator().manual_seed(args.shuffle_seed)
+        )
+
+        # Save outputs
+        train_data_list = [raw_data[i] for i in train_data.indices]
+        test_data_list = [raw_data[i] for i in test_data.indices]
+
+        os.makedirs(os.path.dirname(args.train_data) or '.', exist_ok=True)
+        with open(args.train_data, 'wb') as f:
+            pickle.dump(train_data_list, f)
+
+        os.makedirs(os.path.dirname(args.test_data) or '.', exist_ok=True)
+        with open(args.test_data, 'wb') as f:
+            pickle.dump(test_data_list, f)
+
+        os.makedirs(os.path.dirname(args.dataset_info) or '.', exist_ok=True)
+        with open(args.dataset_info, 'wb') as f:
+            pickle.dump(dataset_info, f)
+
+        print('Dataset loading complete!')
+        "
+    args:
+      - --cdn_url
+      - {inputValue: cdn_url}
+      - --train_split
+      - {inputValue: train_split}
+      - --shuffle_seed
+      - {inputValue: shuffle_seed}
+      - --train_data
+      - {outputPath: train_data}
+      - --test_data
+      - {outputPath: test_data}
+      - --dataset_info
+      - {outputPath: dataset_info}
