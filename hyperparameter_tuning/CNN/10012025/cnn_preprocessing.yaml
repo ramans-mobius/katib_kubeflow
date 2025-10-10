@@ -1,4 +1,4 @@
-name: 2 Preprocess UI Components Dataset
+name: 3 Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -32,9 +32,12 @@ implementation:
         
         print('Number of arguments received:', len(sys.argv))
         for i, arg in enumerate(sys.argv):
-            print(f'  Argument {i}: {arg}')
+            if i == 4:  # config string is long
+                print(f'  Argument {i}: {arg[:100]}...')
+            else:
+                print(f'  Argument {i}: {arg}')
         
-        # Get args - FIXED: Check argument count first
+        # Get args
         if len(sys.argv) < 7:
             raise ValueError(f'Expected 7 arguments, got {len(sys.argv)}')
         
@@ -48,7 +51,6 @@ implementation:
         print('Starting preprocessing...')
         print(f'Train path: {train_path}')
         print(f'Test path: {test_path}')
-        print(f'Config: {config_str[:100]}...')
         
         # Simple classes
         class CustomJSONDataset(Dataset):
@@ -76,12 +78,23 @@ implementation:
         with open(info_path, 'rb') as f: dataset_info = pickle.load(f)
         
         print(f'Loaded {len(train_data)} train, {len(test_data)} test samples')
-        print(f'Classes: {dataset_info[\"classes\"]}')
+        print(f'Classes: {dataset_info[\"classes\"]}')  # FIXED: Removed extra backslash
         
         # Create transforms
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        train_tf = transforms.Compose([transforms.Resize(256), transforms.RandomCrop(224), transforms.RandomHorizontalFlip(), transforms.ToTensor(), normalize])
-        test_tf = transforms.Compose([transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize])
+        train_tf = transforms.Compose([
+            transforms.Resize(256), 
+            transforms.RandomCrop(224), 
+            transforms.RandomHorizontalFlip(), 
+            transforms.ToTensor(), 
+            normalize
+        ])
+        test_tf = transforms.Compose([
+            transforms.Resize(256), 
+            transforms.CenterCrop(224), 
+            transforms.ToTensor(), 
+            normalize
+        ])
         
         # Create datasets
         train_ds = CustomJSONDataset(train_data, train_tf)
@@ -90,8 +103,10 @@ implementation:
         # Convert labels
         label_map = dataset_info['label_to_idx']
         class LabeledDataset(Dataset):
-            def __init__(self, ds, mapping): self.ds, self.mapping = ds, mapping
-            def __len__(self): return len(self.ds)
+            def __init__(self, ds, mapping): 
+                self.ds, self.mapping = ds, mapping
+            def __len__(self): 
+                return len(self.ds)
             def __getitem__(self, idx):
                 img, label_str = self.ds[idx]
                 return img, self.mapping[label_str]
@@ -100,31 +115,44 @@ implementation:
         test_ld = LabeledDataset(test_ds, label_map)
         
         # Create loaders
-        train_loader = DataLoader(train_ld, batch_size=batch_size, shuffle=True)
-        test_loader = DataLoader(test_ld, batch_size=batch_size, shuffle=False)
+        train_loader = DataLoader(train_ld, batch_size=batch_size, shuffle=True, num_workers=0)
+        test_loader = DataLoader(test_ld, batch_size=batch_size, shuffle=False, num_workers=0)
         
         # Save processed data
         data_wrapper = DataWrapper({
-            'train_loader': train_loader, 'test_loader': test_loader,
-            'num_classes': len(dataset_info['classes']), 'class_names': dataset_info['classes'],
-            'label_to_idx': label_map, 'image_size': image_size, 'batch_size': batch_size
+            'train_loader': train_loader, 
+            'test_loader': test_loader,
+            'num_classes': len(dataset_info['classes']), 
+            'class_names': dataset_info['classes'],
+            'label_to_idx': label_map, 
+            'image_size': image_size, 
+            'batch_size': batch_size,
+            'dataset_info': dataset_info
         })
         
         os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
-        with open(out_path, 'wb') as f: pickle.dump(data_wrapper, f)
+        with open(out_path, 'wb') as f: 
+            pickle.dump(data_wrapper, f)
         
         # Save weight config
         weight_config = {
-            'preprocessing_complete': True, 'image_size': image_size, 'batch_size': batch_size,
-            'num_classes': len(dataset_info['classes']), 'classes': dataset_info['classes']
+            'preprocessing_complete': True, 
+            'image_size': image_size, 
+            'batch_size': batch_size,
+            'num_classes': len(dataset_info['classes']), 
+            'classes': dataset_info['classes'],
+            'original_config': config
         }
         
         os.makedirs(os.path.dirname(weight_path) or '.', exist_ok=True)
-        with open(weight_path, 'w') as f: json.dump(weight_config, f, indent=2)
+        with open(weight_path, 'w') as f: 
+            json.dump(weight_config, f, indent=2)
         
         print('Preprocessing complete!')
         print(f'Output saved to: {out_path}')
         print(f'Config saved to: {weight_path}')
+        print(f'Train loader batches: {len(train_loader)}')
+        print(f'Test loader batches: {len(test_loader)}')
         " "$0" "$1" "$2" "$3" "$4" "$5"
     args:
       - {inputPath: train_data}
