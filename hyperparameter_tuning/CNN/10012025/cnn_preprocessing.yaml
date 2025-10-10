@@ -1,4 +1,4 @@
-name: saayalpha Preprocess UI Components Dataset
+name: Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -18,12 +18,11 @@ outputs:
     description: "ResNet preprocessing config as JSON string"
 implementation:
   container:
-    image: python:3.9
+    image: nikhilv215/nesy-factory:v22
     command:
       - sh
       - -c
       - |
-        pip install torch torchvision Pillow
         python -c "
         import sys, os, pickle, json, base64, io
         from PIL import Image
