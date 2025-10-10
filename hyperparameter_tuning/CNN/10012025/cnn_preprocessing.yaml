@@ -1,4 +1,4 @@
-name: 3 Preprocess UI Components Dataset
+name: 4 Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -78,7 +78,8 @@ implementation:
         with open(info_path, 'rb') as f: dataset_info = pickle.load(f)
         
         print(f'Loaded {len(train_data)} train, {len(test_data)} test samples')
-        print(f'Classes: {dataset_info[\"classes\"]}')  # FIXED: Removed extra backslash
+        # FIXED: Use different quotes for the f-string
+        print('Classes: ' + str(dataset_info['classes']))
         
         # Create transforms
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
