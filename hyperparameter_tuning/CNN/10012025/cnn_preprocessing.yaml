@@ -1,4 +1,4 @@
-name: Preprocess UI Components Dataset
+name: 2 Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -121,8 +121,13 @@ implementation:
             
             print('=== RESNET PREPROCESSING STARTED ===')
             
-            with open(args.model_config, 'r') as f:
-                model_config = json.load(f)
+            # Parse model_config as JSON string directly
+            try:
+                model_config = json.loads(args.model_config)
+                print('✅ Loaded model_config as JSON string')
+                print(f'   Model: {model_config[\"model\"][\"architecture\"]}-{model_config[\"model\"][\"variant\"]}')
+            except json.JSONDecodeError as e:
+                raise ValueError(f'model_config must be a valid JSON string: {e}')
             
             with open(args.train_data, 'rb') as f:
                 train_data = pickle.load(f)
@@ -132,6 +137,7 @@ implementation:
                 dataset_info = pickle.load(f)
             
             print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
+            print(f'Classes: {dataset_info[\"classes\"]}')
             
             train_transform, val_transform = create_resnet_transforms(args.image_size, model_config)
             
@@ -192,6 +198,9 @@ implementation:
                 json.dump(weight_config, f, indent=2)
             
             print('✅ Preprocessing complete!')
+            print(f'   Train loader: {len(train_loader)} batches')
+            print(f'   Test loader: {len(test_loader)} batches')
+            print(f'   Output saved to: {args.processed_data_pickle}')
         
         if __name__ == '__main__':
             main()
@@ -208,7 +217,7 @@ implementation:
       - {inputPath: train_data}
       - {inputPath: test_data}
       - {inputPath: dataset_info}
-      - {inputPath: model_config}
+      - {inputValue: model_config}  # Correct parameter name
       - {inputValue: image_size}
       - {inputValue: batch_size}
       - {outputPath: processed_data_pickle}
