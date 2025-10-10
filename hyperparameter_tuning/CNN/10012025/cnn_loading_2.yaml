@@ -67,7 +67,6 @@ implementation:
         session.mount("https://", adapter)
 
         def download_and_extract_zip(url):
-            """Download ZIP file and extract image data with labels"""
             try:
                 # Handle URL encoding - decode %24%24 back to $$
                 decoded_url = unquote(url)
