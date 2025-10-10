@@ -1,4 +1,4 @@
-name: 2 Preprocess UI Components Dataset
+name: 3 Preprocess UI Components Dataset
 description: Takes UI components datasets with base64 images, applies ResNet preprocessing, and outputs processed data loaders.
 inputs:
   - name: train_data
@@ -7,17 +7,9 @@ inputs:
     type: Dataset
   - name: dataset_info
     type: DatasetInfo
-  - name: model_config
+  - name: resnet_config
     type: String
     description: 'ResNet configuration as JSON string'
-  - name: image_size
-    type: Integer
-    default: '224'
-    description: 'Target image size for ResNet'
-  - name: batch_size
-    type: Integer
-    default: '16'
-    description: 'Batch size for data loaders'
 outputs:
   - name: processed_data_pickle
     type: Dataset
@@ -112,22 +104,27 @@ implementation:
             parser.add_argument('--train_data', type=str, required=True)
             parser.add_argument('--test_data', type=str, required=True)
             parser.add_argument('--dataset_info', type=str, required=True)
-            parser.add_argument('--model_config', type=str, required=True)
-            parser.add_argument('--image_size', type=int, default=224)
-            parser.add_argument('--batch_size', type=int, default=16)
+            parser.add_argument('--resnet_config', type=str, required=True)
             parser.add_argument('--processed_data_pickle', type=str, required=True)
             parser.add_argument('--weight_out', type=str, required=True)
             args = parser.parse_args()
             
             print('=== RESNET PREPROCESSING STARTED ===')
             
-            # Parse model_config as JSON string directly
+            # Parse resnet_config as JSON string directly
             try:
-                model_config = json.loads(args.model_config)
-                print('✅ Loaded model_config as JSON string')
-                print(f'   Model: {model_config[\"model\"][\"architecture\"]}-{model_config[\"model\"][\"variant\"]}')
+                resnet_config = json.loads(args.resnet_config)
+                print('✅ Loaded resnet_config as JSON string')
+                print(f'   Model: {resnet_config[\"model\"][\"architecture\"]}-{resnet_config[\"model\"][\"variant\"]}')
             except json.JSONDecodeError as e:
-                raise ValueError(f'model_config must be a valid JSON string: {e}')
+                raise ValueError(f'resnet_config must be a valid JSON string: {e}')
+            
+            # Extract batch_size and image_size from config
+            batch_size = resnet_config.get('training', {}).get('batch_size', 16)
+            image_size = resnet_config.get('preprocessing', {}).get('image_size', 224)
+            
+            print(f'   Batch size: {batch_size}')
+            print(f'   Image size: {image_size}')
             
             with open(args.train_data, 'rb') as f:
                 train_data = pickle.load(f)
@@ -139,7 +136,7 @@ implementation:
             print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
             print(f'Classes: {dataset_info[\"classes\"]}')
             
-            train_transform, val_transform = create_resnet_transforms(args.image_size, model_config)
+            train_transform, val_transform = create_resnet_transforms(image_size, resnet_config)
             
             train_dataset = CustomJSONDataset(train_data, transform=train_transform)
             test_dataset = CustomJSONDataset(test_data, transform=val_transform)
@@ -162,8 +159,8 @@ implementation:
             train_labeled = LabeledDataset(train_dataset, label_to_idx)
             test_labeled = LabeledDataset(test_dataset, label_to_idx)
             
-            train_loader = DataLoader(train_labeled, batch_size=args.batch_size, shuffle=True, num_workers=0)
-            test_loader = DataLoader(test_labeled, batch_size=args.batch_size, shuffle=False, num_workers=0)
+            train_loader = DataLoader(train_labeled, batch_size=batch_size, shuffle=True, num_workers=0)
+            test_loader = DataLoader(test_labeled, batch_size=batch_size, shuffle=False, num_workers=0)
             
             data_dict = {
                 'train_loader': train_loader,
@@ -172,10 +169,10 @@ implementation:
                 'class_names': dataset_info['classes'],
                 'label_to_idx': label_to_idx,
                 'idx_to_label': dataset_info['idx_to_label'],
-                'image_size': args.image_size,
-                'batch_size': args.batch_size,
+                'image_size': image_size,
+                'batch_size': batch_size,
                 'dataset_info': dataset_info,
-                'preprocessing_config': model_config.get('preprocessing', {})
+                'preprocessing_config': resnet_config.get('preprocessing', {})
             }
             
             data_wrapper = DataWrapper(data_dict)
@@ -186,11 +183,11 @@ implementation:
             
             weight_config = {
                 'preprocessing_complete': True,
-                'image_size': args.image_size,
-                'batch_size': args.batch_size,
+                'image_size': image_size,
+                'batch_size': batch_size,
                 'num_classes': len(dataset_info['classes']),
                 'classes': dataset_info['classes'],
-                'original_config': model_config
+                'original_config': resnet_config
             }
             
             os.makedirs(os.path.dirname(args.weight_out) or '.', exist_ok=True)
@@ -208,17 +205,13 @@ implementation:
           --train_data "$0" \
           --test_data "$1" \
           --dataset_info "$2" \
-          --model_config "$3" \
-          --image_size "$4" \
-          --batch_size "$5" \
-          --processed_data_pickle "$6" \
-          --weight_out "$7"
+          --resnet_config "$3" \
+          --processed_data_pickle "$4" \
+          --weight_out "$5"
     args:
       - {inputPath: train_data}
       - {inputPath: test_data}
       - {inputPath: dataset_info}
-      - {inputValue: model_config}  # Correct parameter name
-      - {inputValue: image_size}
-      - {inputValue: batch_size}
+      - {inputValue: resnet_config}
       - {outputPath: processed_data_pickle}
       - {outputPath: weight_out}
