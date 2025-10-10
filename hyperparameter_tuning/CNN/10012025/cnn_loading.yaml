@@ -1,0 +1,161 @@
+name: Load UI Components JSON Dataset
+description: Fetches UI components dataset from API with base64 images and prepares train/test splits.
+inputs:
+  - {name: api_url, type: String, description: 'API URL to fetch JSON dataset'}
+  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
+  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)', default: '0.7'}
+  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling', default: '42'}
+outputs:
+  - {name: train_data, type: Dataset}
+  - {name: test_data, type: Dataset}
+  - {name: dataset_info, type: DatasetInfo}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        python3 -m pip install --quiet torch torchvision Pillow pandas scikit-learn requests || \
+        python3 -m pip install --quiet torch torchvision Pillow pandas scikit-learn requests --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        import json
+        import base64
+        import io
+        from pathlib import Path
+        from PIL import Image
+        import pandas as pd
+        from collections import Counter
+        from torch.utils.data import random_split
+        import torch
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        import logging
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--api_url', type=str, required=True, help='API URL to fetch JSON dataset')
+        parser.add_argument('--access_token', type=str, required=True, help='Bearer token for API')
+        parser.add_argument('--train_split', type=float, default=0.7, help='Train split ratio')
+        parser.add_argument('--shuffle_seed', type=int, default=42, help='Random seed for shuffling')
+        parser.add_argument('--train_data', type=str, required=True, help='Path to output train dataset')
+        parser.add_argument('--test_data', type=str, required=True, help='Path to output test dataset')
+        parser.add_argument('--dataset_info', type=str, required=True, help='Path to output dataset info')
+        args = parser.parse_args()
+
+        with open(args.access_token, 'r') as f:
+            access_token = f.read().strip()
+        
+        # Setup retry logger
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger("api_retry")
+
+        # Setup session with retry logic
+        session = requests.Session()
+        retries = Retry(
+            total=5,                # total retries
+            backoff_factor=1,       # wait 1s, 2s, 4s
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["GET", "POST"]
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        # Fetch dataset from API with retry + timeout
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}"
+        }
+
+        try:
+            logger.info("📦 Fetching UI components dataset from API with retries enabled")
+            resp = session.get(args.api_url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            raw_data = resp.json()
+            logger.info(f"✅ Successfully fetched {len(raw_data)} samples from API")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ API request failed after retries: {e}")
+            raise
+
+        # Extract dataset information (same as original pipeline)
+        labels = [item['label'] for item in raw_data]
+        unique_labels = sorted(list(set(labels)))
+        label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
+        idx_to_label = {idx: label for label, idx in label_to_idx.items()}
+        label_distribution = Counter(labels)
+
+        # Create dataset info
+        dataset_info = {
+            'total_samples': len(raw_data),
+            'classes': unique_labels,
+            'class_distribution': dict(label_distribution),
+            'label_to_idx': label_to_idx,
+            'idx_to_label': idx_to_label,
+            'output_dim': len(unique_labels),
+            'train_split_ratio': args.train_split,
+            'shuffle_seed': args.shuffle_seed
+        }
+
+        print(f"📊 Dataset Info:")
+        print(f"   Total samples: {len(raw_data)}")
+        print(f"   Classes: {unique_labels}")
+        print(f"   Label distribution: {dict(label_distribution)}")
+        print(f"   Auto-detected output_dim: {len(unique_labels)}")
+
+        # Create train/test splits (same logic as original pipeline)
+        train_size = int(args.train_split * len(raw_data))
+        test_size = len(raw_data) - train_size
+
+        # Split the data
+        train_data, test_data = random_split(
+            raw_data, [train_size, test_size],
+            generator=torch.Generator().manual_seed(args.shuffle_seed)
+        )
+
+        # Convert to lists for serialization
+        train_data_list = [raw_data[i] for i in train_data.indices]
+        test_data_list = [raw_data[i] for i in test_data.indices]
+
+        # Save train data
+        os.makedirs(os.path.dirname(args.train_data) or ".", exist_ok=True)
+        with open(args.train_data, "wb") as f:
+            pickle.dump(train_data_list, f)
+
+        # Save test data
+        os.makedirs(os.path.dirname(args.test_data) or ".", exist_ok=True)
+        with open(args.test_data, "wb") as f:
+            pickle.dump(test_data_list, f)
+
+        # Save dataset info
+        os.makedirs(os.path.dirname(args.dataset_info) or ".", exist_ok=True)
+        with open(args.dataset_info, "wb") as f:
+            pickle.dump(dataset_info, f)
+
+        print(f"✅ Dataset loading complete!")
+        print(f"   Train samples: {len(train_data_list)}")
+        print(f"   Test samples: {len(test_data_list)}")
+        print(f"   Dataset info saved with {len(unique_labels)} classes")
+            
+    args:
+      - --api_url
+      - {inputValue: api_url}
+      - --access_token
+      - {inputPath: access_token}
+      - --train_split
+      - {inputValue: train_split}
+      - --shuffle_seed
+      - {inputValue: shuffle_seed}
+      - --train_data
+      - {outputPath: train_data}
+      - --test_data
+      - {outputPath: test_data}
+      - --dataset_info
+      - {outputPath: dataset_info}
