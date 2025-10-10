@@ -1,4 +1,4 @@
-name: 7 Load UI Components from CDN ZIP
+name: 8 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
@@ -15,13 +15,8 @@ implementation:
       - sh
       - -c
       - |
-        python3 -m pip install --quiet requests Pillow torch || \
-        python3 -m pip install --quiet requests Pillow torch --user
-        exec "$0" "$@"
-      - python3
-      - -u
-      - -c
-      - |
+        pip install --quiet requests torch
+        python3 -c "
         import argparse
         import os
         import pickle
@@ -29,8 +24,6 @@ implementation:
         import base64
         import io
         import zipfile
-        from pathlib import Path
-        from PIL import Image
         from collections import Counter
         from torch.utils.data import random_split
         import torch
@@ -41,184 +34,100 @@ implementation:
         from urllib.parse import unquote
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('--cdn_url', type=str, required=True, help='CDN URL to download ZIP file')
-        parser.add_argument('--train_split', type=float, default=0.7, help='Train split ratio')
-        parser.add_argument('--shuffle_seed', type=int, default=42, help='Random seed for shuffling')
-        parser.add_argument('--train_data', type=str, required=True, help='Path to output train dataset')
-        parser.add_argument('--test_data', type=str, required=True, help='Path to output test dataset')
-        parser.add_argument('--dataset_info', type=str, required=True, help='Path to output dataset info')
+        parser.add_argument('--cdn_url', type=str, required=True)
+        parser.add_argument('--train_split', type=float, default=0.7)
+        parser.add_argument('--shuffle_seed', type=int, default=42)
+        parser.add_argument('--train_data', type=str, required=True)
+        parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--dataset_info', type=str, required=True)
         args = parser.parse_args()
-
-        # Setup retry logger
-        logging.basicConfig(level=logging.INFO)
-        logger = logging.getLogger("cdn_retry")
 
         # Setup session with retry logic
         session = requests.Session()
-        retries = Retry(
-            total=5,
-            backoff_factor=1,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET"]
-        )
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
         adapter = HTTPAdapter(max_retries=retries)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
 
         def download_and_extract_zip(url):
-            try:
-                # Handle URL encoding - decode %24%24 back to $$
-                decoded_url = unquote(url)
-                logger.info(f"Original URL: {url}")
-                logger.info(f"Decoded URL: {decoded_url}")
+            decoded_url = unquote(url)
+            print(f'Downloading from: {decoded_url}')
+            
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = session.get(decoded_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            zip_content = io.BytesIO(response.content)
+            dataset = []
+            
+            with zipfile.ZipFile(zip_content, 'r') as zip_file:
+                png_files = [f for f in zip_file.namelist() if f.lower().endswith('.png')]
                 
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                
-                # Use the decoded URL for the request
-                response = session.get(decoded_url, headers=headers, stream=True, timeout=30)
-                response.raise_for_status()
-                
-                logger.info(f"Download successful! Status: {response.status_code}, Size: {len(response.content)} bytes")
-                
-                # Verify it's a ZIP file
-                content_type = response.headers.get('content-type', '').lower()
-                if 'zip' not in content_type and not decoded_url.endswith('.zip'):
-                    logger.warning(f"Content-Type is {content_type}, but proceeding as ZIP")
-                
-                # Extract from ZIP
-                zip_content = io.BytesIO(response.content)
-                dataset = []
-                
-                with zipfile.ZipFile(zip_content, 'r') as zip_file:
-                    file_list = zip_file.namelist()
-                    logger.info(f"Found {len(file_list)} files in ZIP")
-                    
-                    # Count files by type
-                    png_files = [f for f in file_list if f.lower().endswith('.png')]
-                    directories = [f for f in file_list if f.endswith('/')]
-                    logger.info(f"   PNG files: {len(png_files)}")
-                    logger.info(f"   Directories: {len(directories)}")
-                    
-                    # Process each PNG file in the ZIP
-                    for file_path in png_files:
-                        # Extract label from directory structure
-                        parts = file_path.split('/')
-                        if len(parts) >= 3 and parts[0] == 'Classification_dataset':
-                            label = parts[1]  # inputfield or toggle
+                for file_path in png_files:
+                    parts = file_path.split('/')
+                    if len(parts) >= 3 and parts[0] == 'Classification_dataset':
+                        label = parts[1]
+                        
+                        with zip_file.open(file_path) as image_file:
+                            image_data = image_file.read()
+                            base64_image = base64.b64encode(image_data).decode('utf-8')
                             
-                            try:
-                                # Read and encode image
-                                with zip_file.open(file_path) as image_file:
-                                    image_data = image_file.read()
-                                    
-                                    # Verify it's a valid image
-                                    try:
-                                        image = Image.open(io.BytesIO(image_data))
-                                        image.verify()  # Verify it's a valid image
-                                        
-                                        base64_image = base64.b64encode(image_data).decode('utf-8')
-                                        
-                                        dataset.append({
-                                            'image_data': base64_image,
-                                            'label': label,
-                                            'filename': file_path,
-                                            'image_size': image.size if hasattr(image, 'size') else 'unknown'
-                                        })
-                                    except Exception as img_error:
-                                        logger.warning(f"Skipping invalid image {file_path}: {img_error}")
-                                        continue
-                                        
-                            except Exception as e:
-                                logger.warning(f"Error processing {file_path}: {e}")
-                                continue
-                
-                logger.info(f"Successfully processed {len(dataset)} valid images")
-                return dataset
-                
-            except zipfile.BadZipFile:
-                logger.error("Downloaded file is not a valid ZIP archive")
-                # Save for debugging
-                with open('debug_downloaded_file.bin', 'wb') as f:
-                    f.write(response.content)
-                logger.info("Raw content saved as 'debug_downloaded_file.bin'")
-                raise
-            except Exception as e:
-                logger.error(f"Error processing ZIP: {e}")
-                raise
+                            dataset.append({
+                                'image_data': base64_image,
+                                'label': label,
+                                'filename': file_path
+                            })
+            
+            print(f'Processed {len(dataset)} images')
+            return dataset
 
-        # Download and extract dataset
-        print("Starting dataset download")
+        # Download and process
         raw_data = download_and_extract_zip(args.cdn_url)
-
+        
         if not raw_data:
-            raise Exception("No valid images found in the ZIP file")
+            raise Exception('No images found')
 
-        # Extract dataset information
+        # Create dataset info and splits (same as before)
         labels = [item['label'] for item in raw_data]
         unique_labels = sorted(list(set(labels)))
         label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
-        idx_to_label = {idx: label for label, idx in label_to_idx.items()}
         label_distribution = Counter(labels)
 
-        # Create dataset info
         dataset_info = {
             'total_samples': len(raw_data),
             'classes': unique_labels,
             'class_distribution': dict(label_distribution),
             'label_to_idx': label_to_idx,
-            'idx_to_label': idx_to_label,
-            'output_dim': len(unique_labels),
-            'train_split_ratio': args.train_split,
-            'shuffle_seed': args.shuffle_seed,
-            'data_source': 'cdn_zip',
-            'file_types': 'png',
-            'cdn_url': args.cdn_url
+            'output_dim': len(unique_labels)
         }
 
-        print(f"Dataset Info:")
-        print(f"   Total samples: {len(raw_data)}")
-        print(f"   Classes: {unique_labels}")
-        print(f"   Label distribution: {dict(label_distribution)}")
-        print(f"   Auto-detected output_dim: {len(unique_labels)}")
-
-        # Create train/test splits
+        # Split data
         train_size = int(args.train_split * len(raw_data))
         test_size = len(raw_data) - train_size
-
-        print(f"Splitting data: {train_size} train, {test_size} test")
-
-        # Split the data
+        
         train_data, test_data = random_split(
             raw_data, [train_size, test_size],
             generator=torch.Generator().manual_seed(args.shuffle_seed)
         )
 
-        # Convert to lists for serialization
+        # Save outputs
         train_data_list = [raw_data[i] for i in train_data.indices]
         test_data_list = [raw_data[i] for i in test_data.indices]
 
-        # Save train data
-        os.makedirs(os.path.dirname(args.train_data) or ".", exist_ok=True)
-        with open(args.train_data, "wb") as f:
+        os.makedirs(os.path.dirname(args.train_data) or '.', exist_ok=True)
+        with open(args.train_data, 'wb') as f:
             pickle.dump(train_data_list, f)
 
-        # Save test data
-        os.makedirs(os.path.dirname(args.test_data) or ".", exist_ok=True)
-        with open(args.test_data, "wb") as f:
+        os.makedirs(os.path.dirname(args.test_data) or '.', exist_ok=True)
+        with open(args.test_data, 'wb') as f:
             pickle.dump(test_data_list, f)
 
-        # Save dataset info
-        os.makedirs(os.path.dirname(args.dataset_info) or ".", exist_ok=True)
-        with open(args.dataset_info, "wb") as f:
+        os.makedirs(os.path.dirname(args.dataset_info) or '.', exist_ok=True)
+        with open(args.dataset_info, 'wb') as f:
             pickle.dump(dataset_info, f)
 
-        print(f"Dataset loading complete!")
-        print(f"   Train samples: {len(train_data_list)}")
-        print(f"   Test samples: {len(test_data_list)}")
-        print(f"   Classes: {unique_labels}")
-            
+        print('Dataset loading complete!')
+        "
     args:
       - --cdn_url
       - {inputValue: cdn_url}
