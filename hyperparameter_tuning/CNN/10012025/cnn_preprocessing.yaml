@@ -7,7 +7,7 @@ inputs:
     type: Dataset
   - name: dataset_info
     type: DatasetInfo
-  - name: resnet_config
+  - name: model_config
     type: String
     description: 'ResNet configuration as JSON string'
   - name: image_size
@@ -112,7 +112,7 @@ implementation:
             parser.add_argument('--train_data', type=str, required=True)
             parser.add_argument('--test_data', type=str, required=True)
             parser.add_argument('--dataset_info', type=str, required=True)
-            parser.add_argument('--resnet_config', type=str, required=True)
+            parser.add_argument('--model_config', type=str, required=True)
             parser.add_argument('--image_size', type=int, default=224)
             parser.add_argument('--batch_size', type=int, default=16)
             parser.add_argument('--processed_data_pickle', type=str, required=True)
@@ -121,8 +121,8 @@ implementation:
             
             print('=== RESNET PREPROCESSING STARTED ===')
             
-            with open(args.resnet_config, 'r') as f:
-                resnet_config = json.load(f)
+            with open(args.model_config, 'r') as f:
+                model_config = json.load(f)
             
             with open(args.train_data, 'rb') as f:
                 train_data = pickle.load(f)
@@ -133,7 +133,7 @@ implementation:
             
             print(f'Dataset: {len(train_data)} train, {len(test_data)} test samples')
             
-            train_transform, val_transform = create_resnet_transforms(args.image_size, resnet_config)
+            train_transform, val_transform = create_resnet_transforms(args.image_size, model_config)
             
             train_dataset = CustomJSONDataset(train_data, transform=train_transform)
             test_dataset = CustomJSONDataset(test_data, transform=val_transform)
@@ -169,7 +169,7 @@ implementation:
                 'image_size': args.image_size,
                 'batch_size': args.batch_size,
                 'dataset_info': dataset_info,
-                'preprocessing_config': resnet_config.get('preprocessing', {})
+                'preprocessing_config': model_config.get('preprocessing', {})
             }
             
             data_wrapper = DataWrapper(data_dict)
@@ -184,7 +184,7 @@ implementation:
                 'batch_size': args.batch_size,
                 'num_classes': len(dataset_info['classes']),
                 'classes': dataset_info['classes'],
-                'original_config': resnet_config
+                'original_config': model_config
             }
             
             os.makedirs(os.path.dirname(args.weight_out) or '.', exist_ok=True)
@@ -199,7 +199,7 @@ implementation:
           --train_data "$0" \
           --test_data "$1" \
           --dataset_info "$2" \
-          --resnet_config "$3" \
+          --model_config "$3" \
           --image_size "$4" \
           --batch_size "$5" \
           --processed_data_pickle "$6" \
@@ -208,7 +208,7 @@ implementation:
       - {inputPath: train_data}
       - {inputPath: test_data}
       - {inputPath: dataset_info}
-      - {inputPath: resnet_config}
+      - {inputPath: model_config}
       - {inputValue: image_size}
       - {inputValue: batch_size}
       - {outputPath: processed_data_pickle}
