@@ -1,4 +1,4 @@
-name: 8 Load UI Components from CDN ZIP
+name: 9 Load UI Components from CDN ZIP
 description: Downloads ZIP file from CDN containing UI component images and prepares train/test datasets.
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download ZIP file (use %24%24 for $$)'}
@@ -10,12 +10,11 @@ outputs:
   - {name: dataset_info, type: DatasetInfo}
 implementation:
   container:
-    image: python:3.9
+    image: nikhilv215/nesy-factory:v22
     command:
       - sh
       - -c
       - |
-        pip install --quiet requests torch
         python3 -c "
         import argparse
         import os
