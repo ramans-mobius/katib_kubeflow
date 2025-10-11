@@ -1,0 +1,135 @@
+name: CNN Train Model
+description: Trains CNN model using image data and configuration following ResNet pipeline structure
+inputs:
+  - name: data_path
+    type: Dataset
+  - name: model
+    type: Model
+  - name: config
+    type: String
+outputs:
+  - name: trained_model
+    type: Model
+  - name: epoch_loss
+    type: String
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v18
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import torch, argparse, pickle, json, os
+        import torch.optim as optim
+        import torch.nn as nn
+        from torch.utils.data import DataLoader
+        from nesy_factory.CNNs.factory import CNNFactory
+        from nesy_factory.utils import get_device
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--data_path', type=str, required=True)
+        parser.add_argument('--model', type=str, required=True)
+        parser.add_argument('--config', type=str, required=True)
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--epoch_loss', type=str, required=True)
+        args = parser.parse_args()
+
+        print(f"Data path: {args.data_path}")
+        print(f"Model path: {args.model}")
+        print(f"Config: {args.config}")
+
+        config = json.loads(args.config)
+        print(f"Training configuration: {config}")
+
+        print("Loading data...")
+        with open(args.data_path, "rb") as f:
+            data_dict = pickle.load(f)
+        
+        train_loader = data_dict.get('train_loader')
+        val_loader = data_dict.get('val_loader')
+        
+        if train_loader is None or val_loader is None:
+            raise ValueError("Data must contain train_loader and val_loader")
+
+        print(f"Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+
+        print("Loading model...")
+        architecture = config.get('architecture', 'resnet')
+        model = CNNFactory.create_model(architecture, config)
+        model.load_state_dict(torch.load(args.model, map_location=torch.device('cpu')))
+        
+        device = get_device()
+        model = model.to(device)
+        print(f"Training device: {device}")
+
+        training_config = config.get('training', {})
+        epochs = training_config.get('epochs', 100)
+        
+        optimizer_config = training_config.get('optimizer', {})
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=optimizer_config.get('learning_rate', 1e-4),
+            weight_decay=optimizer_config.get('weight_decay', 1e-4)
+        )
+        
+        criterion = nn.CrossEntropyLoss()
+
+        print(f"Starting CNN training for {epochs} epochs")
+        epoch_loss_data = []
+
+        for epoch in range(epochs):
+            model.train()
+            running_loss = 0.0
+            correct = 0
+            total = 0
+            
+            for batch_idx, (images, labels) in enumerate(train_loader):
+                images, labels = images.to(device), labels.to(device)
+                
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                
+                running_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+            
+            epoch_loss = running_loss / len(train_loader)
+            epoch_acc = 100. * correct / total
+            epoch_loss_data.append({'epoch': epoch, 'loss': epoch_loss, 'accuracy': epoch_acc})
+            
+            print(f"Epoch {epoch}/{epochs} | Loss: {epoch_loss:.4f} | Acc: {epoch_acc:.2f}%")
+
+        output_dir_epoch_loss = os.path.dirname(args.epoch_loss)
+        if output_dir_epoch_loss and not os.path.exists(output_dir_epoch_loss):
+            os.makedirs(output_dir_epoch_loss, exist_ok=True)
+        
+        with open(args.epoch_loss, 'w') as f:
+            json.dump(epoch_loss_data, f, indent=2)
+
+        print("Saving trained model...")
+        output_dir = os.path.dirname(args.trained_model)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        
+        torch.save(model.state_dict(), args.trained_model)
+        print(f"Saved trained model to {args.trained_model}")
+    args:
+      - --data_path
+      - {inputPath: data_path}
+      - --model
+      - {inputPath: model}
+      - --config
+      - {inputValue: config}
+      - --trained_model
+      - {outputPath: trained_model}
+      - --epoch_loss
+      - {outputPath: epoch_loss}
