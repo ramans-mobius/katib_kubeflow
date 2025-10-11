@@ -1,0 +1,131 @@
+name: CNN Evaluate Model
+description: Evaluates trained CNN model and generates comprehensive performance metrics
+inputs:
+  - name: trained_model
+    type: Model
+  - name: data_path
+    type: Dataset
+  - name: config
+    type: String
+outputs:
+  - name: metrics
+    type: Metrics
+  - name: metrics_json
+    type: String
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v18
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import torch, argparse, pickle, json, os, numpy as np
+        from sklearn.metrics import classification_report, confusion_matrix
+        from nesy_factory.CNNs.factory import CNNFactory
+        from nesy_factory.utils import get_device
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--data_path', type=str, required=True)
+        parser.add_argument('--config', type=str, required=True)
+        parser.add_argument('--metrics', type=str, required=True)
+        parser.add_argument('--metrics_json', type=str, required=True)
+        args = parser.parse_args()
+
+        print(f"Trained model path: {args.trained_model}")
+        print(f"Data path: {args.data_path}")
+
+        config = json.loads(args.config)
+        print(f"Evaluation configuration: {config}")
+
+        print("Loading trained model...")
+        architecture = config.get('architecture', 'resnet')
+        model = CNNFactory.create_model(architecture, config)
+        model.load_state_dict(torch.load(args.trained_model, map_location=torch.device('cpu')))
+        
+        device = get_device()
+        model = model.to(device)
+        model.eval()
+
+        print("Loading data...")
+        with open(args.data_path, "rb") as f:
+            data_dict = pickle.load(f)
+        
+        val_loader = data_dict.get('val_loader')
+        if val_loader is None:
+            raise ValueError("Data must contain val_loader")
+
+        dataset_info = data_dict.get('dataset_info', {})
+        class_names = dataset_info.get('classes', [])
+
+        print("Starting CNN model evaluation")
+        all_predictions = []
+        all_labels = []
+        all_probabilities = []
+        total_loss = 0.0
+        criterion = torch.nn.CrossEntropyLoss()
+
+        with torch.no_grad():
+            for images, labels in val_loader:
+                images, labels = images.to(device), labels.to(device)
+                
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                total_loss += loss.item()
+                
+                probabilities = torch.softmax(outputs, dim=1)
+                _, predicted = outputs.max(1)
+                
+                all_predictions.extend(predicted.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+                all_probabilities.extend(probabilities.cpu().numpy())
+
+        val_loss = total_loss / len(val_loader)
+        accuracy = 100.0 * np.sum(np.array(all_predictions) == np.array(all_labels)) / len(all_labels)
+
+        class_report = classification_report(all_labels, all_predictions, output_dict=True)
+        conf_matrix = confusion_matrix(all_labels, all_predictions)
+
+        probabilities = np.array(all_probabilities)
+        confidence_scores = np.max(probabilities, axis=1)
+        avg_confidence = np.mean(confidence_scores)
+
+        eval_metrics = {
+            'val_loss': float(val_loss),
+            'accuracy': float(accuracy),
+            'average_confidence': float(avg_confidence),
+            'total_samples': len(all_labels),
+            'correct_predictions': int(np.sum(np.array(all_predictions) == np.array(all_labels))),
+            'detailed_metrics': class_report,
+            'confusion_matrix': conf_matrix.tolist()
+        }
+
+        os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
+        os.makedirs(os.path.dirname(args.metrics_json), exist_ok=True)
+
+        print("Saving evaluation metrics...")
+        with open(args.metrics, 'w') as f:
+            json.dump(eval_metrics, f, indent=2)
+
+        with open(args.metrics_json, 'w') as f:
+            json.dump(eval_metrics, f, indent=2)
+
+        print(f"Evaluation complete - Accuracy: {accuracy:.2f}%")
+        print(f"Saved metrics to {args.metrics}")
+        print(f"Saved metrics JSON to {args.metrics_json}")
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --data_path
+      - {inputPath: data_path}
+      - --config
+      - {inputValue: config}
+      - --metrics
+      - {outputPath: metrics}
+      - --metrics_json
+      - {outputPath: metrics_json}
