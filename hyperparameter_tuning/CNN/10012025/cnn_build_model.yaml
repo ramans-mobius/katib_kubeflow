@@ -1,0 +1,89 @@
+name: CNN Build Model
+description: Instantiates a CNN model using CNNFactory with configuration and weights
+inputs:
+  - name: weight_in
+    type: String
+    description: Weight info as JSON string
+  - name: config_str
+    type: String  
+    description: Model configuration as JSON string
+  - name: model_name
+    type: String
+    description: CNN model architecture name
+outputs:
+  - name: model_out
+    type: Model
+    description: Model state_dict
+  - name: config_updated
+    type: String
+    description: Updated configuration
+  - name: model_info_out
+    type: String
+    description: Combined model info and config
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v18
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import torch, argparse, json, os
+        from nesy_factory.CNNs.factory import CNNFactory
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--weight_in', type=str, required=True)
+        parser.add_argument('--config_str', type=str, required=True)
+        parser.add_argument('--model_name', type=str, required=True)
+        parser.add_argument('--model_out', type=str, required=True)
+        parser.add_argument('--config_updated', type=str, required=True)
+        parser.add_argument('--model_info_out', type=str, required=True)
+        args = parser.parse_args()
+
+        config = json.loads(args.config_str)
+        weight = json.loads(args.weight_in)
+        
+        for key, value in weight.items():
+            config[key] = value
+        config['architecture'] = args.model_name
+
+        model = CNNFactory.create_model(args.model_name, config)
+        print("CNN model created successfully")
+
+        model_info = model.get_model_info()
+        print(f"Model Info: {model_info}")
+
+        combined_info = {**model_info, **config}
+
+        os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
+        os.makedirs(os.path.dirname(args.config_updated), exist_ok=True)
+        os.makedirs(os.path.dirname(args.model_info_out), exist_ok=True)
+
+        torch.save(model.state_dict(), args.model_out)
+
+        with open(args.config_updated, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        with open(args.model_info_out, 'w') as f:
+            json.dump(combined_info, f, indent=2)
+
+        print(f"Model saved to {args.model_out}")
+        print(f"Updated config saved to {args.config_updated}")
+        print(f"Combined model info saved to {args.model_info_out}")
+    args:
+      - --model_name
+      - {inputValue: model_name}
+      - --weight_in
+      - {inputValue: weight_in}
+      - --config_str
+      - {inputValue: config_str}
+      - --model_out
+      - {outputPath: model_out}
+      - --config_updated
+      - {outputPath: config_updated}
+      - --model_info_out
+      - {outputPath: model_info_out}
