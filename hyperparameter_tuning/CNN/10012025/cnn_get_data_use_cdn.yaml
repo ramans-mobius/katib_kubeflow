@@ -1,12 +1,13 @@
-name: 3 CNN Get Data Through CDN
+name: 4 CNN Get Data Through CDN
 description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
     type: String
     description: URL to fetch the image dataset from
 outputs:
-  - name: processed_data
+  - name: processed_data_path
     type: String
+    description: Path to downloaded dataset file
 implementation:
   container:
     image: python:3.9
@@ -25,7 +26,7 @@ implementation:
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--process_data_url', type=str, required=True)
-        parser.add_argument('--processed_data', type=str, required=True)
+        parser.add_argument('--processed_data_path', type=str, required=True)
         args = parser.parse_args()
 
         args.process_data_url = args.process_data_url.replace("$$", "$$$")
@@ -34,12 +35,19 @@ implementation:
         resp = requests.get(args.process_data_url)
         resp.raise_for_status()
 
-        os.makedirs(os.path.dirname(args.processed_data), exist_ok=True)
-        with open(args.processed_data, "wb") as f:
+        # Save to a fixed path and output that path
+        data_file_path = "/tmp/downloaded_data.pkl"
+        with open(data_file_path, "wb") as f:
             f.write(resp.content)
-        print(f"Image dataset saved at {args.processed_data}")
+
+        # Write the file path to output
+        with open(args.processed_data_path, "w") as f:
+            f.write(data_file_path)
+        
+        print(f"Image dataset saved at {data_file_path}")
+        print(f"Path output: {data_file_path}")
     args:
       - --process_data_url
       - { inputValue: process_data_url }
-      - --processed_data
-      - { outputPath: processed_data }
+      - --processed_data_path
+      - { outputPath: processed_data_path }
