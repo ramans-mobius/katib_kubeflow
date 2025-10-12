@@ -1,4 +1,4 @@
-name: 3 CNN Build Model
+name: 4 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
@@ -8,9 +8,9 @@ inputs:
     type: String
     description: CNN model architecture name
 outputs:
-  - name: model_out
+  - name: model_path
     type: String
-    description: Built model file
+    description: Path to built model file
   - name: config_out
     type: String
     description: Model configuration
@@ -27,12 +27,11 @@ implementation:
       - -c
       - |
         import torch, argparse, json, os, pickle
-        from nesy_factory.CNNs.factory import CNNFactory
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--model_config', type=str, required=True)
         parser.add_argument('--model_name', type=str, required=True)
-        parser.add_argument('--model_out', type=str, required=True)
+        parser.add_argument('--model_path', type=str, required=True)
         parser.add_argument('--config_out', type=str, required=True)
         args = parser.parse_args()
 
@@ -46,23 +45,27 @@ implementation:
         model_info = model.get_model_info()
         print(f"Model parameters: {model.get_num_parameters()}")
 
-        os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
-        os.makedirs(os.path.dirname(args.config_out), exist_ok=True)
-
-        with open(args.model_out, 'wb') as f:
+        # Save model to fixed path
+        model_file_path = "/tmp/built_model.pkl"
+        with open(model_file_path, 'wb') as f:
             pickle.dump(model, f)
 
+        # Write model path to output
+        with open(args.model_path, 'w') as f:
+            f.write(model_file_path)
+
+        # Write config
         with open(args.config_out, 'w') as f:
             json.dump(config, f, indent=2)
 
-        print(f"Model saved to {args.model_out}")
+        print(f"Model saved to {model_file_path}")
         print(f"Config saved to {args.config_out}")
     args:
       - --model_name
       - {inputValue: model_name}
       - --model_config
       - {inputValue: model_config}
-      - --model_out
-      - {outputPath: model_out}
+      - --model_path
+      - {outputPath: model_path}
       - --config_out
       - {outputPath: config_out}
