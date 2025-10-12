@@ -1,4 +1,4 @@
-name: 2 CNN Model Trainer
+name: saay CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
