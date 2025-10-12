@@ -1,4 +1,4 @@
-name: 2 CNN Get Data Through CDN
+name: 3 CNN Get Data Through CDN
 description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
@@ -6,7 +6,7 @@ inputs:
     description: URL to fetch the image dataset from
 outputs:
   - name: processed_data
-    type: Dataset
+    type: String
 implementation:
   container:
     image: python:3.9
