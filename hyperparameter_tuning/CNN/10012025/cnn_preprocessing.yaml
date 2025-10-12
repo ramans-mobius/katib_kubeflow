@@ -18,7 +18,7 @@ outputs:
     description: "ResNet preprocessing config as JSON string"
 implementation:
   container:
-    image: nikhilv215/nesy-factory:v22
+    image: gurpreetgandhi/nesy-factory:v19
     command:
       - sh
       - -c
