@@ -5,17 +5,17 @@ inputs:
   - name: model_name
     type: String
     default: resnet
-    description: Name of the GNN model to train (e.g., tgcn, gat, rgcn)
+    description: Name of the GNN model to train (e.g., simple_cnn, resnet etc.)
 
   - name: projectid
     type: String
     default: ui_analysis
-    description: Name or ID of the use case (e.g., usecase1, usecase2, fraud, traffic)
-
+    description: Name or ID of the use case (e.g., ui_analysis)
+    
   - name: model_type
     type: String
     default: cnn
-    description: Type of model(e.g., gnn, ml, xgboost etc)
+    description: Type of model(e.g., gnn, cnn, etc)
 
   - name: config_json
     type: String
@@ -27,7 +27,7 @@ inputs:
 
   - name: objective_metric_name
     type: String
-    description: Metric name Katib will optimize (e.g., best_val_loss, accuracy, f1_score, roc_auc)
+    description: Metric name Katib will optimize (e.g., val_loss, accuracy, f1_score, roc_auc)
 
   - name: objective_type
     type: String
@@ -270,7 +270,7 @@ implementation:
                                 {
                                     "name": "training-container",
                                     "image": "sanram00/cnn-image:v1",
-                                    "command": ["python", "train_cnn.py"],
+                                    "command": ["python", "train_cnn_ui.py"],
                                     "args": trial_args,
                                     "resources": {
                                         "limits": {"cpu": "2", "memory": "2Gi"}
