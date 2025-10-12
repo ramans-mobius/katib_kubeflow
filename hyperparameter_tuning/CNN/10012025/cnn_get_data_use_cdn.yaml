@@ -1,17 +1,12 @@
-name: CNN Get Data Through CDN
-description: Downloads image dataset and weights from CDN URLs
+name: 2 CNN Get Data Through CDN
+description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
     type: String
     description: URL to fetch the image dataset from
-  - name: weights_url  
-    type: String
-    description: URL to fetch weights JSON from
 outputs:
   - name: processed_data
     type: Dataset
-  - name: weights_out
-    type: String
 implementation:
   container:
     image: python:3.9
@@ -20,7 +15,7 @@ implementation:
       - -c
       - |
         set -e
-        python3 -m pip install --quiet requests pickle5
+        python3 -m pip install --quiet requests
         exec "$0" "$@"
       - python3
       - -u
@@ -31,12 +26,9 @@ implementation:
         parser = argparse.ArgumentParser()
         parser.add_argument('--process_data_url', type=str, required=True)
         parser.add_argument('--processed_data', type=str, required=True)
-        parser.add_argument('--weights_url', type=str, required=True)
-        parser.add_argument('--weights_out', type=str, required=True)
         args = parser.parse_args()
 
         args.process_data_url = args.process_data_url.replace("$$", "$$$")
-        args.weights_url = args.weights_url.replace("$$", "$$$")
 
         print(f"Fetching image dataset from CDN: {args.process_data_url}")
         resp = requests.get(args.process_data_url)
@@ -46,21 +38,8 @@ implementation:
         with open(args.processed_data, "wb") as f:
             f.write(resp.content)
         print(f"Image dataset saved at {args.processed_data}")
-
-        print(f"Fetching weights from CDN: {args.weights_url}")
-        resp_w = requests.get(args.weights_url)
-        resp_w.raise_for_status()
-
-        os.makedirs(os.path.dirname(args.weights_out), exist_ok=True)
-        with open(args.weights_out, "w") as f:
-            f.write(resp_w.text)
-        print(f"Weights JSON saved at {args.weights_out}")
     args:
       - --process_data_url
       - { inputValue: process_data_url }
       - --processed_data
       - { outputPath: processed_data }
-      - --weights_url
-      - { inputValue: weights_url }
-      - --weights_out
-      - { outputPath: weights_out }
