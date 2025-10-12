@@ -1,4 +1,4 @@
-name: saay CNN Model Trainer
+name: 2 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
@@ -24,175 +24,174 @@ implementation:
   container:
     image: nikhilv215/nesy-factory:v18
     command:
-    - python3
-    - -u
-    - -c
-    - |
-      import os
-      import sys
-      import json
-      import torch
-      import torch.nn as nn
-      import torch.optim as optim
-      from pathlib import Path
-      import pickle
-      
-      print("CNN MODEL TRAINER")
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import sys
+        import json
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        from pathlib import Path
+        import pickle
+        
+        print("CNN MODEL TRAINER")
 
-      model_path = sys.argv[1]
-      processed_data_path = sys.argv[2]
-      model_config_str = sys.argv[3]
-      trained_model_path_file = sys.argv[4]
-      training_history_file = sys.argv[5]
-      final_accuracy_file = sys.argv[6]
-      
-      model_config = json.loads(model_config_str)
-      training_config = model_config.get('training', {})
-      epochs = training_config.get('epochs', 4)
-      batch_size = training_config.get('batch_size', 16)
-      learning_rate = training_config.get('learning_rate', 0.001)
-      
-      print(f"Model path: {model_path}")
-      print(f"Data path: {processed_data_path}")
-      print(f"Epochs: {epochs}")
-      print(f"Learning rate: {learning_rate}")
-      
-      try:
-          from nesy_factory.CNNs.factory import CNNFactory
-          from nesy_factory.utils import get_device
-          
-          device = get_device()
-          print(f"Training device: {device}")
-          
-          print("Loading model...")
-          with open(model_path, 'rb') as f:
-              model = pickle.load(f)
-          model = model.to(device)
-          
-          print("Loading preprocessed data...")
-          with open(processed_data_path, 'rb') as f:
-              data_wrapper = pickle.load(f)
-          
-          train_loader = data_wrapper.train_loader
-          val_loader = data_wrapper.test_loader
-          
-          print(f"Training batches: {len(train_loader)}")
-          print(f"Validation batches: {len(val_loader)}")
-          
-          optimizer_config = training_config.get('optimizer', {})
-          criterion_config = training_config.get('criterion', {})
-          
-          optimizer = optim.AdamW(
-              model.parameters(),
-              lr=optimizer_config.get('learning_rate', learning_rate),
-              weight_decay=optimizer_config.get('weight_decay', 1e-4)
-          )
-          
-          criterion = nn.CrossEntropyLoss(label_smoothing=criterion_config.get('label_smoothing', 0.1))
-          
-          print("Starting training...")
-          history = {
-              'train_loss': [], 'train_acc': [],
-              'val_loss': [], 'val_acc': [],
-              'best_val_acc': 0.0,
-              'best_val_loss': float('inf')
-          }
-          
-          for epoch in range(epochs):
-              model.train()
-              train_loss, train_acc = 0.0, 0.0
-              correct, total = 0, 0
-              
-              for batch_idx, (images, labels) in enumerate(train_loader):
-                  if images.numel() == 0:
-                      continue
-                  images, labels = images.to(device), labels.to(device)
-                  
-                  optimizer.zero_grad()
-                  outputs = model(images)
-                  loss = criterion(outputs, labels)
-                  loss.backward()
-                  optimizer.step()
-                  
-                  train_loss += loss.item()
-                  _, predicted = outputs.max(1)
-                  total += labels.size(0)
-                  correct += predicted.eq(labels).sum().item()
-              
-              train_acc = 100. * correct / total if total > 0 else 0.0
-              train_loss = train_loss / len(train_loader) if len(train_loader) > 0 else 0.0
-              
-              model.eval()
-              val_loss, val_acc = 0.0, 0.0
-              correct, total = 0, 0
-              
-              with torch.no_grad():
-                  for images, labels in val_loader:
-                      if images.numel() == 0:
-                          continue
-                      images, labels = images.to(device), labels.to(device)
-                      outputs = model(images)
-                      loss = criterion(outputs, labels)
-                      
-                      val_loss += loss.item()
-                      _, predicted = outputs.max(1)
-                      total += labels.size(0)
-                      correct += predicted.eq(labels).sum().item()
-              
-              val_acc = 100. * correct / total if total > 0 else 0.0
-              val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0.0
-              
-              history['train_loss'].append(train_loss)
-              history['train_acc'].append(train_acc)
-              history['val_loss'].append(val_loss)
-              history['val_acc'].append(val_acc)
-              
-              if val_acc > history['best_val_acc']:
-                  history['best_val_acc'] = val_acc
-              
-              if val_loss < history['best_val_loss']:
-                  history['best_val_loss'] = val_loss
-              
-              print(f'Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%')
-          
-          output_dir = Path('/tmp/trainer_output')
-          output_dir.mkdir(exist_ok=True)
-          trained_model_file = output_dir / 'trained_model.pth'
-          
-          torch.save({
-              'model_state_dict': model.state_dict(),
-              'optimizer_state_dict': optimizer.state_dict(),
-              'history': history,
-          }, str(trained_model_file))
-          
-          with open(trained_model_path_file, 'w') as f:
-              f.write(str(trained_model_file))
-          with open(training_history_file, 'w') as f:
-              json.dump(history, f)
-          with open(final_accuracy_file, 'w') as f:
-              f.write(f"{history['val_acc'][-1]:.2f}")
-          
-          print(f"Training completed")
-          print(f"Best validation accuracy: {history['best_val_acc']:.2f}%")
-          print(f"Final validation accuracy: {history['val_acc'][-1]:.2f}%")
-          print(f"Trained model saved to: {trained_model_file}")
-          
-      except Exception as e:
-          print(f"MODEL TRAINING FAILED: {e}")
-          import traceback
-          traceback.print_exc()
-          sys.exit(1)
-    
+        model_path = sys.argv[1]
+        processed_data_path = sys.argv[2]
+        model_config_str = sys.argv[3]
+        trained_model_path_file = sys.argv[4]
+        training_history_file = sys.argv[5]
+        final_accuracy_file = sys.argv[6]
+        
+        model_config = json.loads(model_config_str)
+        training_config = model_config.get('training', {})
+        epochs = training_config.get('epochs', 4)
+        batch_size = training_config.get('batch_size', 16)
+        learning_rate = training_config.get('learning_rate', 0.001)
+        
+        print(f"Model path: {model_path}")
+        print(f"Data path: {processed_data_path}")
+        print(f"Epochs: {epochs}")
+        print(f"Learning rate: {learning_rate}")
+        
+        try:
+            from nesy_factory.CNNs.factory import CNNFactory
+            from nesy_factory.utils import get_device
+            
+            device = get_device()
+            print(f"Training device: {device}")
+            
+            print("Loading model...")
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+            model = model.to(device)
+            
+            print("Loading preprocessed data...")
+            with open(processed_data_path, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            
+            train_loader = data_wrapper.train_loader
+            val_loader = data_wrapper.test_loader
+            
+            print(f"Training batches: {len(train_loader)}")
+            print(f"Validation batches: {len(val_loader)}")
+            
+            optimizer_config = training_config.get('optimizer', {})
+            criterion_config = training_config.get('criterion', {})
+            
+            optimizer = optim.AdamW(
+                model.parameters(),
+                lr=optimizer_config.get('learning_rate', learning_rate),
+                weight_decay=optimizer_config.get('weight_decay', 1e-4)
+            )
+            
+            criterion = nn.CrossEntropyLoss(label_smoothing=criterion_config.get('label_smoothing', 0.1))
+            
+            print("Starting training...")
+            history = {
+                'train_loss': [], 'train_acc': [],
+                'val_loss': [], 'val_acc': [],
+                'best_val_acc': 0.0,
+                'best_val_loss': float('inf')
+            }
+            
+            for epoch in range(epochs):
+                model.train()
+                train_loss, train_acc = 0.0, 0.0
+                correct, total = 0, 0
+                
+                for batch_idx, (images, labels) in enumerate(train_loader):
+                    if images.numel() == 0:
+                        continue
+                    images, labels = images.to(device), labels.to(device)
+                    
+                    optimizer.zero_grad()
+                    outputs = model(images)
+                    loss = criterion(outputs, labels)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    train_loss += loss.item()
+                    _, predicted = outputs.max(1)
+                    total += labels.size(0)
+                    correct += predicted.eq(labels).sum().item()
+                
+                train_acc = 100. * correct / total if total > 0 else 0.0
+                train_loss = train_loss / len(train_loader) if len(train_loader) > 0 else 0.0
+                
+                model.eval()
+                val_loss, val_acc = 0.0, 0.0
+                correct, total = 0, 0
+                
+                with torch.no_grad():
+                    for images, labels in val_loader:
+                        if images.numel() == 0:
+                            continue
+                        images, labels = images.to(device), labels.to(device)
+                        outputs = model(images)
+                        loss = criterion(outputs, labels)
+                        
+                        val_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        total += labels.size(0)
+                        correct += predicted.eq(labels).sum().item()
+                
+                val_acc = 100. * correct / total if total > 0 else 0.0
+                val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else 0.0
+                
+                history['train_loss'].append(train_loss)
+                history['train_acc'].append(train_acc)
+                history['val_loss'].append(val_loss)
+                history['val_acc'].append(val_acc)
+                
+                if val_acc > history['best_val_acc']:
+                    history['best_val_acc'] = val_acc
+                
+                if val_loss < history['best_val_loss']:
+                    history['best_val_loss'] = val_loss
+                
+                print(f'Epoch {epoch+1}/{epochs}: Train Loss: {train_loss:.4f}, Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%')
+            
+            output_dir = Path('/tmp/trainer_output')
+            output_dir.mkdir(exist_ok=True)
+            trained_model_file = output_dir / 'trained_model.pth'
+            
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'history': history,
+            }, str(trained_model_file))
+            
+            with open(trained_model_path_file, 'w') as f:
+                f.write(str(trained_model_file))
+            with open(training_history_file, 'w') as f:
+                json.dump(history, f)
+            with open(final_accuracy_file, 'w') as f:
+                f.write(f"{history['val_acc'][-1]:.2f}")
+            
+            print(f"Training completed")
+            print(f"Best validation accuracy: {history['best_val_acc']:.2f}%")
+            print(f"Final validation accuracy: {history['val_acc'][-1]:.2f}%")
+            print(f"Trained model saved to: {trained_model_file}")
+            
+        except Exception as e:
+            print(f"MODEL TRAINING FAILED: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
     args:
-    - --model_path
-    - {inputValue: model_path}
-    - --processed_data_path
-    - {inputValue: processed_data_path}
-    - --model_config
-    - {inputValue: model_config}
-    - --trained_model_path
-    - {outputPath: trained_model_path}
-    - --training_history
-    - {outputPath: training_history}
-    - --final_accuracy
-    - {outputPath: final_accuracy}
+      - --model_path
+      - {inputValue: model_path}
+      - --processed_data_path
+      - {inputValue: processed_data_path}
+      - --model_config
+      - {inputValue: model_config}
+      - --trained_model_path
+      - {outputPath: trained_model_path}
+      - --training_history
+      - {outputPath: training_history}
+      - --final_accuracy
+      - {outputPath: final_accuracy}
