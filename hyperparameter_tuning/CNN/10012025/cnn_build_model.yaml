@@ -1,4 +1,4 @@
-name:  2 CNN Build Model
+name:  3 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
@@ -9,7 +9,7 @@ inputs:
     description: CNN model architecture name
 outputs:
   - name: model_out
-    type: Model
+    type: String
     description: Built model file
   - name: config_out
     type: String
