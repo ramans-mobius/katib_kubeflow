@@ -29,7 +29,7 @@ outputs:
 
 implementation:
   container:
-    image: nikhilv215/nesy-factory:v18
+    image: gurpreetgandhi/nesy-factory:v19
     command:
     - python3
     - -u
