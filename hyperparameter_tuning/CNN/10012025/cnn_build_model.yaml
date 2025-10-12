@@ -16,7 +16,7 @@ outputs:
     description: Model configuration
 implementation:
   container:
-    image: gurpreetgandhi/nesy-factory:v18
+    image: gurpreetgandhi/nesy-factory:v19
     command:
       - sh
       - -c
