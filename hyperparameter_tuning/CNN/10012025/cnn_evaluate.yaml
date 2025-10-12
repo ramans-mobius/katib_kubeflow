@@ -1,131 +1,159 @@
-name: CNN Evaluate Model
-description: Evaluates trained CNN model and generates comprehensive performance metrics
+name: 2 CNN Model Evaluator
+description: Comprehensive evaluation of trained CNN model
 inputs:
-  - name: trained_model
-    type: Model
-  - name: data_path
-    type: Dataset
-  - name: config
+  - name: trained_model_path
     type: String
+    description: Path to trained model
+  - name: processed_data_path
+    type: String
+    description: Path to preprocessed data
+  - name: model_config
+    type: String
+    description: Complete model configuration
 outputs:
-  - name: metrics
-    type: Metrics
-  - name: metrics_json
+  - name: evaluation_results
     type: String
+    description: JSON with comprehensive evaluation results
+  - name: test_accuracy
+    type: String
+    description: Final test accuracy percentage
+  - name: confusion_matrix
+    type: String
+    description: Path to confusion matrix data
 implementation:
   container:
-    image: gurpreetgandhi/nesy-factory:v18
+    image: nikhilv215/nesy-factory:v18
     command:
-      - sh
-      - -c
-      - |
-        exec "$0" "$@"
-      - python3
-      - -u
-      - -c
-      - |
-        import torch, argparse, pickle, json, os, numpy as np
-        from sklearn.metrics import classification_report, confusion_matrix
-        from nesy_factory.CNNs.factory import CNNFactory
-        from nesy_factory.utils import get_device
+    - python3
+    - -u
+    - -c
+    - |
+      import os
+      import sys
+      import json
+      import torch
+      import torch.nn as nn
+      import numpy as np
+      from pathlib import Path
+      import pickle
+      from sklearn.metrics import confusion_matrix, classification_report
+      
+      print("CNN MODEL EVALUATOR")
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--trained_model', type=str, required=True)
-        parser.add_argument('--data_path', type=str, required=True)
-        parser.add_argument('--config', type=str, required=True)
-        parser.add_argument('--metrics', type=str, required=True)
-        parser.add_argument('--metrics_json', type=str, required=True)
-        args = parser.parse_args()
-
-        print(f"Trained model path: {args.trained_model}")
-        print(f"Data path: {args.data_path}")
-
-        config = json.loads(args.config)
-        print(f"Evaluation configuration: {config}")
-
-        print("Loading trained model...")
-        architecture = config.get('architecture', 'resnet')
-        model = CNNFactory.create_model(architecture, config)
-        model.load_state_dict(torch.load(args.trained_model, map_location=torch.device('cpu')))
-        
-        device = get_device()
-        model = model.to(device)
-        model.eval()
-
-        print("Loading data...")
-        with open(args.data_path, "rb") as f:
-            data_dict = pickle.load(f)
-        
-        val_loader = data_dict.get('val_loader')
-        if val_loader is None:
-            raise ValueError("Data must contain val_loader")
-
-        dataset_info = data_dict.get('dataset_info', {})
-        class_names = dataset_info.get('classes', [])
-
-        print("Starting CNN model evaluation")
-        all_predictions = []
-        all_labels = []
-        all_probabilities = []
-        total_loss = 0.0
-        criterion = torch.nn.CrossEntropyLoss()
-
-        with torch.no_grad():
-            for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
-                
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                total_loss += loss.item()
-                
-                probabilities = torch.softmax(outputs, dim=1)
-                _, predicted = outputs.max(1)
-                
-                all_predictions.extend(predicted.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
-                all_probabilities.extend(probabilities.cpu().numpy())
-
-        val_loss = total_loss / len(val_loader)
-        accuracy = 100.0 * np.sum(np.array(all_predictions) == np.array(all_labels)) / len(all_labels)
-
-        class_report = classification_report(all_labels, all_predictions, output_dict=True)
-        conf_matrix = confusion_matrix(all_labels, all_predictions)
-
-        probabilities = np.array(all_probabilities)
-        confidence_scores = np.max(probabilities, axis=1)
-        avg_confidence = np.mean(confidence_scores)
-
-        eval_metrics = {
-            'val_loss': float(val_loss),
-            'accuracy': float(accuracy),
-            'average_confidence': float(avg_confidence),
-            'total_samples': len(all_labels),
-            'correct_predictions': int(np.sum(np.array(all_predictions) == np.array(all_labels))),
-            'detailed_metrics': class_report,
-            'confusion_matrix': conf_matrix.tolist()
-        }
-
-        os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
-        os.makedirs(os.path.dirname(args.metrics_json), exist_ok=True)
-
-        print("Saving evaluation metrics...")
-        with open(args.metrics, 'w') as f:
-            json.dump(eval_metrics, f, indent=2)
-
-        with open(args.metrics_json, 'w') as f:
-            json.dump(eval_metrics, f, indent=2)
-
-        print(f"Evaluation complete - Accuracy: {accuracy:.2f}%")
-        print(f"Saved metrics to {args.metrics}")
-        print(f"Saved metrics JSON to {args.metrics_json}")
+      trained_model_path = sys.argv[1]
+      processed_data_path = sys.argv[2]
+      model_config_str = sys.argv[3]
+      evaluation_results_file = sys.argv[4]
+      test_accuracy_file = sys.argv[5]
+      confusion_matrix_file = sys.argv[6]
+      
+      model_config = json.loads(model_config_str)
+      
+      print(f"Trained model path: {trained_model_path}")
+      print(f"Data path: {processed_data_path}")
+      
+      try:
+          from nesy_factory.CNNs.factory import CNNFactory
+          from nesy_factory.utils import get_device
+          
+          device = get_device()
+          
+          print("Loading trained model...")
+          checkpoint = torch.load(trained_model_path, map_location=device)
+          
+          model_config_eval = model_config.get('model', {})
+          model = CNNFactory.create_model(model_config_eval.get('architecture', 'basecnn'), model_config_eval)
+          model.load_state_dict(checkpoint['model_state_dict'])
+          model = model.to(device)
+          
+          print("Loading test data...")
+          with open(processed_data_path, 'rb') as f:
+              data_wrapper = pickle.load(f)
+          
+          val_loader = data_wrapper.test_loader
+          
+          print(f"Test batches: {len(val_loader)}")
+          
+          print("Running evaluation...")
+          model.eval()
+          criterion = nn.CrossEntropyLoss()
+          
+          all_predictions = []
+          all_labels = []
+          total_loss = 0.0
+          
+          with torch.no_grad():
+              for images, labels in val_loader:
+                  if images.numel() == 0:
+                      continue
+                  images, labels = images.to(device), labels.to(device)
+                  outputs = model(images)
+                  
+                  loss = criterion(outputs, labels)
+                  total_loss += loss.item()
+                  
+                  _, predicted = outputs.max(1)
+                  
+                  all_predictions.extend(predicted.cpu().numpy())
+                  all_labels.extend(labels.cpu().numpy())
+          
+          if len(all_labels) > 0:
+              accuracy = 100.0 * np.sum(np.array(all_predictions) == np.array(all_labels)) / len(all_labels)
+              val_loss = total_loss / len(val_loader)
+          else:
+              accuracy = 0.0
+              val_loss = 0.0
+          
+          cm = confusion_matrix(all_labels, all_predictions)
+          class_report = classification_report(all_labels, all_predictions, output_dict=True)
+          
+          evaluation_results = {
+              'model_name': model_config_eval.get('architecture', 'unknown'),
+              'accuracy': accuracy,
+              'val_loss': val_loss,
+              'total_samples': len(all_labels),
+              'correct_predictions': np.sum(np.array(all_predictions) == np.array(all_labels)),
+              'confusion_matrix': cm.tolist(),
+              'classification_report': class_report,
+              'training_history': checkpoint.get('history', {})
+          }
+          
+          output_dir = Path('/tmp/evaluator_output')
+          output_dir.mkdir(exist_ok=True)
+          cm_data_path = output_dir / 'confusion_matrix.json'
+          
+          with open(cm_data_path, 'w') as f:
+              json.dump(cm.tolist(), f)
+          
+          with open(evaluation_results_file, 'w') as f:
+              json.dump(evaluation_results, f, indent=2)
+          with open(test_accuracy_file, 'w') as f:
+              f.write(f"{accuracy:.2f}")
+          with open(confusion_matrix_file, 'w') as f:
+              f.write(str(cm_data_path))
+          
+          print(f"Evaluation completed")
+          print(f"Test Accuracy: {accuracy:.2f}%")
+          print(f"Test Loss: {val_loss:.4f}")
+          print(f"Correct: {evaluation_results['correct_predictions']}/{evaluation_results['total_samples']}")
+          print(f"Confusion matrix saved to: {cm_data_path}")
+          
+      except Exception as e:
+          print(f"MODEL EVALUATION FAILED: {e}")
+          import traceback
+          traceback.print_exc()
+          sys.exit(1)
+    
     args:
-      - --trained_model
-      - {inputPath: trained_model}
-      - --data_path
-      - {inputPath: data_path}
-      - --config
-      - {inputValue: config}
-      - --metrics
-      - {outputPath: metrics}
-      - --metrics_json
-      - {outputPath: metrics_json}
+    - --trained_model_path
+    - {inputValue: trained_model_path}
+    - --processed_data_path
+    - {inputValue: processed_data_path}
+    - --model_config
+    - {inputValue: model_config}
+    - --evaluation_results
+    - {outputPath: evaluation_results}
+    - --test_accuracy
+    - {outputPath: test_accuracy}
+    - --confusion_matrix
+    - {outputPath: confusion_matrix}
