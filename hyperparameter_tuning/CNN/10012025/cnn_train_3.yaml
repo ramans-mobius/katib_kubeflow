@@ -1,4 +1,4 @@
-name: CNN Model Trainer
+name: 123 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 
 inputs:
