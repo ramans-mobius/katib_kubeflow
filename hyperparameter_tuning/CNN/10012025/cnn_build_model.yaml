@@ -1,4 +1,4 @@
-name: 7 CNN Build Model
+name: 8 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
@@ -31,9 +31,9 @@ implementation:
         # Import CNNFactory
         try:
             from nesy_factory.CNNs.factory import CNNFactory
-            print("✅ Successfully imported CNNFactory")
+            print("Successfully imported CNNFactory")
         except ImportError as e:
-            print(f"❌ Failed to import CNNFactory: {e}")
+            print(f"Failed to import CNNFactory: {e}")
             sys.exit(1)
 
         parser = argparse.ArgumentParser()
@@ -53,13 +53,13 @@ implementation:
         missing_params = [param for param in required_params if param not in model_config]
         
         if missing_params:
-            print(f"❌ Missing required parameters in model_config: {missing_params}")
+            print(f"Missing required parameters in model_config: {missing_params}")
             print(f"Current model_config keys: {list(model_config.keys())}")
             print("Please ensure your model_config includes 'output_dim' (number of output classes)")
             sys.exit(1)
         
         # Validate configuration structure
-        print(f"🔧 Building {args.model_name} model with config:")
+        print(f"Building {args.model_name} model with config:")
         print(f"   - output_dim: {model_config.get('output_dim')}")
         print(f"   - input_channels: {model_config.get('input_channels', 3)}")
         print(f"   - input_size: {model_config.get('input_size', (224, 224))}")
@@ -67,15 +67,15 @@ implementation:
 
         try:
             model = CNNFactory.create_model(args.model_name, model_config)
-            print("✅ CNN model created successfully")
+            print("CNN model created successfully")
             
             model_info = model.get_model_info()
-            print(f"📊 Model parameters: {model.get_num_parameters():,}")
-            print(f"🏗️  Model architecture: {model_info.get('model_name', 'Unknown')}")
+            print(f"Model parameters: {model.get_num_parameters():,}")
+            print(f"Model architecture: {model_info.get('model_name', 'Unknown')}")
             
         except Exception as e:
-            print(f"❌ Failed to create model: {e}")
-            print("💡 Required configuration parameters for CNN models:")
+            print(f"Failed to create model: {e}")
+            print("Required configuration parameters for CNN models:")
             print("   - output_dim: Number of output classes (required)")
             print("   - input_channels: Number of input channels (default: 3)")
             print("   - input_size: Input image size as tuple (default: (224, 224))")
@@ -87,9 +87,9 @@ implementation:
         try:
             with open(model_file_path, 'wb') as f:
                 pickle.dump(model, f)
-            print(f"💾 Model saved to {model_file_path}")
+            print(f"Model saved to {model_file_path}")
         except Exception as e:
-            print(f"❌ Failed to save model: {e}")
+            print(f"Failed to save model: {e}")
             sys.exit(1)
 
         # Write model path to output
@@ -97,19 +97,19 @@ implementation:
             with open(args.model_path, 'w') as f:
                 f.write(model_file_path)
         except Exception as e:
-            print(f"❌ Failed to write model path: {e}")
+            print(f"Failed to write model path: {e}")
             sys.exit(1)
 
         # Write config
         try:
             with open(args.config_out, 'w') as f:
                 json.dump(config, f, indent=2)
-            print(f"📄 Config saved to {args.config_out}")
+            print(f"Config saved to {args.config_out}")
         except Exception as e:
-            print(f"❌ Failed to save config: {e}")
+            print(f"Failed to save config: {e}")
             sys.exit(1)
 
-        print("🎉 CNN Build Model completed successfully!")
+        print("CNN Build Model completed successfully!")
     args:
       - --model_name
       - {inputValue: model_name}
