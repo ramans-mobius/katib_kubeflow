@@ -110,14 +110,14 @@ implementation:
         try:
             print("DEBUG: Loading Kubernetes config...")
             config.load_incluster_config()
-            print("✓ DEBUG: Successfully loaded in-cluster config")
+            print("DEBUG: Successfully loaded in-cluster config")
         except Exception as e:
             print(f"DEBUG: In-cluster config failed: {e}")
             try:
                 config.load_kube_config()
-                print("✓ DEBUG: Successfully loaded kube config")
+                print("DEBUG: Successfully loaded kube config")
             except Exception as e2:
-                print(f"✗ DEBUG: Kube config also failed: {e2}")
+                print(f"DEBUG: Kube config also failed: {e2}")
                 raise
 
         parser = argparse.ArgumentParser()
@@ -169,7 +169,7 @@ implementation:
                     print(f"     feasible_space: {param['feasible_space']}")
             
         except Exception as e:
-            print(f"✗ DEBUG: Failed to parse parameters_to_tune: {e}")
+            print(f"DEBUG: Failed to parse parameters_to_tune: {e}")
             print(f"DEBUG: parameters_to_tune content: {args.parameters_to_tune}")
             raise
 
@@ -281,7 +281,7 @@ implementation:
                                     "command": ["python", "train_cnn_ui.py"],
                                     "args": trial_args,
                                     "resources": {
-                                        "limits": {"cpu": "1", "memory": "1Gi"}
+                                        "limits": {"cpu": "2", "memory": "4Gi"}
                                     }
                                 }
                             ],
@@ -318,9 +318,9 @@ implementation:
         print("=== DEBUG: CREATING EXPERIMENT IN KUBERNETES ===")
         try:
             katib_client.create_experiment(experiment)
-            print("✓ DEBUG: Experiment created successfully!")
+            print("DEBUG: Experiment created successfully!")
         except Exception as e:
-            print(f"✗ DEBUG: Failed to create experiment: {e}")
+            print(f"DEBUG: Failed to create experiment: {e}")
             print("DEBUG: Experiment spec:")
             print(json.dumps(experiment.to_dict(), indent=2, default=str))
             raise
@@ -328,9 +328,9 @@ implementation:
         print("=== DEBUG: WAITING FOR EXPERIMENT COMPLETION ===")
         try:
             katib_client.wait_for_experiment_condition(name=experiment_name, namespace=namespace, timeout=10800)
-            print("✓ DEBUG: Experiment completed!")
+            print("DEBUG: Experiment completed!")
         except Exception as e:
-            print(f"✗ DEBUG: Experiment wait failed: {e}")
+            print(f"DEBUG: Experiment wait failed: {e}")
             # Continue to try to get trials anyway
 
         print("=== DEBUG: FETCHING TRIALS ===")
@@ -339,7 +339,7 @@ implementation:
             print(f"DEBUG: Found {len(trials)} trials")
             
             if len(trials) == 0:
-                print("⚠️ DEBUG: WARNING - 0 TRIALS FOUND!")
+                print("DEBUG: WARNING - 0 TRIALS FOUND!")
                 print("DEBUG: Checking experiment status...")
                 exp_status = katib_client.get_experiment_status(experiment_name, namespace)
                 print(f"DEBUG: Experiment status: {exp_status}")
@@ -421,9 +421,9 @@ implementation:
                 print("✓ DEBUG: Best Hyperparameters Found:", hp_dict)
             else:
                 hp_dict = {}
-                print("⚠️ DEBUG: No optimal hyperparameters found")
+                print("DEBUG: No optimal hyperparameters found")
         except Exception as e:
-            print(f"✗ DEBUG: Failed to get optimal hyperparameters: {e}")
+            print(f"DEBUG: Failed to get optimal hyperparameters: {e}")
             hp_dict = {}
 
         dir_path = os.path.dirname(args.best_hyperparams)
