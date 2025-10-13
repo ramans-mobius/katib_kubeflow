@@ -1,9 +1,9 @@
-name: 8 CNN Build Model
+name: 6 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
     type: String  
-    description: Complete model configuration as JSON string (must include output_dim)
+    description: Complete model configuration as JSON string
   - name: model_name
     type: String
     description: CNN model architecture name
@@ -31,9 +31,9 @@ implementation:
         # Import CNNFactory
         try:
             from nesy_factory.CNNs.factory import CNNFactory
-            print("Successfully imported CNNFactory")
+            print("✅ Successfully imported CNNFactory")
         except ImportError as e:
-            print(f"Failed to import CNNFactory: {e}")
+            print(f"❌ Failed to import CNNFactory: {e}")
             sys.exit(1)
 
         parser = argparse.ArgumentParser()
@@ -48,38 +48,45 @@ implementation:
         model_config = config.get('model', {})
         model_config['architecture'] = args.model_name
         
-        # VALIDATE REQUIRED PARAMETERS
-        required_params = ['output_dim']
-        missing_params = [param for param in required_params if param not in model_config]
+        # AUTO-ADD MISSING REQUIRED PARAMETERS WITH DEFAULTS
+        if 'output_dim' not in model_config:
+            print(f"⚠️  output_dim not found in model_config, using default: 10")
+            model_config['output_dim'] = 10
         
-        if missing_params:
-            print(f"Missing required parameters in model_config: {missing_params}")
-            print(f"Current model_config keys: {list(model_config.keys())}")
-            print("Please ensure your model_config includes 'output_dim' (number of output classes)")
-            sys.exit(1)
+        # Set default values for other common parameters if missing
+        defaults = {
+            'input_channels': 3,
+            'input_size': [224, 224],
+            'pretrained': True,
+            'task_type': 'classification'
+        }
+        
+        for param, default_value in defaults.items():
+            if param not in model_config:
+                print(f"⚠️  {param} not found in model_config, using default: {default_value}")
+                model_config[param] = default_value
         
         # Validate configuration structure
-        print(f"Building {args.model_name} model with config:")
-        print(f"   - output_dim: {model_config.get('output_dim')}")
-        print(f"   - input_channels: {model_config.get('input_channels', 3)}")
-        print(f"   - input_size: {model_config.get('input_size', (224, 224))}")
-        print(f"   - architecture: {model_config.get('architecture')}")
+        print(f"🔧 Building {args.model_name} model with config:")
+        for key in ['output_dim', 'input_channels', 'input_size', 'architecture', 'variant', 'pretrained']:
+            if key in model_config:
+                print(f"   - {key}: {model_config[key]}")
+        
+        print(f"   - All config keys: {list(model_config.keys())}")
 
         try:
             model = CNNFactory.create_model(args.model_name, model_config)
-            print("CNN model created successfully")
+            print("✅ CNN model created successfully")
             
             model_info = model.get_model_info()
-            print(f"Model parameters: {model.get_num_parameters():,}")
-            print(f"Model architecture: {model_info.get('model_name', 'Unknown')}")
+            print(f"📊 Model parameters: {model.get_num_parameters():,}")
+            print(f"🏗️  Model architecture: {model_info.get('model_name', 'Unknown')}")
             
         except Exception as e:
-            print(f"Failed to create model: {e}")
-            print("Required configuration parameters for CNN models:")
-            print("   - output_dim: Number of output classes (required)")
-            print("   - input_channels: Number of input channels (default: 3)")
-            print("   - input_size: Input image size as tuple (default: (224, 224))")
-            print("   - Optional: base_channels, num_blocks, hidden_dims, etc.")
+            print(f"❌ Failed to create model: {e}")
+            print("💡 Configuration parameters used:")
+            for key, value in model_config.items():
+                print(f"   - {key}: {value}")
             sys.exit(1)
 
         # Save model to fixed path
@@ -87,9 +94,9 @@ implementation:
         try:
             with open(model_file_path, 'wb') as f:
                 pickle.dump(model, f)
-            print(f"Model saved to {model_file_path}")
+            print(f"💾 Model saved to {model_file_path}")
         except Exception as e:
-            print(f"Failed to save model: {e}")
+            print(f"❌ Failed to save model: {e}")
             sys.exit(1)
 
         # Write model path to output
@@ -97,19 +104,22 @@ implementation:
             with open(args.model_path, 'w') as f:
                 f.write(model_file_path)
         except Exception as e:
-            print(f"Failed to write model path: {e}")
+            print(f"❌ Failed to write model path: {e}")
             sys.exit(1)
 
+        # Update the original config with the modified model_config
+        config['model'] = model_config
+        
         # Write config
         try:
             with open(args.config_out, 'w') as f:
                 json.dump(config, f, indent=2)
-            print(f"Config saved to {args.config_out}")
+            print(f"📄 Config saved to {args.config_out}")
         except Exception as e:
-            print(f"Failed to save config: {e}")
+            print(f"❌ Failed to save config: {e}")
             sys.exit(1)
 
-        print("CNN Build Model completed successfully!")
+        print("🎉 CNN Build Model completed successfully!")
     args:
       - --model_name
       - {inputValue: model_name}
