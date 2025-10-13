@@ -1,4 +1,4 @@
-name: saayalpha CNN Model Trainer
+name: saaybeta CNN Model Trainer
 description: Trains CNN model on preprocessed data using any architecture from CNN factory
 inputs:
   - name: model_path
