@@ -1,0 +1,227 @@
+name: CNN Hyperparameter Test Brick
+description: Test brick that mimics CNN hyperparameter tuning output for schema testing
+
+inputs:
+  - name: model_name
+    type: String
+    default: resnet
+    description: Name of the model
+
+  - name: projectid
+    type: String
+    default: ui_analysis
+    description: Name or ID of the use case
+    
+  - name: model_type
+    type: String
+    default: cnn
+    description: Type of model
+
+  - name: config_json
+    type: String
+    description: Configuration of the model
+
+  - name: process_data_url
+    type: String
+    description: CDN url of processed dataset
+    
+  - name: parameters_to_tune
+    type: String
+    description: List of parameter specs to tune
+
+  - name: objective_metric_name
+    type: String
+    description: Metric name for optimization
+
+  - name: objective_type
+    type: String
+    description: Objective type for optimization
+
+  - name: objective_goal
+    type: String
+    description: Target goal value for the metric
+    
+  - name: algorithm_name
+    type: String
+    default: bayesianoptimization
+    description: Search algorithm
+
+  - name: early_stopping_algorithm
+    type: String
+    default: medianstop
+    description: Early stopping algorithm
+
+  - name: max_trial_count 
+    type: Integer
+    default: '4'
+    description: Maximum number of trials
+
+  - name: parallel_trial_count
+    type: String
+    default: '2'
+    description: Number of trials to run in parallel
+
+  - name: max_failed_trial_count
+    type: String
+    default: '2'
+    description: Maximum number of failed trials
+
+outputs:
+  - name: best_hyperparams
+    type: JsonArray
+    description: Mock best parameter set
+
+  - name: payload
+    type: string
+    description: Test payload for PI Entity
+
+implementation:
+  container:
+    image: python:3.8
+    command:
+    - python3
+    - -u
+    - -c
+    - |
+      import json
+      import os
+      import time
+      import argparse
+      import uuid
+
+      parser = argparse.ArgumentParser()
+      parser.add_argument("--best_hyperparams", type=str, required=True)
+      parser.add_argument("--parameters_to_tune", type=str, required=True)
+      parser.add_argument("--objective_metric_name", type=str, required=True)
+      parser.add_argument("--objective_type", type=str, required=True)
+      parser.add_argument("--process_data_url", type=str, required=True)
+      parser.add_argument("--objective_goal", type=float, required=True)
+      parser.add_argument("--algorithm_name", type=str, required=True)
+      parser.add_argument("--early_stopping_algorithm", type=str, required=True)
+      parser.add_argument("--max_trial_count", type=int, required=True)
+      parser.add_argument("--parallel_trial_count", type=int, required=True)
+      parser.add_argument("--max_failed_trial_count", type=int, required=True)
+      parser.add_argument("--model_name", type=str, required=True)
+      parser.add_argument("--projectid", type=str, required=True)
+      parser.add_argument("--payload", type=str, required=True)
+      parser.add_argument("--model_type", type=str, required=True)
+      parser.add_argument("--config_json", type=str, required=True)
+      
+      args = parser.parse_args()
+
+      print("=== TEST BRICK: GENERATING MOCK DATA ===")
+      print(f"Model: {args.model_name}")
+      print(f"Project: {args.projectid}")
+      print(f"Model Type: {args.model_type}")
+      print(f"Objective: {args.objective_metric_name} ({args.objective_type})")
+
+      # Parse parameters to extract parameter names for mock data
+      try:
+          params_input = json.loads(args.parameters_to_tune)
+          param_names = [p["name"] for p in params_input]
+          print(f"Parameters to tune: {param_names}")
+      except:
+          param_names = ["learning_rate", "batch_size", "weight_decay"]
+          print(f"Using default parameters: {param_names}")
+
+      # Generate mock best hyperparameters
+      best_hyperparams = {}
+      for param in param_names:
+          if "learning_rate" in param:
+              best_hyperparams[param] = 0.0005
+          elif "batch_size" in param:
+              best_hyperparams[param] = 16
+          elif "weight_decay" in param:
+              best_hyperparams[param] = 0.0001
+          else:
+              best_hyperparams[param] = 0.001
+
+      print(f"Mock best hyperparameters: {best_hyperparams}")
+
+      # Generate mock trial data (similar to actual Katib output)
+      payload_data = []
+      for trial_idx in range(1, args.max_trial_count + 1):
+          trial_data = {
+              'project_id': args.projectid,
+              'model_name': f"{args.model_name}_trial{trial_idx}",
+              'model_type': args.model_type,
+              'timestamp': time.strftime("%Y%m%d%H%M%S")
+          }
+          
+          # Add mock hyperparameters for this trial
+          for param in param_names:
+              if "learning_rate" in param:
+                  trial_data[param] = 0.0001 * trial_idx
+              elif "batch_size" in param:
+                  trial_data[param] = 8 * trial_idx
+              elif "weight_decay" in param:
+                  trial_data[param] = 0.00001 * trial_idx
+              else:
+                  trial_data[param] = 0.001 * trial_idx
+          
+          # Add mock metrics
+          if args.objective_metric_name == "val_loss":
+              metric_value = 0.1 - (0.02 * trial_idx)  # Decreasing loss
+          elif args.objective_metric_name == "accuracy":
+              metric_value = 0.8 + (0.05 * trial_idx)  # Increasing accuracy
+          else:
+              metric_value = 0.5 + (0.1 * trial_idx)   # Generic improvement
+          
+          trial_data["metrics_value"] = [{args.objective_metric_name: metric_value}]
+          payload_data.append(trial_data)
+          
+          print(f"Trial {trial_idx}: {args.objective_metric_name} = {metric_value}")
+
+      # Create final payload structure
+      payload = {
+          "data": payload_data
+      }
+
+      print(f"Generated {len(payload_data)} mock trials")
+
+      # Write outputs
+      os.makedirs(os.path.dirname(args.payload), exist_ok=True)
+      with open(args.payload, "w") as f:
+          json.dump(payload, f, indent=2)
+
+      os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+      with open(args.best_hyperparams, "w") as f:
+          json.dump(best_hyperparams, f, indent=2)
+
+      print("=== TEST BRICK: COMPLETED SUCCESSFULLY ===")
+      print(f"Payload written to: {args.payload}")
+      print(f"Best hyperparams written to: {args.best_hyperparams}")
+
+    args:
+      - --model_name
+      - {inputValue: model_name}
+      - --model_type
+      - {inputValue: model_type}
+      - --config_json
+      - {inputValue: config_json}
+      - --process_data_url
+      - {inputValue: process_data_url}
+      - --parameters_to_tune
+      - {inputValue: parameters_to_tune}
+      - --objective_metric_name
+      - {inputValue: objective_metric_name}
+      - --objective_type
+      - {inputValue: objective_type}
+      - --objective_goal
+      - {inputValue: objective_goal}
+      - --algorithm_name
+      - {inputValue: algorithm_name}
+      - --early_stopping_algorithm
+      - {inputValue: early_stopping_algorithm}
+      - --max_trial_count
+      - {inputValue: max_trial_count}
+      - --parallel_trial_count
+      - {inputValue: parallel_trial_count}
+      - --max_failed_trial_count
+      - {inputValue: max_failed_trial_count}
+      - --projectid
+      - {inputValue: projectid}
+      - --best_hyperparams
+      - {outputPath: best_hyperparams}
+      - --payload
+      - {outputPath: payload}
