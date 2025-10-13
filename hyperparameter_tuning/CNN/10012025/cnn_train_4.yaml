@@ -246,22 +246,8 @@ implementation:
               'data_info': data_info
           }, trained_model_file_path)
           
-          def save_katib_metrics(val_loss, training_history=None):
-              katib_dir = Path("/katib")
-              katib_dir.mkdir(parents=True, exist_ok=True)
-              metrics_file = katib_dir / "mnist.json"
-              record = {
-                  "val_loss": f"{val_loss:.6f}",
-                  "global_step": str(len(training_history) if training_history else 1),
-                  "timestamp": time.time()
-              }
-              with open(metrics_file, "a", encoding="utf-8") as f:
-                  json.dump(record, f)
-                  f.write("\n")
-              print(f"Saved metrics for Katib: val_loss = {val_loss:.6f}")
           
           final_val_loss = training_history[-1]['val_loss'] if training_history else 10.0
-          #save_katib_metrics(final_val_loss, training_history)
           
           os.makedirs(os.path.dirname(trained_model_path_file), exist_ok=True)
           os.makedirs(os.path.dirname(training_history_file), exist_ok=True)
