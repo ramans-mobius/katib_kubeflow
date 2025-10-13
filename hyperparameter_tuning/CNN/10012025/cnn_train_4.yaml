@@ -254,7 +254,7 @@ implementation:
                       'best_val_loss': best_val_loss,
                       'epoch': epoch + 1
                   }, best_model_path)
-                  print(f"✅ Saved best model with val_loss: {best_val_loss:.4f}")
+                  print(f"Saved best model with val_loss: {best_val_loss:.4f}")
               else:
                   patience_counter += 1
                   
@@ -300,7 +300,7 @@ implementation:
                   json.dump(record, f)
                   f.write("\n")
               
-              print(f"📊 Saved metrics for Katib: val_loss = {val_loss:.6f}")
+              print(f"Saved metrics for Katib: val_loss = {val_loss:.6f}")
           
           # Save metrics using the final validation loss
           final_val_loss = training_history[-1]['val_loss'] if training_history else 10.0
