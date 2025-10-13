@@ -1,4 +1,4 @@
-name: saaygamma CNN Model Trainer
+name: saaydelta CNN Model Trainer
 description: Trains CNN model on preprocessed data using any architecture from CNN factory
 inputs:
   - name: model_path
@@ -168,6 +168,7 @@ implementation:
           best_val_acc = 0.0
           best_val_loss = float('inf')
           patience_counter = 0
+          current_lr = learning_rate  # Initialize current_lr
           
           for epoch in range(epochs):
               # Training phase
@@ -229,7 +230,7 @@ implementation:
                   'train_accuracy': train_acc,
                   'val_loss': avg_val_loss,
                   'val_accuracy': val_acc,
-                  'learning_rate': current_lr if scheduler is not None else learning_rate
+                  'learning_rate': current_lr
               }
               training_history.append(epoch_info)
               
@@ -344,7 +345,6 @@ implementation:
               f.write("\n")
           
           sys.exit(1)
-    
     args:
     - --model_path
     - {inputValue: model_path}
