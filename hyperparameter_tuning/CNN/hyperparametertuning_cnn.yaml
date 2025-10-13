@@ -1,4 +1,4 @@
-name: saayeta CNN Hyperparameter Tuner
+name: saayzeta CNN Hyperparameter Tuner
 description: Launches a Katib experiment for CNN using a predefined objective function.
 
 inputs:
@@ -152,7 +152,7 @@ implementation:
         print(f"DEBUG: parallel_trial_count: {args.parallel_trial_count}")
         print(f"DEBUG: config_json length: {len(args.config_json)}")
         print(f"DEBUG: parameters_to_tune length: {len(args.parameters_to_tune)}")
-        print(f"DEBUG: process_datset_url: {args.process_dataset_url}")
+        print(f"DEBUG: process_datset_url: {args.process_data_url}")
 
         # HARDCODED NAMESPACE - admin only
         namespace = "admin"
@@ -443,7 +443,7 @@ implementation:
       - {inputValue: model_type}
       - --config_json
       - {inputValue: config_json}
-      - --process_dataset_url
+      - --process_data _url
       - {inputValue: process_data_url}
       - --parameters_to_tune
       - {inputValue: parameters_to_tune}
