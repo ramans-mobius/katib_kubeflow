@@ -1,4 +1,4 @@
-name: 6 CNN Build Model
+name: 7 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
@@ -42,6 +42,10 @@ implementation:
         parser.add_argument('--model_path', type=str, required=True)
         parser.add_argument('--config_out', type=str, required=True)
         args = parser.parse_args()
+
+        # Create output directories
+        os.makedirs(os.path.dirname(args.model_path), exist_ok=True)
+        os.makedirs(os.path.dirname(args.config_out), exist_ok=True)
 
         # Parse and validate configuration
         config = json.loads(args.model_config)
@@ -103,6 +107,7 @@ implementation:
         try:
             with open(args.model_path, 'w') as f:
                 f.write(model_file_path)
+            print(f"Model path written to {args.model_path}")
         except Exception as e:
             print(f"Failed to write model path: {e}")
             sys.exit(1)
