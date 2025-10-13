@@ -1,4 +1,4 @@
-name: saaydelta CNN Model Trainer
+name: saayeta CNN Model Trainer
 description: Trains CNN model on preprocessed data using any architecture from CNN factory
 inputs:
   - name: model_path
@@ -43,7 +43,6 @@ implementation:
       
       print("=== CNN MODEL TRAINER (GENERALIZED) ===")
       
-      # Use argparse to properly parse command line arguments
       parser = argparse.ArgumentParser()
       parser.add_argument("--model_path", type=str, required=True)
       parser.add_argument("--processed_data_path", type=str, required=True)
@@ -64,7 +63,6 @@ implementation:
       print("Model file path: " + model_file_path)
       print("Data file path: " + data_file_path)
       
-      # Parse complete model config and extract training parameters
       model_config = json.loads(model_config_str)
       model_arch_config = model_config.get('model', {})
       training_config = model_config.get('training', {})
@@ -72,13 +70,10 @@ implementation:
       criterion_config = training_config.get('criterion', {})
       scheduler_config = training_config.get('scheduler', {})
       
-      # Extract model architecture details
       architecture = model_arch_config.get('architecture', 'cnn')
       variant = model_arch_config.get('variant', 'default')
       pretrained = model_arch_config.get('pretrained', True)
       freeze_backbone = model_arch_config.get('freeze_backbone', False)
-      
-      # Extract training parameters
       epochs = training_config.get('epochs', 4)
       batch_size = training_config.get('batch_size', 16)
       learning_rate = optimizer_config.get('learning_rate', 1e-4)
@@ -97,11 +92,9 @@ implementation:
       print(f"Weight decay: {weight_decay}")
       
       try:
-          # Add CNN factory to path
           sys.path.insert(0, '/app/nesy_factory_cnn')
           from nesy_factory_cnn import BaseCNN
           
-          # Load model from PATH
           print("Loading model...")
           with open(model_file_path, 'rb') as f:
               model = pickle.load(f)
@@ -110,12 +103,10 @@ implementation:
           model = model.to(device)
           print(f"Using device: {device}")
           
-          # Load data from PATH
           print("Loading preprocessed data...")
           with open(data_file_path, 'rb') as f:
               processed_data = pickle.load(f)
           
-          # Extract data loaders from processed data
           train_loader = processed_data.get('train_loader')
           val_loader = processed_data.get('val_loader') or processed_data.get('test_loader')
           data_info = processed_data.get('data_info', {})
@@ -129,32 +120,16 @@ implementation:
           print(f"Validation samples: {len(val_loader.dataset)}")
           print(f"Number of classes: {data_info.get('num_classes', 'Unknown')}")
           
-          # Setup optimizer based on config
           if optimizer_type.lower() == 'adamw':
-              optimizer = optim.AdamW(
-                  model.parameters(), 
-                  lr=learning_rate, 
-                  weight_decay=weight_decay
-              )
+              optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
           elif optimizer_type.lower() == 'sgd':
               momentum = optimizer_config.get('momentum', 0.9)
-              optimizer = optim.SGD(
-                  model.parameters(), 
-                  lr=learning_rate, 
-                  weight_decay=weight_decay,
-                  momentum=momentum
-              )
-          else:  # Default to Adam
-              optimizer = optim.Adam(
-                  model.parameters(), 
-                  lr=learning_rate, 
-                  weight_decay=weight_decay
-              )
+              optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+          else:
+              optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
           
-          # Setup criterion
           criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
           
-          # Setup learning rate scheduler if specified
           scheduler = None
           if scheduler_config.get('type', '').lower() == 'cosineannealinglr':
               T_max = scheduler_config.get('T_max', epochs)
@@ -162,16 +137,14 @@ implementation:
               scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
               print(f"Using CosineAnnealingLR scheduler: T_max={T_max}, eta_min={eta_min}")
           
-          # Training loop
           print("Starting training...")
           training_history = []
           best_val_acc = 0.0
           best_val_loss = float('inf')
           patience_counter = 0
-          current_lr = learning_rate  # Initialize current_lr
+          current_lr = learning_rate
           
           for epoch in range(epochs):
-              # Training phase
               model.train()
               train_loss = 0.0
               train_correct = 0
@@ -179,7 +152,6 @@ implementation:
               
               for batch_idx, (data, target) in enumerate(train_loader):
                   data, target = data.to(device), target.to(device)
-                  
                   optimizer.zero_grad()
                   output = model(data)
                   loss = criterion(output, target)
@@ -197,7 +169,6 @@ implementation:
               train_acc = 100.0 * train_correct / train_total
               avg_train_loss = train_loss / len(train_loader)
               
-              # Validation phase
               model.eval()
               val_loss = 0.0
               val_correct = 0
@@ -208,7 +179,6 @@ implementation:
                       data, target = data.to(device), target.to(device)
                       output = model(data)
                       loss = criterion(output, target)
-                      
                       val_loss += loss.item()
                       _, predicted = output.max(1)
                       val_total += target.size(0)
@@ -217,13 +187,11 @@ implementation:
               val_acc = 100.0 * val_correct / val_total
               avg_val_loss = val_loss / len(val_loader)
               
-              # Update learning rate scheduler
               if scheduler is not None:
                   scheduler.step()
                   current_lr = scheduler.get_last_lr()[0]
                   print(f"Current learning rate: {current_lr:.6f}")
               
-              # Save epoch results
               epoch_info = {
                   'epoch': epoch + 1,
                   'train_loss': avg_train_loss,
@@ -234,18 +202,14 @@ implementation:
               }
               training_history.append(epoch_info)
               
-              print(f"Epoch {epoch+1}/{epochs}: "
-                    f"Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.2f}% | "
-                    f"Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.2f}%")
+              print(f"Epoch {epoch+1}/{epochs}: Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.2f}% | Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.2f}%")
               
-              # Early stopping check (based on validation loss)
               if val_acc > best_val_acc:
                   best_val_acc = val_acc
                   
               if avg_val_loss < best_val_loss:
                   best_val_loss = avg_val_loss
                   patience_counter = 0
-                  # Save best model
                   best_model_path = "/tmp/best_model.pth"
                   torch.save({
                       'model_state_dict': model.state_dict(),
@@ -263,7 +227,6 @@ implementation:
                   print(f"Early stopping at epoch {epoch+1}")
                   break
           
-          # Load best model for final output
           if os.path.exists("/tmp/best_model.pth"):
               checkpoint = torch.load("/tmp/best_model.pth")
               model.load_state_dict(checkpoint['model_state_dict'])
@@ -271,7 +234,6 @@ implementation:
               best_val_loss = checkpoint['best_val_loss']
               print("Loaded best model from early stopping")
           
-          # Save final trained model
           trained_model_file_path = "/tmp/trained_model.pth"
           torch.save({
               'model_state_dict': model.state_dict(),
@@ -284,29 +246,23 @@ implementation:
               'data_info': data_info
           }, trained_model_file_path)
           
-          # Save metrics for Katib
           def save_katib_metrics(val_loss, training_history=None):
               katib_dir = Path("/katib")
               katib_dir.mkdir(parents=True, exist_ok=True)
-              
               metrics_file = katib_dir / "mnist.json"
               record = {
                   "val_loss": f"{val_loss:.6f}",
                   "global_step": str(len(training_history) if training_history else 1),
                   "timestamp": time.time()
               }
-              
               with open(metrics_file, "a", encoding="utf-8") as f:
                   json.dump(record, f)
                   f.write("\n")
-              
               print(f"Saved metrics for Katib: val_loss = {val_loss:.6f}")
           
-          # Save metrics using the final validation loss
           final_val_loss = training_history[-1]['val_loss'] if training_history else 10.0
           save_katib_metrics(final_val_loss, training_history)
           
-          # Write OUTPUT PATHS to files
           os.makedirs(os.path.dirname(trained_model_path_file), exist_ok=True)
           os.makedirs(os.path.dirname(training_history_file), exist_ok=True)
           os.makedirs(os.path.dirname(final_accuracy_file), exist_ok=True)
@@ -330,20 +286,17 @@ implementation:
           print("MODEL TRAINING FAILED: " + str(e))
           import traceback
           traceback.print_exc()
-          
-          # Save error metrics for Katib
           katib_dir = Path("/katib")
           katib_dir.mkdir(parents=True, exist_ok=True)
           metrics_file = katib_dir / "mnist.json"
           record = {
-              "val_loss": "10.000000",  # High loss indicates failure
+              "val_loss": "10.000000",
               "global_step": "1",
               "timestamp": time.time()
           }
           with open(metrics_file, "a", encoding="utf-8") as f:
               json.dump(record, f)
               f.write("\n")
-          
           sys.exit(1)
     args:
     - --model_path
