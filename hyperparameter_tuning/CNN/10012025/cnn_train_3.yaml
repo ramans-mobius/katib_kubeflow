@@ -1,4 +1,4 @@
-name: 6 CNN Model Trainer
+name: 7 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
@@ -40,12 +40,9 @@ implementation:
       
       print("=== CNN MODEL TRAINER ===")
       
-      # Read input PATHS from files
-      with open(sys.argv[1], 'r') as f:
-          model_file_path = f.read().strip()
-      with open(sys.argv[2], 'r') as f:
-          data_file_path = f.read().strip()
-          
+      # Parse command line arguments directly
+      model_file_path = sys.argv[1]  # Direct value, not file path
+      data_file_path = sys.argv[2]   # Direct value, not file path
       model_config_str = sys.argv[3]
       trained_model_path_file = sys.argv[4]
       training_history_file = sys.argv[5]
@@ -189,6 +186,10 @@ implementation:
           }, trained_model_file_path)
           
           # Write OUTPUT PATHS to files
+          os.makedirs(os.path.dirname(trained_model_path_file), exist_ok=True)
+          os.makedirs(os.path.dirname(training_history_file), exist_ok=True)
+          os.makedirs(os.path.dirname(final_accuracy_file), exist_ok=True)
+          
           with open(trained_model_path_file, 'w') as f:
               f.write(trained_model_file_path)
           with open(training_history_file, 'w') as f:
