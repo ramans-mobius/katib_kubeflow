@@ -1,4 +1,4 @@
-name: saaybeta CNN Hyperparameter Tuner
+name: saaygamma CNN Hyperparameter Tuner
 description: Launches a Katib experiment for CNN using a predefined objective function.
 
 inputs:
@@ -77,7 +77,7 @@ outputs:
   
 implementation:
   container:
-    image: sanram00/cnn-image:v1
+    image: sanram00/cnn-image:v3
     command:
       - python3
       - -u
@@ -277,11 +277,11 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": "sanram00/cnn-image:v1",
+                                    "image": "sanram00/cnn-image:v3",
                                     "command": ["python", "train_cnn_ui.py"],
                                     "args": trial_args,
                                     "resources": {
-                                        "limits": {"cpu": "2", "memory": "2Gi"}
+                                        "limits": {"cpu": "1", "memory": "1Gi"}
                                     }
                                 }
                             ],
