@@ -1,9 +1,9 @@
-name: 6 CNN Build Model
+name: 7 CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: model_config
     type: String  
-    description: Complete model configuration as JSON string
+    description: Complete model configuration as JSON string (must include output_dim)
   - name: model_name
     type: String
     description: CNN model architecture name
@@ -26,9 +26,15 @@ implementation:
       - -u
       - -c
       - |
-        import torch, argparse, json, os, pickle
-        # ADD THIS IMPORT
-        from nesy_factory.CNNs.factory import CNNFactory
+        import torch, argparse, json, os, pickle, sys
+        
+        # Import CNNFactory
+        try:
+            from nesy_factory.CNNs.factory import CNNFactory
+            print("✅ Successfully imported CNNFactory")
+        except ImportError as e:
+            print(f"❌ Failed to import CNNFactory: {e}")
+            sys.exit(1)
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--model_config', type=str, required=True)
@@ -37,31 +43,73 @@ implementation:
         parser.add_argument('--config_out', type=str, required=True)
         args = parser.parse_args()
 
+        # Parse and validate configuration
         config = json.loads(args.model_config)
         model_config = config.get('model', {})
         model_config['architecture'] = args.model_name
+        
+        # VALIDATE REQUIRED PARAMETERS
+        required_params = ['output_dim']
+        missing_params = [param for param in required_params if param not in model_config]
+        
+        if missing_params:
+            print(f"❌ Missing required parameters in model_config: {missing_params}")
+            print(f"Current model_config keys: {list(model_config.keys())}")
+            print("Please ensure your model_config includes 'output_dim' (number of output classes)")
+            sys.exit(1)
+        
+        # Validate configuration structure
+        print(f"🔧 Building {args.model_name} model with config:")
+        print(f"   - output_dim: {model_config.get('output_dim')}")
+        print(f"   - input_channels: {model_config.get('input_channels', 3)}")
+        print(f"   - input_size: {model_config.get('input_size', (224, 224))}")
+        print(f"   - architecture: {model_config.get('architecture')}")
 
-        model = CNNFactory.create_model(args.model_name, model_config)
-        print("CNN model created successfully")
-
-        model_info = model.get_model_info()
-        print(f"Model parameters: {model.get_num_parameters()}")
+        try:
+            model = CNNFactory.create_model(args.model_name, model_config)
+            print("✅ CNN model created successfully")
+            
+            model_info = model.get_model_info()
+            print(f"📊 Model parameters: {model.get_num_parameters():,}")
+            print(f"🏗️  Model architecture: {model_info.get('model_name', 'Unknown')}")
+            
+        except Exception as e:
+            print(f"❌ Failed to create model: {e}")
+            print("💡 Required configuration parameters for CNN models:")
+            print("   - output_dim: Number of output classes (required)")
+            print("   - input_channels: Number of input channels (default: 3)")
+            print("   - input_size: Input image size as tuple (default: (224, 224))")
+            print("   - Optional: base_channels, num_blocks, hidden_dims, etc.")
+            sys.exit(1)
 
         # Save model to fixed path
         model_file_path = "/tmp/built_model.pkl"
-        with open(model_file_path, 'wb') as f:
-            pickle.dump(model, f)
+        try:
+            with open(model_file_path, 'wb') as f:
+                pickle.dump(model, f)
+            print(f"💾 Model saved to {model_file_path}")
+        except Exception as e:
+            print(f"❌ Failed to save model: {e}")
+            sys.exit(1)
 
         # Write model path to output
-        with open(args.model_path, 'w') as f:
-            f.write(model_file_path)
+        try:
+            with open(args.model_path, 'w') as f:
+                f.write(model_file_path)
+        except Exception as e:
+            print(f"❌ Failed to write model path: {e}")
+            sys.exit(1)
 
         # Write config
-        with open(args.config_out, 'w') as f:
-            json.dump(config, f, indent=2)
+        try:
+            with open(args.config_out, 'w') as f:
+                json.dump(config, f, indent=2)
+            print(f"📄 Config saved to {args.config_out}")
+        except Exception as e:
+            print(f"❌ Failed to save config: {e}")
+            sys.exit(1)
 
-        print(f"Model saved to {model_file_path}")
-        print(f"Config saved to {args.config_out}")
+        print("🎉 CNN Build Model completed successfully!")
     args:
       - --model_name
       - {inputValue: model_name}
