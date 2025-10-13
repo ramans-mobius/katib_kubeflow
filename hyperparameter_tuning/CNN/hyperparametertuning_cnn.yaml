@@ -152,7 +152,7 @@ implementation:
         print(f"DEBUG: parallel_trial_count: {args.parallel_trial_count}")
         print(f"DEBUG: config_json length: {len(args.config_json)}")
         print(f"DEBUG: parameters_to_tune length: {len(args.parameters_to_tune)}")
-        print(f"DEBUG: process_datset_url: {args.process_data_url}")
+        print(f"DEBUG: process_data_url: {args.process_data_url}")
 
         # HARDCODED NAMESPACE - admin only
         namespace = "admin"
