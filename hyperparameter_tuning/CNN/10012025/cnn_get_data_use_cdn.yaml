@@ -1,4 +1,4 @@
-name: 5 CNN Get Data Through CDN
+name: 6 CNN Get Data Through CDN
 description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
@@ -8,6 +8,7 @@ outputs:
   - name: processed_data_path
     type: String
     description: Path to downloaded dataset file
+
 implementation:
   container:
     image: python:3.9
@@ -31,21 +32,29 @@ implementation:
 
         args.process_data_url = args.process_data_url.replace("$$", "$$$")
 
-        print(f"Fetching image dataset from CDN: {args.process_data_url}")
+        print("Fetching image dataset from CDN: " + args.process_data_url)
         resp = requests.get(args.process_data_url)
         resp.raise_for_status()
 
-        # Save to a fixed path and output that path
+        # Create the output directory if it doesn't exist
+        output_dir = os.path.dirname(args.processed_data_path)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save the downloaded data directly to the output path
+        with open(args.processed_data_path, "wb") as f:
+            f.write(resp.content)
+
+        # Also save to a known path for reference
         data_file_path = "/tmp/downloaded_data.pkl"
         with open(data_file_path, "wb") as f:
             f.write(resp.content)
 
-        # Write the file path to output
+        # Write the known path to the output file
         with open(args.processed_data_path, "w") as f:
             f.write(data_file_path)
         
-        print(f"Image dataset saved at {data_file_path}")
-        print(f"Path output: {data_file_path}")
+        print("Image dataset saved at " + data_file_path)
+        print("Path output written to: " + args.processed_data_path)
     args:
       - --process_data_url
       - { inputValue: process_data_url }
