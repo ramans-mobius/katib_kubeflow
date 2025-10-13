@@ -1,4 +1,4 @@
-name: saayeta CNN Model Trainer
+name: saayeta1 CNN Model Trainer
 description: Trains CNN model on preprocessed data using any architecture from CNN factory
 inputs:
   - name: model_path
