@@ -1,28 +1,22 @@
-name: 123 CNN Model Evaluator
+name: 5 CNN Model Evaluator
 description: Comprehensive evaluation of trained CNN model
-
 inputs:
   - name: trained_model_path
     type: String
-    description: Path to trained model
-    
+    description: Path to trained model file
   - name: processed_data_path
     type: String
-    description: Path to preprocessed data
-    
+    description: Path to preprocessed data file
   - name: model_config
     type: String
     description: Complete model configuration with evaluation parameters
-
 outputs:
   - name: evaluation_results
     type: String
     description: JSON string with comprehensive evaluation results
-    
   - name: test_accuracy
     type: String
     description: Final test accuracy percentage
-    
   - name: confusion_matrix
     type: String
     description: Path to confusion matrix visualization
@@ -44,26 +38,30 @@ implementation:
       import matplotlib.pyplot as plt
       from pathlib import Path
       import pickle
-      from sklearn.metrics import confusion_matrix, classification_report
+      from sklearn.metrics import confusion_matrix, classification_report, precision_recall_fscore_support
       import seaborn as sns
       
       print("=== CNN MODEL EVALUATOR ===")
       
-      trained_model_path = sys.argv[1]
-      processed_data_path = sys.argv[2]
+      # Read input PATHS from files
+      with open(sys.argv[1], 'r') as f:
+          trained_model_file_path = f.read().strip()
+      with open(sys.argv[2], 'r') as f:
+          data_file_path = f.read().strip()
+          
       model_config_str = sys.argv[3]
       evaluation_results_file = sys.argv[4]
       test_accuracy_file = sys.argv[5]
       confusion_matrix_file = sys.argv[6]
+      
+      print(f"Trained model file path: {trained_model_file_path}")
+      print(f"Data file path: {data_file_path}")
       
       # Parse complete model config and extract evaluation parameters
       model_config = json.loads(model_config_str)
       evaluation_config = model_config.get('evaluation', {})
       generate_plots = evaluation_config.get('generate_plots', True)
       detailed_metrics = evaluation_config.get('detailed_metrics', True)
-      
-      print(f"Trained model path: {trained_model_path}")
-      print(f"Data path: {processed_data_path}")
       
       # Add CNN factory to path
       sys.path.insert(0, '/app/nesy_factory_cnn')
@@ -80,22 +78,28 @@ implementation:
                   x = self.classifier(x)
                   return x
           
-          # Load trained model
+          # Load trained model from PATH
           print("Loading trained model...")
-          checkpoint = torch.load(trained_model_path, map_location='cpu')
+          checkpoint = torch.load(trained_model_file_path, map_location='cpu')
           model = ConfigurableCNN(checkpoint['model_config'])
           model.load_state_dict(checkpoint['model_state_dict'])
           device = model.device
+          print(f"Model loaded successfully. Device: {device}")
           
-          # Load test data
+          # Load test data from PATH
           print("Loading test data...")
-          test_loader = torch.load(os.path.join(processed_data_path, 'test_loader.pth'))
+          with open(data_file_path, 'rb') as f:
+              processed_data = pickle.load(f)
           
-          with open(os.path.join(processed_data_path, 'data_info.pkl'), 'rb') as f:
-              data_info = pickle.load(f)
+          test_loader = processed_data.get('test_loader')
+          data_info = processed_data.get('data_info', {})
+          
+          if test_loader is None:
+              raise ValueError("Test loader not found in processed data")
           
           print(f"Test samples: {len(test_loader.dataset)}")
-          print(f"Number of classes: {data_info['num_classes']}")
+          print(f"Number of classes: {data_info.get('num_classes', 'Unknown')}")
+          print(f"Input shape: {data_info.get('input_shape', 'Unknown')}")
           
           # Comprehensive evaluation
           print("Running comprehensive evaluation...")
@@ -106,9 +110,10 @@ implementation:
           all_predictions = []
           all_targets = []
           all_probabilities = []
+          all_correct = []
           
           with torch.no_grad():
-              for data, target in test_loader:
+              for batch_idx, (data, target) in enumerate(test_loader):
                   data, target = data.to(device), target.to(device)
                   output = model(data)
                   loss = criterion(output, target)
@@ -121,28 +126,52 @@ implementation:
                   all_predictions.extend(predictions.cpu().numpy())
                   all_targets.extend(target.cpu().numpy())
                   all_probabilities.extend(probabilities.cpu().numpy())
+                  all_correct.extend(predictions.eq(target).cpu().numpy())
+                  
+                  if batch_idx % 10 == 0:
+                      print(f"Processed batch {batch_idx}/{len(test_loader)}")
           
           # Convert to numpy arrays
           all_predictions = np.array(all_predictions)
           all_targets = np.array(all_targets)
           all_probabilities = np.array(all_probabilities)
+          all_correct = np.array(all_correct)
           
-          # Calculate metrics
+          # Calculate basic metrics
           accuracy = np.mean(all_predictions == all_targets) * 100
           avg_test_loss = test_loss / len(test_loader)
           
           # Per-class metrics
-          num_classes = data_info['num_classes']
+          num_classes = data_info.get('num_classes', len(np.unique(all_targets)))
           class_accuracy = {}
+          class_precision = {}
+          class_recall = {}
+          class_f1 = {}
+          
+          # Calculate per-class metrics using sklearn
+          precision, recall, f1, support = precision_recall_fscore_support(
+              all_targets, all_predictions, average=None, zero_division=0
+          )
+          
           for class_id in range(num_classes):
               class_mask = all_targets == class_id
               if np.sum(class_mask) > 0:
                   class_accuracy[class_id] = np.mean(all_predictions[class_mask] == all_targets[class_mask]) * 100
+                  class_precision[class_id] = precision[class_id] * 100
+                  class_recall[class_id] = recall[class_id] * 100
+                  class_f1[class_id] = f1[class_id] * 100
+              else:
+                  class_accuracy[class_id] = 0.0
+                  class_precision[class_id] = 0.0
+                  class_recall[class_id] = 0.0
+                  class_f1[class_id] = 0.0
           
           # Confidence analysis
           max_probabilities = np.max(all_probabilities, axis=1)
           avg_confidence = np.mean(max_probabilities) * 100
           confidence_std = np.std(max_probabilities) * 100
+          confidence_min = np.min(max_probabilities) * 100
+          confidence_max = np.max(max_probabilities) * 100
           
           # Misclassification analysis
           misclassified_mask = all_predictions != all_targets
@@ -154,59 +183,103 @@ implementation:
           else:
               misclassified_confidence = 0
           
+          # Correct classification confidence
+          correct_confidence = np.mean(max_probabilities[~misclassified_mask]) * 100
+          
           # Generate confusion matrix
           cm = confusion_matrix(all_targets, all_predictions)
           
-          # Create evaluation results
+          # Calculate overall metrics using sklearn
+          macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
+              all_targets, all_predictions, average='macro', zero_division=0
+          )
+          weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
+              all_targets, all_predictions, average='weighted', zero_division=0
+          )
+          
+          # Create comprehensive evaluation results
           evaluation_results = {
               'overall_metrics': {
                   'test_accuracy': float(accuracy),
                   'test_loss': float(avg_test_loss),
-                  'misclassification_rate': float(misclassification_rate)
+                  'misclassification_rate': float(misclassification_rate),
+                  'macro_precision': float(macro_precision * 100),
+                  'macro_recall': float(macro_recall * 100),
+                  'macro_f1': float(macro_f1 * 100),
+                  'weighted_precision': float(weighted_precision * 100),
+                  'weighted_recall': float(weighted_recall * 100),
+                  'weighted_f1': float(weighted_f1 * 100)
               },
               'confidence_analysis': {
                   'average_confidence': float(avg_confidence),
                   'confidence_std': float(confidence_std),
-                  'misclassified_confidence': float(misclassified_confidence)
+                  'confidence_min': float(confidence_min),
+                  'confidence_max': float(confidence_max),
+                  'misclassified_confidence': float(misclassified_confidence),
+                  'correct_confidence': float(correct_confidence)
               },
               'class_metrics': {
-                  f'class_{class_id}': float(acc) for class_id, acc in class_accuracy.items()
+                  f'class_{class_id}': {
+                      'accuracy': float(class_accuracy[class_id]),
+                      'precision': float(class_precision[class_id]),
+                      'recall': float(class_recall[class_id]),
+                      'f1_score': float(class_f1[class_id]),
+                      'support': int(support[class_id])
+                  } for class_id in range(num_classes)
               },
               'predictions_summary': {
                   'total_samples': len(all_predictions),
                   'correct_predictions': int(np.sum(all_predictions == all_targets)),
-                  'misclassified': int(misclassified_count)
+                  'misclassified': int(misclassified_count),
+                  'per_class_distribution': {
+                      f'class_{class_id}': int(np.sum(all_targets == class_id)) for class_id in range(num_classes)
+                  }
               },
               'model_info': {
                   'num_parameters': model.get_num_parameters(),
-                  'input_shape': data_info['input_shape'],
-                  'output_dim': checkpoint['model_config'].get('output_dim', num_classes)
+                  'input_shape': data_info.get('input_shape', 'Unknown'),
+                  'output_dim': checkpoint.get('model_config', {}).get('output_dim', num_classes),
+                  'device': str(device)
               },
               'training_summary': {
                   'final_val_accuracy': checkpoint.get('final_val_accuracy', 0),
-                  'total_training_epochs': len(checkpoint.get('training_history', []))
+                  'best_val_accuracy': checkpoint.get('best_val_accuracy', 0),
+                  'total_training_epochs': len(checkpoint.get('training_history', [])),
+                  'training_history_available': 'training_history' in checkpoint
               }
           }
           
           # Generate confusion matrix plot
+          cm_plot_path = "/tmp/confusion_matrix.png"
           if generate_plots:
-              plt.figure(figsize=(10, 8))
-              sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                         xticklabels=range(num_classes), 
-                         yticklabels=range(num_classes))
-              plt.title('Confusion Matrix')
-              plt.xlabel('Predicted')
-              plt.ylabel('Actual')
-              
-              output_dir = Path('/tmp/evaluator_output')
-              output_dir.mkdir(exist_ok=True)
-              cm_plot_path = output_dir / 'confusion_matrix.png'
-              plt.savefig(str(cm_plot_path), bbox_inches='tight', dpi=300)
-              plt.close()
+              try:
+                  plt.figure(figsize=(12, 10))
+                  sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                             xticklabels=[f'Class {i}' for i in range(num_classes)], 
+                             yticklabels=[f'Class {i}' for i in range(num_classes)],
+                             cbar_kws={'label': 'Number of Samples'})
+                  plt.title('Confusion Matrix', fontsize=16, fontweight='bold')
+                  plt.xlabel('Predicted Label', fontsize=12)
+                  plt.ylabel('True Label', fontsize=12)
+                  plt.xticks(rotation=45)
+                  plt.yticks(rotation=0)
+                  
+                  plt.tight_layout()
+                  plt.savefig(str(cm_plot_path), bbox_inches='tight', dpi=300, facecolor='white')
+                  plt.close()
+                  print(f"Confusion matrix plot saved to: {cm_plot_path}")
+              except Exception as plot_error:
+                  print(f"Failed to generate confusion matrix plot: {plot_error}")
+                  cm_plot_path = "/tmp/confusion_matrix_failed.png"
+                  # Create a simple text file as fallback
+                  with open(cm_plot_path, 'w') as f:
+                      f.write("Confusion matrix plot generation failed")
           else:
               cm_plot_path = "/tmp/no_plot_generated.png"
+              with open(cm_plot_path, 'w') as f:
+                  f.write("Plots disabled in configuration")
           
-          # Write outputs
+          # Write OUTPUT PATHS to files
           with open(evaluation_results_file, 'w') as f:
               json.dump(evaluation_results, f, indent=2)
           with open(test_accuracy_file, 'w') as f:
@@ -214,19 +287,38 @@ implementation:
           with open(confusion_matrix_file, 'w') as f:
               f.write(str(cm_plot_path))
           
-          # Print summary
-          print(f"Evaluation completed!")
+          # Print comprehensive summary
+          print(f"\n{'='*50}")
+          print("EVALUATION SUMMARY")
+          print(f"{'='*50}")
           print(f"Test Accuracy: {accuracy:.2f}%")
           print(f"Test Loss: {avg_test_loss:.4f}")
           print(f"Misclassification Rate: {misclassification_rate:.2f}%")
+          print(f"Macro F1-Score: {macro_f1 * 100:.2f}%")
           print(f"Average Confidence: {avg_confidence:.2f}%")
+          print(f"Correct Prediction Confidence: {correct_confidence:.2f}%")
+          print(f"Misclassified Confidence: {misclassified_confidence:.2f}%")
+          print(f"Total Samples: {len(all_predictions)}")
+          print(f"Correct Predictions: {np.sum(all_predictions == all_targets)}")
+          print(f"Misclassified: {misclassified_count}")
           print(f"Confusion matrix saved to: {cm_plot_path}")
+          print(f"{'='*50}")
           print("MODEL EVALUATION COMPLETED SUCCESSFULLY!")
           
       except Exception as e:
           print(f"MODEL EVALUATION FAILED: {e}")
           import traceback
           traceback.print_exc()
+          # Write error outputs
+          try:
+              with open(evaluation_results_file, 'w') as f:
+                  json.dump({"error": str(e), "success": False}, f)
+              with open(test_accuracy_file, 'w') as f:
+                  f.write("0.00")
+              with open(confusion_matrix_file, 'w') as f:
+                  f.write("/tmp/evaluation_failed.png")
+          except:
+              pass
           sys.exit(1)
     
     args:
