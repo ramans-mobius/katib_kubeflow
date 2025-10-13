@@ -1,4 +1,4 @@
-name: 5 CNN Model Trainer
+name: 6 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
@@ -20,6 +20,7 @@ outputs:
   - name: final_accuracy
     type: String
     description: Final validation accuracy
+
 implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
@@ -50,8 +51,8 @@ implementation:
       training_history_file = sys.argv[5]
       final_accuracy_file = sys.argv[6]
       
-      print(f"Model file path: {model_file_path}")
-      print(f"Data file path: {data_file_path}")
+      print("Model file path: " + model_file_path)
+      print("Data file path: " + data_file_path)
       
       # Parse complete model config and extract training parameters
       model_config = json.loads(model_config_str)
@@ -60,8 +61,8 @@ implementation:
       learning_rate = training_config.get('learning_rate', 0.001)
       patience = training_config.get('patience', 5)
       
-      print(f"Epochs: {epochs}")
-      print(f"Learning rate: {learning_rate}")
+      print("Epochs: " + str(epochs))
+      print("Learning rate: " + str(learning_rate))
       
       # Add CNN factory to path
       sys.path.insert(0, '/app/nesy_factory_cnn')
@@ -94,15 +95,15 @@ implementation:
           val_loader = processed_data.get('val_loader')
           data_info = processed_data.get('data_info', {})
           
-          print(f"Training samples: {len(train_loader.dataset)}")
-          print(f"Validation samples: {len(val_loader.dataset)}")
-          print(f"Number of classes: {data_info['num_classes']}")
+          print("Training samples: " + str(len(train_loader.dataset)))
+          print("Validation samples: " + str(len(val_loader.dataset)))
+          print("Number of classes: " + str(data_info['num_classes']))
           
           # Training setup
           optimizer = optim.Adam(model.parameters(), lr=learning_rate)
           criterion = nn.CrossEntropyLoss()
           
-          # Training loop (same as before)
+          # Training loop
           print("Starting training...")
           training_history = []
           best_val_acc = 0.0
@@ -129,7 +130,7 @@ implementation:
                   train_total += target.size(0)
                   train_correct += predicted.eq(target).sum().item()
               
-              train_acc = 100. * train_correct / train_total
+              train_acc = 100.0 * train_correct / train_total
               avg_train_loss = train_loss / len(train_loader)
               
               # Validation phase
@@ -149,7 +150,7 @@ implementation:
                       val_total += target.size(0)
                       val_correct += predicted.eq(target).sum().item()
               
-              val_acc = 100. * val_correct / val_total
+              val_acc = 100.0 * val_correct / val_total
               avg_val_loss = val_loss / len(val_loader)
               
               # Save epoch results
@@ -162,9 +163,9 @@ implementation:
               }
               training_history.append(epoch_info)
               
-              print(f'Epoch {epoch+1}/{epochs}: '
-                    f'Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.2f}% | '
-                    f'Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.2f}%')
+              print("Epoch " + str(epoch+1) + "/" + str(epochs) + ": " +
+                    "Train Loss: {:.4f}, Acc: {:.2f}% | ".format(avg_train_loss, train_acc) +
+                    "Val Loss: {:.4f}, Acc: {:.2f}%".format(avg_val_loss, val_acc))
               
               # Early stopping check
               if val_acc > best_val_acc:
@@ -174,7 +175,7 @@ implementation:
                   patience_counter += 1
                   
               if patience_counter >= patience:
-                  print(f"Early stopping at epoch {epoch+1}")
+                  print("Early stopping at epoch " + str(epoch+1))
                   break
           
           # Save final trained model to fixed path
@@ -193,16 +194,16 @@ implementation:
           with open(training_history_file, 'w') as f:
               json.dump(training_history, f)
           with open(final_accuracy_file, 'w') as f:
-              f.write(f"{best_val_acc:.2f}")
+              f.write("{:.2f}".format(best_val_acc))
           
-          print(f"Training completed!")
-          print(f"Best validation accuracy: {best_val_acc:.2f}%")
-          print(f"Total epochs: {len(training_history)}")
-          print(f"Trained model saved to: {trained_model_file_path}")
+          print("Training completed!")
+          print("Best validation accuracy: {:.2f}%".format(best_val_acc))
+          print("Total epochs: " + str(len(training_history)))
+          print("Trained model saved to: " + trained_model_file_path)
           print("MODEL TRAINING COMPLETED SUCCESSFULLY!")
           
       except Exception as e:
-          print(f"MODEL TRAINING FAILED: {e}")
+          print("MODEL TRAINING FAILED: " + str(e))
           import traceback
           traceback.print_exc()
           sys.exit(1)
