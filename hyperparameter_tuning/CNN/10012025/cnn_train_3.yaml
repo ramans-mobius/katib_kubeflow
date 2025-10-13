@@ -1,32 +1,25 @@
-name: 123 CNN Model Trainer
+name: 5 CNN Model Trainer
 description: Trains CNN model on preprocessed data
-
 inputs:
   - name: model_path
     type: String
-    description: Path to built model
-    
+    description: Path to built model file
   - name: processed_data_path
     type: String
-    description: Path to preprocessed data
-    
+    description: Path to preprocessed data file
   - name: model_config
     type: String
     description: Complete model configuration with training parameters
-
 outputs:
   - name: trained_model_path
     type: String
     description: Path to trained model file
-    
   - name: training_history
     type: String
     description: JSON string with training history and metrics
-    
   - name: final_accuracy
     type: String
     description: Final validation accuracy
-
 implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
@@ -46,12 +39,19 @@ implementation:
       
       print("=== CNN MODEL TRAINER ===")
       
-      model_path = sys.argv[1]
-      processed_data_path = sys.argv[2]
+      # Read input PATHS from files
+      with open(sys.argv[1], 'r') as f:
+          model_file_path = f.read().strip()
+      with open(sys.argv[2], 'r') as f:
+          data_file_path = f.read().strip()
+          
       model_config_str = sys.argv[3]
       trained_model_path_file = sys.argv[4]
       training_history_file = sys.argv[5]
       final_accuracy_file = sys.argv[6]
+      
+      print(f"Model file path: {model_file_path}")
+      print(f"Data file path: {data_file_path}")
       
       # Parse complete model config and extract training parameters
       model_config = json.loads(model_config_str)
@@ -60,8 +60,6 @@ implementation:
       learning_rate = training_config.get('learning_rate', 0.001)
       patience = training_config.get('patience', 5)
       
-      print(f"Model path: {model_path}")
-      print(f"Data path: {processed_data_path}")
       print(f"Epochs: {epochs}")
       print(f"Learning rate: {learning_rate}")
       
@@ -80,20 +78,21 @@ implementation:
                   x = self.classifier(x)
                   return x
           
-          # Load model
+          # Load model from PATH
           print("Loading model...")
-          checkpoint = torch.load(model_path, map_location='cpu')
-          model = ConfigurableCNN(checkpoint['model_config'])
-          model.load_state_dict(checkpoint['model_state_dict'])
+          with open(model_file_path, 'rb') as f:
+              model = pickle.load(f)
           device = model.device
           
-          # Load data
+          # Load data from PATH
           print("Loading preprocessed data...")
-          train_loader = torch.load(os.path.join(processed_data_path, 'train_loader.pth'))
-          val_loader = torch.load(os.path.join(processed_data_path, 'val_loader.pth'))
+          with open(data_file_path, 'rb') as f:
+              processed_data = pickle.load(f)
           
-          with open(os.path.join(processed_data_path, 'data_info.pkl'), 'rb') as f:
-              data_info = pickle.load(f)
+          # Extract data loaders from processed data
+          train_loader = processed_data.get('train_loader')
+          val_loader = processed_data.get('val_loader')
+          data_info = processed_data.get('data_info', {})
           
           print(f"Training samples: {len(train_loader.dataset)}")
           print(f"Validation samples: {len(val_loader.dataset)}")
@@ -103,7 +102,7 @@ implementation:
           optimizer = optim.Adam(model.parameters(), lr=learning_rate)
           criterion = nn.CrossEntropyLoss()
           
-          # Training loop
+          # Training loop (same as before)
           print("Starting training...")
           training_history = []
           best_val_acc = 0.0
@@ -171,14 +170,6 @@ implementation:
               if val_acc > best_val_acc:
                   best_val_acc = val_acc
                   patience_counter = 0
-                  # Save best model
-                  best_model_path = os.path.join('/tmp', 'best_model.pth')
-                  torch.save({
-                      'model_state_dict': model.state_dict(),
-                      'model_config': checkpoint['model_config'],
-                      'training_history': training_history,
-                      'best_val_accuracy': best_val_acc
-                  }, best_model_path)
               else:
                   patience_counter += 1
                   
@@ -186,22 +177,19 @@ implementation:
                   print(f"Early stopping at epoch {epoch+1}")
                   break
           
-          # Save final trained model
-          output_dir = Path('/tmp/trainer_output')
-          output_dir.mkdir(exist_ok=True)
-          trained_model_file = output_dir / 'trained_model.pth'
-          
+          # Save final trained model to fixed path
+          trained_model_file_path = "/tmp/trained_model.pth"
           torch.save({
               'model_state_dict': model.state_dict(),
-              'model_config': checkpoint['model_config'],
+              'model_config': getattr(model, 'config', {}),
               'training_history': training_history,
               'final_val_accuracy': best_val_acc,
               'total_epochs': len(training_history)
-          }, str(trained_model_file))
+          }, trained_model_file_path)
           
-          # Write outputs
+          # Write OUTPUT PATHS to files
           with open(trained_model_path_file, 'w') as f:
-              f.write(str(trained_model_file))
+              f.write(trained_model_file_path)
           with open(training_history_file, 'w') as f:
               json.dump(training_history, f)
           with open(final_accuracy_file, 'w') as f:
@@ -210,7 +198,7 @@ implementation:
           print(f"Training completed!")
           print(f"Best validation accuracy: {best_val_acc:.2f}%")
           print(f"Total epochs: {len(training_history)}")
-          print(f"Trained model saved to: {trained_model_file}")
+          print(f"Trained model saved to: {trained_model_file_path}")
           print("MODEL TRAINING COMPLETED SUCCESSFULLY!")
           
       except Exception as e:
