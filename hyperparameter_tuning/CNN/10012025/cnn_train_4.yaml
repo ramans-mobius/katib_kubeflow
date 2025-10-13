@@ -1,4 +1,4 @@
-name: saaybeta CNN Model Trainer
+name: saaygamma CNN Model Trainer
 description: Trains CNN model on preprocessed data using any architecture from CNN factory
 inputs:
   - name: model_path
@@ -285,7 +285,6 @@ implementation:
           
           # Save metrics for Katib
           def save_katib_metrics(val_loss, training_history=None):
-              """Save metrics for Katib - using validation loss"""
               katib_dir = Path("/katib")
               katib_dir.mkdir(parents=True, exist_ok=True)
               
