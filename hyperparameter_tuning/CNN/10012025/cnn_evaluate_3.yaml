@@ -1,4 +1,4 @@
-name: 6 CNN Model Evaluator
+name: 7 CNN Model Evaluator
 description: Comprehensive evaluation of trained CNN model
 inputs:
   - name: trained_model_path
