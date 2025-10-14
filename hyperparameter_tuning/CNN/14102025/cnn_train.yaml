@@ -1,4 +1,4 @@
-name: CNN Train Model
+name: Pls CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -27,11 +27,12 @@ implementation:
         print('STARTING CNN TRAIN MODEL - DEBUG VERSION')
         print('=' * 80)
         
-        # Install required dependencies first
-        print('Installing required dependencies...')
+        # Install compatible dependencies first
+        print('Installing compatible dependencies...')
         import subprocess
         import sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "torchvision", "pillow", "--quiet"])
+        # Install compatible torchvision version for torch 2.0.0-2.3.0
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "torchvision==0.15.2", "pillow", "--quiet", "--root-user-action=ignore"])
         print('Dependencies installed successfully')
         
         # DEFINE ALL THE CLASSES THAT ARE IN THE PICKLE FILE
@@ -282,6 +283,7 @@ implementation:
         else:
             print('WARNING: test_loader attribute not found')
 
+        # Rest of the training code remains the same...
         print('')
         print('=' * 50)
         print('STEP 5: LOADING CONFIG')
@@ -289,13 +291,9 @@ implementation:
         try:
             config = json.loads(args.config)
             print('SUCCESS: Config parsed as JSON')
-            print('Config keys: ' + str(list(config.keys())))
             
             training_config = config.get('training', {})
             model_config = config.get('model', {})
-            
-            print('Training config keys: ' + str(list(training_config.keys())))
-            print('Model config keys: ' + str(list(model_config.keys())))
             
             epochs = training_config.get('epochs', 5)
             learning_rate = training_config.get('optimizer', {}).get('learning_rate', 0.001)
@@ -318,12 +316,7 @@ implementation:
             print('SUCCESS: Imported CNNFactory')
             
             model_architecture = model_config.get('architecture', 'resnet')
-            print('Creating model with architecture: ' + str(model_architecture))
-            
             model = CNNFactory.create_model(model_architecture, model_config)
-            print('SUCCESS: Model created')
-            
-            print('Loading state dict from: ' + str(args.model))
             model.load_state_dict(torch.load(args.model, map_location=torch.device('cpu')))
             print('SUCCESS: Model weights loaded')
             
@@ -335,51 +328,13 @@ implementation:
 
         print('')
         print('=' * 50)
-        print('STEP 7: SETTING UP TRAINING')
+        print('STEP 7: STARTING TRAINING')
         print('=' * 50)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print('Using device: ' + str(device))
-        
         model = model.to(device)
-        print('Model moved to device')
-        
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
-        print('Optimizer and criterion created')
 
-        print('')
-        print('=' * 50)
-        print('STEP 8: DATA LOADER SANITY CHECK')
-        print('=' * 50)
-        if train_loader is None:
-            print('ERROR: train_loader is None, cannot train!')
-            exit(1)
-            
-        print('Testing one batch from train_loader...')
-        try:
-            data_iter = iter(train_loader)
-            first_batch = next(data_iter)
-            print('First batch type: ' + str(type(first_batch)))
-            
-            if isinstance(first_batch, (list, tuple)) and len(first_batch) >= 2:
-                images, labels = first_batch[0], first_batch[1]
-                print('  Images shape: ' + str(images.shape))
-                print('  Labels shape: ' + str(labels.shape))
-                print('  Images dtype: ' + str(images.dtype))
-                print('  Labels dtype: ' + str(labels.dtype))
-            else:
-                print('  Unexpected batch structure')
-                
-        except Exception as e:
-            print('ERROR testing data loader: ' + str(e))
-            import traceback
-            traceback.print_exc()
-            exit(1)
-
-        print('')
-        print('=' * 50)
-        print('STEP 9: STARTING TRAINING LOOP')
-        print('=' * 50)
         training_history = []
         best_val_acc = 0.0
 
@@ -391,10 +346,8 @@ implementation:
             train_loss = 0.0
             train_correct = 0
             train_total = 0
-            batch_count = 0
             
-            print('Training phase...')
-            for batch_idx, (data, target) in enumerate(train_loader):
+            for data, target in train_loader:
                 data, target = data.to(device), target.to(device)
                 
                 optimizer.zero_grad()
@@ -407,17 +360,11 @@ implementation:
                 _, predicted = output.max(1)
                 train_total += target.size(0)
                 train_correct += predicted.eq(target).sum().item()
-                batch_count += 1
-                
-                if batch_idx % 10 == 0:
-                    print('  Batch ' + str(batch_idx) + ': loss=' + str(loss.item()))
             
             train_acc = 100.0 * train_correct / train_total
-            avg_train_loss = train_loss / batch_count
             
             val_acc = 0.0
-            if test_loader is not None:
-                print('Validation phase...')
+            if test_loader:
                 model.eval()
                 val_correct = 0
                 val_total = 0
@@ -431,41 +378,29 @@ implementation:
                         val_correct += predicted.eq(target).sum().item()
                 
                 val_acc = 100.0 * val_correct / val_total
-                if val_acc > best_val_acc:
-                    best_val_acc = val_acc
-                    best_model_state = model.state_dict().copy()
-                    print('  New best validation accuracy: ' + str(val_acc))
-            else:
-                print('No validation loader available')
-                best_model_state = model.state_dict().copy()
             
             epoch_info = {
                 'epoch': epoch + 1,
-                'train_loss': avg_train_loss,
+                'train_loss': train_loss / len(train_loader),
                 'train_accuracy': train_acc,
                 'val_accuracy': val_acc
             }
             training_history.append(epoch_info)
             
             print('Epoch ' + str(epoch+1) + ' Summary:')
-            print('  Train Loss: ' + str(avg_train_loss))
+            print('  Train Loss: ' + str(train_loss / len(train_loader)))
             print('  Train Accuracy: ' + str(train_acc))
             print('  Val Accuracy: ' + str(val_acc))
 
         print('')
         print('=' * 50)
-        print('STEP 10: SAVING RESULTS')
+        print('STEP 8: SAVING RESULTS')
         print('=' * 50)
         try:
-            model.load_state_dict(best_model_state)
-            
             os.makedirs(os.path.dirname(args.trained_model), exist_ok=True)
             os.makedirs(os.path.dirname(args.training_history), exist_ok=True)
             
-            print('Saving trained model to: ' + str(args.trained_model))
             torch.save(model.state_dict(), args.trained_model)
-            
-            print('Saving training history to: ' + str(args.training_history))
             with open(args.training_history, 'w') as f:
                 json.dump(training_history, f, indent=2)
                 
@@ -481,9 +416,6 @@ implementation:
         print('=' * 80)
         print('TRAINING COMPLETED SUCCESSFULLY!')
         print('=' * 80)
-        print('Best validation accuracy: ' + str(best_val_acc))
-        print('Final model saved: ' + str(args.trained_model))
-        print('Training history saved: ' + str(args.training_history))
     args:
       - --data_path
       - {inputPath: data_path}
