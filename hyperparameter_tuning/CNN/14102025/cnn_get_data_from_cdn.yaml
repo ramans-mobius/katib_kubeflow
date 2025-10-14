@@ -1,4 +1,4 @@
-name: CNN Get Data Through CDN
+name: data CNN Get Data Through CDN
 description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
