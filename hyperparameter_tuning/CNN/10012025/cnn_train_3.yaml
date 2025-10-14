@@ -1,4 +1,4 @@
-name: 7 CNN Model Trainer
+name: 8 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
@@ -37,74 +37,151 @@ implementation:
       import torch.optim as optim
       from pathlib import Path
       import pickle
+      import base64
       
       print("=== CNN MODEL TRAINER ===")
+      print(f"Command line args received: {sys.argv}")
       
-      # Parse command line arguments directly
-      model_file_path = sys.argv[1]  # Direct value, not file path
-      data_file_path = sys.argv[2]   # Direct value, not file path
-      model_config_str = sys.argv[3]
-      trained_model_path_file = sys.argv[4]
-      training_history_file = sys.argv[5]
-      final_accuracy_file = sys.argv[6]
+      # Use argparse for proper argument handling
+      import argparse
+      parser = argparse.ArgumentParser()
+      parser.add_argument('--model_path', type=str, required=True)
+      parser.add_argument('--processed_data_path', type=str, required=True)
+      parser.add_argument('--model_config', type=str, required=True)
+      parser.add_argument('--trained_model_path', type=str, required=True)
+      parser.add_argument('--training_history', type=str, required=True)
+      parser.add_argument('--final_accuracy', type=str, required=True)
+      args = parser.parse_args()
       
-      print("Model file path: " + model_file_path)
-      print("Data file path: " + data_file_path)
+      print(f"Model path input file: {args.model_path}")
+      print(f"Data path input file: {args.processed_data_path}") 
+      print(f"Config input file: {args.model_config}")
       
-      # Parse complete model config and extract training parameters
-      model_config = json.loads(model_config_str)
+      # Debug: Check if input files exist and their contents
+      print("\n=== DEBUGGING INPUT FILES ===")
+      
+      # Check model_path file
+      if os.path.exists(args.model_path):
+          with open(args.model_path, 'r') as f:
+              model_file_content = f.read().strip()
+          print(f"Model path file exists. Content: '{model_file_content}'")
+          model_file_path = model_file_content
+      else:
+          print(f"ERROR: Model path file does not exist: {args.model_path}")
+          print("Current directory contents:")
+          for item in os.listdir('.'):
+              print(f"  {item}")
+          sys.exit(1)
+      
+      # Check processed_data_path file
+      if os.path.exists(args.processed_data_path):
+          with open(args.processed_data_path, 'r') as f:
+              data_file_content = f.read().strip()
+          print(f"Data path file exists. Content: '{data_file_content}'")
+          data_file_path = data_file_content
+      else:
+          print(f"ERROR: Data path file does not exist: {args.processed_data_path}")
+          sys.exit(1)
+      
+      # Check model_config file - THIS IS THE KEY ISSUE
+      if os.path.exists(args.model_config):
+          with open(args.model_config, 'r') as f:
+              model_config_content = f.read().strip()
+          
+          print(f"Config file exists. Size: {len(model_config_content)} characters")
+          print(f"Config file content (first 500 chars): '{model_config_content[:500]}'")
+          
+          # Print as Base64 to see raw content
+          config_bytes = model_config_content.encode('utf-8')
+          config_b64 = base64.b64encode(config_bytes).decode('utf-8')
+          print(f"Config content (Base64): {config_b64}")
+          
+          # Try to parse JSON
+          try:
+              if model_config_content:
+                  model_config = json.loads(model_config_content)
+                  print(f"SUCCESS: Parsed model config with keys: {list(model_config.keys())}")
+                  
+                  # Print config structure
+                  print("Config structure:")
+                  for key, value in model_config.items():
+                      if isinstance(value, dict):
+                          print(f"  {key}: (dict with keys: {list(value.keys())})")
+                      else:
+                          print(f"  {key}: {value}")
+              else:
+                  print("ERROR: Config file is EMPTY")
+                  model_config = {}
+          except json.JSONDecodeError as e:
+              print(f"ERROR: Failed to parse config as JSON: {e}")
+              print(f"Raw config content that failed: '{model_config_content}'")
+              sys.exit(1)
+      else:
+          print(f"ERROR: Config file does not exist: {args.model_config}")
+          sys.exit(1)
+      
+      # If we get here, we have the config - extract training parameters
+      print("\n=== EXTRACTING TRAINING PARAMETERS ===")
+      
       training_config = model_config.get('training', {})
-      epochs = training_config.get('epochs', 2)
+      model_config_section = model_config.get('model', {})
+      
+      # Use defaults if config is empty
+      epochs = training_config.get('epochs', 2)  # Reduced for testing
       learning_rate = training_config.get('learning_rate', 0.001)
-      patience = training_config.get('patience', 5)
+      patience = training_config.get('patience', 2)
+      batch_size = training_config.get('batch_size', 32)
       
-      print("Epochs: " + str(epochs))
-      print("Learning rate: " + str(learning_rate))
+      print(f"Training Parameters:")
+      print(f"  - Epochs: {epochs}")
+      print(f"  - Learning rate: {learning_rate}")
+      print(f"  - Patience: {patience}")
+      print(f"  - Batch size: {batch_size}")
       
-      # Add CNN factory to path
-      sys.path.insert(0, '/app/nesy_factory_cnn')
-      
+      # Continue with model loading and training...
       try:
-          from nesy_factory_cnn import BaseCNN
+          print("\n=== LOADING MODEL AND DATA ===")
           
-          class ConfigurableCNN(BaseCNN):
-              def forward(self, x):
-                  for conv_block in self.conv_blocks:
-                      x = conv_block(x)
-                      x = self.pool(x)
-                  x = x.view(x.size(0), -1)
-                  x = self.classifier(x)
-                  return x
-          
-          # Load model from PATH
-          print("Loading model...")
+          # Load model
+          print(f"Loading model from: {model_file_path}")
           with open(model_file_path, 'rb') as f:
               model = pickle.load(f)
-          device = model.device
           
-          # Load data from PATH
-          print("Loading preprocessed data...")
+          device = model.device
+          print(f"Model loaded successfully. Device: {device}")
+          print(f"Model type: {type(model)}")
+          
+          # Load data
+          print(f"Loading data from: {data_file_path}")
           with open(data_file_path, 'rb') as f:
               processed_data = pickle.load(f)
           
-          # Extract data loaders from processed data
+          print(f"Data keys: {list(processed_data.keys())}")
+          
+          # Extract data loaders
           train_loader = processed_data.get('train_loader')
           val_loader = processed_data.get('val_loader')
           data_info = processed_data.get('data_info', {})
           
-          print("Training samples: " + str(len(train_loader.dataset)))
-          print("Validation samples: " + str(len(val_loader.dataset)))
-          print("Number of classes: " + str(data_info['num_classes']))
+          if train_loader is None:
+              print("ERROR: train_loader is None in processed data")
+              sys.exit(1)
+              
+          print(f"Training samples: {len(train_loader.dataset)}")
+          if val_loader:
+              print(f"Validation samples: {len(val_loader.dataset)}")
+          else:
+              print("No validation loader found, will split training data")
           
           # Training setup
           optimizer = optim.Adam(model.parameters(), lr=learning_rate)
           criterion = nn.CrossEntropyLoss()
           
-          # Training loop
-          print("Starting training...")
+          print("\n=== STARTING TRAINING ===")
           training_history = []
           best_val_acc = 0.0
           patience_counter = 0
+          best_model_state = None
           
           for epoch in range(epochs):
               # Training phase
@@ -113,7 +190,7 @@ implementation:
               train_correct = 0
               train_total = 0
               
-              for data, target in train_loader:
+              for batch_idx, (data, target) in enumerate(train_loader):
                   data, target = data.to(device), target.to(device)
                   
                   optimizer.zero_grad()
@@ -130,25 +207,29 @@ implementation:
               train_acc = 100.0 * train_correct / train_total
               avg_train_loss = train_loss / len(train_loader)
               
-              # Validation phase
-              model.eval()
-              val_loss = 0.0
-              val_correct = 0
-              val_total = 0
+              # Simple validation (skip if no val_loader for quick test)
+              val_acc = 0.0
+              avg_val_loss = 0.0
               
-              with torch.no_grad():
-                  for data, target in val_loader:
-                      data, target = data.to(device), target.to(device)
-                      output = model(data)
-                      loss = criterion(output, target)
-                      
-                      val_loss += loss.item()
-                      _, predicted = output.max(1)
-                      val_total += target.size(0)
-                      val_correct += predicted.eq(target).sum().item()
-              
-              val_acc = 100.0 * val_correct / val_total
-              avg_val_loss = val_loss / len(val_loader)
+              if val_loader:
+                  model.eval()
+                  val_loss = 0.0
+                  val_correct = 0
+                  val_total = 0
+                  
+                  with torch.no_grad():
+                      for data, target in val_loader:
+                          data, target = data.to(device), target.to(device)
+                          output = model(data)
+                          loss = criterion(output, target)
+                          
+                          val_loss += loss.item()
+                          _, predicted = output.max(1)
+                          val_total += target.size(0)
+                          val_correct += predicted.eq(target).sum().item()
+                  
+                  val_acc = 100.0 * val_correct / val_total
+                  avg_val_loss = val_loss / len(val_loader)
               
               # Save epoch results
               epoch_info = {
@@ -160,51 +241,46 @@ implementation:
               }
               training_history.append(epoch_info)
               
-              print("Epoch " + str(epoch+1) + "/" + str(epochs) + ": " +
-                    "Train Loss: {:.4f}, Acc: {:.2f}% | ".format(avg_train_loss, train_acc) +
-                    "Val Loss: {:.4f}, Acc: {:.2f}%".format(avg_val_loss, val_acc))
+              print(f"Epoch {epoch+1}/{epochs}: Train Loss: {avg_train_loss:.4f}, Acc: {train_acc:.2f}% | Val Loss: {avg_val_loss:.4f}, Acc: {val_acc:.2f}%")
               
-              # Early stopping check
+              # Simple early stopping for testing
               if val_acc > best_val_acc:
                   best_val_acc = val_acc
                   patience_counter = 0
+                  best_model_state = model.state_dict().copy()
               else:
                   patience_counter += 1
                   
               if patience_counter >= patience:
-                  print("Early stopping at epoch " + str(epoch+1))
+                  print(f"Early stopping at epoch {epoch+1}")
                   break
           
-          # Save final trained model to fixed path
+          # Save final model
           trained_model_file_path = "/tmp/trained_model.pth"
           torch.save({
               'model_state_dict': model.state_dict(),
-              'model_config': getattr(model, 'config', {}),
               'training_history': training_history,
-              'final_val_accuracy': best_val_acc,
-              'total_epochs': len(training_history)
+              'final_val_accuracy': best_val_acc
           }, trained_model_file_path)
           
-          # Write OUTPUT PATHS to files
-          os.makedirs(os.path.dirname(trained_model_path_file), exist_ok=True)
-          os.makedirs(os.path.dirname(training_history_file), exist_ok=True)
-          os.makedirs(os.path.dirname(final_accuracy_file), exist_ok=True)
+          # Create output directories and write output files
+          os.makedirs(os.path.dirname(args.trained_model_path), exist_ok=True)
+          os.makedirs(os.path.dirname(args.training_history), exist_ok=True)
+          os.makedirs(os.path.dirname(args.final_accuracy), exist_ok=True)
           
-          with open(trained_model_path_file, 'w') as f:
+          with open(args.trained_model_path, 'w') as f:
               f.write(trained_model_file_path)
-          with open(training_history_file, 'w') as f:
-              json.dump(training_history, f)
-          with open(final_accuracy_file, 'w') as f:
+          with open(args.training_history, 'w') as f:
+              json.dump(training_history, f, indent=2)
+          with open(args.final_accuracy, 'w') as f:
               f.write("{:.2f}".format(best_val_acc))
           
-          print("Training completed!")
-          print("Best validation accuracy: {:.2f}%".format(best_val_acc))
-          print("Total epochs: " + str(len(training_history)))
-          print("Trained model saved to: " + trained_model_file_path)
-          print("MODEL TRAINING COMPLETED SUCCESSFULLY!")
+          print("Training completed successfully!")
+          print(f"Best validation accuracy: {best_val_acc:.2f}%")
+          print(f"Output files written successfully")
           
       except Exception as e:
-          print("MODEL TRAINING FAILED: " + str(e))
+          print(f"Training failed: {str(e)}")
           import traceback
           traceback.print_exc()
           sys.exit(1)
