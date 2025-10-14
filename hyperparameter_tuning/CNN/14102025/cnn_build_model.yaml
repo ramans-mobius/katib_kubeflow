@@ -1,4 +1,4 @@
-name: dataset CNN Build Model
+name: CNN Build Model
 description: Instantiates a CNN model using CNNFactory with configuration
 inputs:
   - name: config_str
@@ -52,12 +52,12 @@ implementation:
         
         for param, default_value in defaults.items():
             if param not in model_config:
-                print(f"{param} not found, using default: {default_value}")
+                print(f"⚙️ {param} not found, using default: {default_value}")
                 model_config[param] = default_value
 
         try:
             from nesy_factory.CNNs.factory import CNNFactory
-            model = CNNFactory.create_model(args.model_name, model_config)
+            model = CNNFactory.create_model(model_config['architecture'], model_config)
             print(f"Model created with {model.get_num_parameters():,} parameters")
         except Exception as e:
             print(f"Failed to create model: {e}")
@@ -90,9 +90,9 @@ implementation:
         with open(args.model_info_out, 'w') as f:
             json.dump(combined_info, f, indent=2)
 
-        print(f"Model saved to {args.model_out}")
-        print(f"Updated config saved to {args.config_updated}")
-        print(f"Combined model info saved to {args.model_info_out}")
+        print(f"Model saved to: {args.model_out}")
+        print(f"Updated config saved to: {args.config_updated}")
+        print(f"Model info saved to: {args.model_info_out}")
 
     args:
       - --model_name
