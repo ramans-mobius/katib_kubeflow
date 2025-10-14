@@ -33,7 +33,7 @@ implementation:
 
         # Normalize URL
         url = unquote(args.process_data_url)
-        print(f"📦 Downloading dataset from: {url}")
+        print(f"Downloading dataset from: {url}")
 
         # Download the pickle file
         resp = requests.get(url)
