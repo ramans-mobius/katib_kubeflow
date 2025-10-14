@@ -1,4 +1,4 @@
-name: 11 CNN Model Trainer
+name: 12 CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_path
@@ -49,138 +49,69 @@ implementation:
       parser.add_argument('--final_accuracy', type=str, required=True)
       args = parser.parse_args()
       
-      print("INPUT VALUES:")
-      print("Model path: " + args.model_path)
-      print("Data path: " + args.processed_data_path)
-      print("Config length: " + str(len(args.model_config)) + " characters")
+      print("INPUT FILES:")
+      print("Model path file: " + args.model_path)
+      print("Data path file: " + args.processed_data_path)
+      print("Config: [JSON string]")
       
-      # Check if inputs are file paths or direct values
-      def check_and_read_file(file_path, description):
-          print(description + " checking: " + file_path)
-          if os.path.exists(file_path):
-              print(description + " exists as file")
+      # READ FILE PATHS FROM INPUT FILES
+      def read_path_from_file(file_path):
+          """Read actual file path from input file"""
+          try:
               with open(file_path, 'r') as f:
                   content = f.read().strip()
+              print("Read path from " + file_path + ": " + content)
               return content
-          else:
-              print(description + " does not exist as file, treating as direct value")
-              return file_path
+          except Exception as e:
+              print("ERROR reading " + file_path + ": " + str(e))
+              return None
       
-      # Process inputs
-      actual_model_path = check_and_read_file(args.model_path, "Model path")
-      actual_data_path = check_and_read_file(args.processed_data_path, "Data path")
+      # Read actual file paths
+      actual_model_path = read_path_from_file(args.model_path)
+      actual_data_path = read_path_from_file(args.processed_data_path)
       
-      print("ACTUAL PATHS AFTER PROCESSING:")
-      print("Model file to load: " + actual_model_path)
-      print("Data file to load: " + actual_data_path)
+      if not actual_model_path:
+          print("ERROR: Could not read model path")
+          sys.exit(1)
+      if not actual_data_path:
+          print("ERROR: Could not read data path")
+          sys.exit(1)
       
-      # PARSE CONFIG FROM DIRECT JSON STRING
+      print("ACTUAL FILES TO LOAD:")
+      print("Model file: " + actual_model_path)
+      print("Data file: " + actual_data_path)
+      
+      # Check if files exist
+      if not os.path.exists(actual_model_path):
+          print("ERROR: Model file does not exist: " + actual_model_path)
+          print("Current directory: " + os.getcwd())
+          print("Directory contents:")
+          for item in os.listdir('.'):
+              print("  " + item)
+          sys.exit(1)
+      
+      if not os.path.exists(actual_data_path):
+          print("ERROR: Data file does not exist: " + actual_data_path)
+          print("Files in /tmp:")
+          if os.path.exists('/tmp'):
+              for item in os.listdir('/tmp'):
+                  if 'data' in item or 'model' in item:
+                      print("  " + item)
+          sys.exit(1)
+      
+      # PARSE CONFIG
       try:
           model_config = json.loads(args.model_config)
           print("CONFIG PARSED SUCCESSFULLY")
-          print("Config keys: " + str(list(model_config.keys())))
       except json.JSONDecodeError as e:
           print("ERROR: Failed to parse config JSON: " + str(e))
           sys.exit(1)
-      
-      # If model file doesn't exist, create a simple model for testing
-      if not os.path.exists(actual_model_path):
-          print("WARNING: Model file does not exist: " + actual_model_path)
-          print("Creating a simple model for testing...")
-          
-          try:
-              from nesy_factory.CNNs.factory import CNNFactory
-              
-              # Create model config from the provided config
-              model_build_config = model_config.get('model', {}).copy()
-              model_build_config['architecture'] = model_build_config.get('architecture', 'SimpleCNN')
-              model_build_config['output_dim'] = model_build_config.get('output_dim', 10)
-              model_build_config['input_channels'] = model_build_config.get('input_channels', 3)
-              model_build_config['input_size'] = model_build_config.get('input_size', [224, 224])
-              
-              print("Creating model with config:")
-              for key, value in model_build_config.items():
-                  print("  " + key + ": " + str(value))
-              
-              model = CNNFactory.create_model(model_build_config['architecture'], model_build_config)
-              print("Model created successfully: " + str(type(model)))
-              
-              # Save the created model
-              with open('/tmp/fallback_model.pkl', 'wb') as f:
-                  pickle.dump(model, f)
-              actual_model_path = '/tmp/fallback_model.pkl'
-              print("Fallback model saved to: " + actual_model_path)
-              
-          except Exception as e:
-              print("ERROR: Failed to create fallback model: " + str(e))
-              print("Creating basic CNN model...")
-              
-              # Create a basic CNN model as last resort
-              class BasicCNN(nn.Module):
-                  def __init__(self, num_classes=10):
-                      super().__init__()
-                      self.features = nn.Sequential(
-                          nn.Conv2d(3, 32, 3, padding=1),
-                          nn.ReLU(),
-                          nn.MaxPool2d(2),
-                          nn.Conv2d(32, 64, 3, padding=1),
-                          nn.ReLU(),
-                          nn.MaxPool2d(2),
-                          nn.Conv2d(64, 128, 3, padding=1),
-                          nn.ReLU(),
-                          nn.AdaptiveAvgPool2d((1, 1))
-                      )
-                      self.classifier = nn.Linear(128, num_classes)
-                  
-                  def forward(self, x):
-                      x = self.features(x)
-                      x = x.view(x.size(0), -1)
-                      x = self.classifier(x)
-                      return x
-              
-              model = BasicCNN(num_classes=model_config.get('model', {}).get('output_dim', 10))
-              model.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-              
-              with open('/tmp/basic_model.pkl', 'wb') as f:
-                  pickle.dump(model, f)
-              actual_model_path = '/tmp/basic_model.pkl'
-              print("Basic model saved to: " + actual_model_path)
-      
-      # Load data
-      if not os.path.exists(actual_data_path):
-          print("ERROR: Data file does not exist: " + actual_data_path)
-          print("Creating dummy data for testing...")
-          
-          # Create dummy data
-          import numpy as np
-          from torch.utils.data import DataLoader, TensorDataset
-          
-          # Create dummy dataset
-          dummy_images = torch.randn(100, 3, 224, 224)
-          dummy_labels = torch.randint(0, 10, (100,))
-          
-          train_dataset = TensorDataset(dummy_images[:80], dummy_labels[:80])
-          val_dataset = TensorDataset(dummy_images[80:], dummy_labels[80:])
-          
-          train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-          val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
-          
-          processed_data = {
-              'train_loader': train_loader,
-              'val_loader': val_loader,
-              'data_info': {'num_classes': 10, 'image_size': [224, 224]}
-          }
-          
-          with open('/tmp/dummy_data.pkl', 'wb') as f:
-              pickle.dump(processed_data, f)
-          actual_data_path = '/tmp/dummy_data.pkl'
-          print("Dummy data created and saved to: " + actual_data_path)
       
       # EXTRACT TRAINING PARAMETERS
       training_config = model_config.get('training', {})
       optimizer_config = training_config.get('optimizer', {})
       
-      epochs = 5  # Reduced for testing
+      epochs = 5
       learning_rate = optimizer_config.get('learning_rate', 0.001)
       weight_decay = optimizer_config.get('weight_decay', 0.0001)
       batch_size = training_config.get('batch_size', 16)
@@ -217,6 +148,7 @@ implementation:
           # Extract data loaders
           train_loader = processed_data.get('train_loader')
           val_loader = processed_data.get('val_loader')
+          data_info = processed_data.get('data_info', {})
           
           if train_loader is None:
               print("ERROR: train_loader is None in processed data")
