@@ -1,4 +1,4 @@
-name: B CNN Train Model
+name: CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -91,6 +91,71 @@ implementation:
             def __init__(self, data_dict=None):
                 if data_dict:
                     self.__dict__.update(data_dict)
+
+        # Create mock torchvision transforms to handle missing imports
+        class MockCompose:
+            def __init__(self, transforms):
+                self.transforms = transforms
+            def __call__(self, x):
+                return x
+
+        class MockResize:
+            def __init__(self, size):
+                self.size = size
+            def __call__(self, x):
+                return x
+
+        class MockRandomCrop:
+            def __init__(self, size):
+                self.size = size
+            def __call__(self, x):
+                return x
+
+        class MockCenterCrop:
+            def __init__(self, size):
+                self.size = size
+            def __call__(self, x):
+                return x
+
+        class MockRandomHorizontalFlip:
+            def __init__(self, p=0.5):
+                self.p = p
+            def __call__(self, x):
+                return x
+
+        class MockToTensor:
+            def __call__(self, x):
+                if isinstance(x, torch.Tensor):
+                    return x
+                return torch.tensor(x)
+
+        class MockNormalize:
+            def __init__(self, mean, std):
+                self.mean = mean
+                self.std = std
+            def __call__(self, x):
+                return x
+
+        # Mock torchvision module
+        class MockTorchvision:
+            def __init__(self):
+                self.transforms = MockTransforms()
+                
+        class MockTransforms:
+            def __init__(self):
+                self.Compose = MockCompose
+                self.Resize = MockResize
+                self.RandomCrop = MockRandomCrop
+                self.CenterCrop = MockCenterCrop
+                self.RandomHorizontalFlip = MockRandomHorizontalFlip
+                self.ToTensor = MockToTensor
+                self.Normalize = MockNormalize
+
+        # Create mock modules to handle imports in pickle
+        import sys
+        mock_torchvision = MockTorchvision()
+        sys.modules['torchvision'] = mock_torchvision
+        sys.modules['torchvision.transforms'] = mock_torchvision.transforms
 
         class CustomJSONDataset:
             def __init__(self, data, transform=None):
@@ -259,6 +324,10 @@ implementation:
                 print('  Number of batches: ' + str(len(train_loader)))
                 if hasattr(train_loader, 'batch_size'):
                     print('  Batch size: ' + str(train_loader.batch_size))
+                if hasattr(train_loader, 'dataset'):
+                    print('  Dataset type: ' + str(type(train_loader.dataset)))
+                    if hasattr(train_loader.dataset, '__len__'):
+                        print('  Dataset samples: ' + str(len(train_loader.dataset)))
             else:
                 print('  train_loader is None!')
         else:
@@ -360,6 +429,8 @@ implementation:
                 print('  Labels shape: ' + str(labels.shape))
                 print('  Images dtype: ' + str(images.dtype))
                 print('  Labels dtype: ' + str(labels.dtype))
+                print('  Min/Max images: ' + str(images.min().item()) + '/' + str(images.max().item()))
+                print('  Unique labels: ' + str(torch.unique(labels)))
             else:
                 print('  Unexpected batch structure')
                 
