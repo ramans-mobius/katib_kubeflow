@@ -1,4 +1,4 @@
-name: V CNN Train Model
+name: CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -17,10 +17,10 @@ implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
     command:
-      - sh
+      - python3
+      - -u
       - -c
       - |
-        python3 -u -c "
         import torch, argparse, pickle, os, json, torch.nn as nn, torch.optim as optim
         
         print('=' * 80)
@@ -356,7 +356,6 @@ implementation:
         print('Best validation accuracy: ' + str(best_val_acc))
         print('Final model saved: ' + str(args.trained_model))
         print('Training history saved: ' + str(args.training_history))
-        "
     args:
       - --data_path
       - {inputPath: data_path}
