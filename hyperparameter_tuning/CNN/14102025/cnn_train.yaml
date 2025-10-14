@@ -1,4 +1,4 @@
-name: F CNN Train Model
+name: K CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -17,15 +17,16 @@ implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
     command:
-      - sh
+      - python3
+      - -u
       - -c
       - |
-        set -e
-        echo "Installing required dependencies..."
-        pip install --quiet torchvision pillow --root-user-action=ignore 2>/dev/null || true
-        echo "Starting training..."
-        python3 -u -c "
         import torch, argparse, pickle, os, json, torch.nn as nn, torch.optim as optim
+        
+        # Install dependencies first
+        import subprocess
+        import sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "torchvision", "pillow", "--quiet"])
         
         parser = argparse.ArgumentParser()
         parser.add_argument('--data_path', type=str, required=True)
@@ -144,7 +145,6 @@ implementation:
             json.dump(training_history, f, indent=2)
 
         print('Training completed successfully')
-        " -- --data_path "$1" --model "$2" --config "$3" --trained_model "$4" --training_history "$5"
     args:
       - --data_path
       - {inputPath: data_path}
