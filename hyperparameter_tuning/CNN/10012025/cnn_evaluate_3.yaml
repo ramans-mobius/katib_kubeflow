@@ -39,9 +39,20 @@ implementation:
       from pathlib import Path
       import pickle
       from sklearn.metrics import confusion_matrix, classification_report, precision_recall_fscore_support
-      import seaborn as sns
       
       print("=== CNN MODEL EVALUATOR ===")
+      
+      # Create output directories first
+      output_dirs = [
+          '/tmp/outputs/evaluation_results',
+          '/tmp/outputs/test_accuracy', 
+          '/tmp/outputs/confusion_matrix',
+          '/tmp'
+      ]
+      
+      for dir_path in output_dirs:
+          Path(dir_path).mkdir(parents=True, exist_ok=True)
+          print(f"Ensured directory exists: {dir_path}")
       
       # Read input PATHS from files
       with open(sys.argv[1], 'r') as f:
@@ -249,20 +260,29 @@ implementation:
               }
           }
           
-          # Generate confusion matrix plot
+          # Generate confusion matrix plot without seaborn
           cm_plot_path = "/tmp/confusion_matrix.png"
           if generate_plots:
               try:
                   plt.figure(figsize=(12, 10))
-                  sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                             xticklabels=['Class ' + str(i) for i in range(num_classes)], 
-                             yticklabels=['Class ' + str(i) for i in range(num_classes)],
-                             cbar_kws={'label': 'Number of Samples'})
+                  
+                  # Create confusion matrix plot using matplotlib imshow
+                  plt.imshow(cm, interpolation='nearest', cmap='Blues')
                   plt.title('Confusion Matrix', fontsize=16, fontweight='bold')
+                  plt.colorbar()
+                  
+                  # Add text annotations
+                  for i in range(cm.shape[0]):
+                      for j in range(cm.shape[1]):
+                          plt.text(j, i, str(cm[i, j]),
+                                 horizontalalignment="center",
+                                 color="white" if cm[i, j] > cm.max() / 2 else "black")
+                  
+                  tick_marks = np.arange(num_classes)
+                  plt.xticks(tick_marks, ['Class ' + str(i) for i in range(num_classes)], rotation=45)
+                  plt.yticks(tick_marks, ['Class ' + str(i) for i in range(num_classes)])
                   plt.xlabel('Predicted Label', fontsize=12)
                   plt.ylabel('True Label', fontsize=12)
-                  plt.xticks(rotation=45)
-                  plt.yticks(rotation=0)
                   
                   plt.tight_layout()
                   plt.savefig(str(cm_plot_path), bbox_inches='tight', dpi=300, facecolor='white')
@@ -279,13 +299,22 @@ implementation:
               with open(cm_plot_path, 'w') as f:
                   f.write("Plots disabled in configuration")
           
-          # Write OUTPUT PATHS to files
+          # Write OUTPUT PATHS to files - ensure directories exist
+          Path(evaluation_results_file).parent.mkdir(parents=True, exist_ok=True)
+          Path(test_accuracy_file).parent.mkdir(parents=True, exist_ok=True)
+          Path(confusion_matrix_file).parent.mkdir(parents=True, exist_ok=True)
+          
           with open(evaluation_results_file, 'w') as f:
               json.dump(evaluation_results, f, indent=2)
           with open(test_accuracy_file, 'w') as f:
               f.write("{:.2f}".format(accuracy))
           with open(confusion_matrix_file, 'w') as f:
               f.write(str(cm_plot_path))
+          
+          print("Output files written successfully:")
+          print(f"  - Evaluation results: {evaluation_results_file}")
+          print(f"  - Test accuracy: {test_accuracy_file}")
+          print(f"  - Confusion matrix: {confusion_matrix_file}")
           
           # Print comprehensive summary
           print("=" * 50)
@@ -309,16 +338,20 @@ implementation:
           print("MODEL EVALUATION FAILED: " + str(e))
           import traceback
           traceback.print_exc()
-          # Write error outputs
+          # Write error outputs - ensure directories exist first
           try:
+              Path(evaluation_results_file).parent.mkdir(parents=True, exist_ok=True)
+              Path(test_accuracy_file).parent.mkdir(parents=True, exist_ok=True)
+              Path(confusion_matrix_file).parent.mkdir(parents=True, exist_ok=True)
+              
               with open(evaluation_results_file, 'w') as f:
                   json.dump({"error": str(e), "success": False}, f)
               with open(test_accuracy_file, 'w') as f:
                   f.write("0.00")
               with open(confusion_matrix_file, 'w') as f:
                   f.write("/tmp/evaluation_failed.png")
-          except:
-              pass
+          except Exception as write_error:
+              print(f"Failed to write error outputs: {write_error}")
           sys.exit(1)
     
     args:
