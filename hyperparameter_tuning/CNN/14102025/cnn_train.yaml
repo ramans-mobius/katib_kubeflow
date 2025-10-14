@@ -1,4 +1,4 @@
-name: CNN Train Model
+name: F CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -146,8 +146,13 @@ implementation:
         print('Training completed successfully')
         " -- --data_path "$1" --model "$2" --config "$3" --trained_model "$4" --training_history "$5"
     args:
+      - --data_path
       - {inputPath: data_path}
+      - --model
       - {inputPath: model}
+      - --config
       - {inputValue: config}
+      - --trained_model
       - {outputPath: trained_model}
+      - --training_history
       - {outputPath: training_history}
