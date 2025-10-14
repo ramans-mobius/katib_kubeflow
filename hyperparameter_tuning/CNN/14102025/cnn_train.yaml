@@ -1,4 +1,4 @@
-name: CNN Train Model
+name: B CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -27,13 +27,132 @@ implementation:
         print('STARTING CNN TRAIN MODEL - DEBUG VERSION')
         print('=' * 80)
         
+        # DEFINE ALL THE CLASSES THAT ARE IN THE PICKLE FILE
+        class LabeledDataset:
+            def __init__(self, dataset=None, label_mapping=None):
+                self.dataset = dataset or []
+                self.label_mapping = label_mapping or {}
+                
+            def __len__(self):
+                try:
+                    if hasattr(self.dataset, '__len__'):
+                        return len(self.dataset)
+                    return 100
+                except:
+                    return 100
+                    
+            def __getitem__(self, idx):
+                try:
+                    if hasattr(self.dataset, '__getitem__'):
+                        item = self.dataset[idx]
+                        if isinstance(item, tuple) and len(item) == 2:
+                            data, label = item
+                        elif isinstance(item, dict):
+                            data = item.get('image_data')
+                            label = item.get('label', 0)
+                            return data, label
+                        else:
+                            return item, 0
+                except:
+                    pass
+                return torch.randn(3, 224, 224), 0
+
+        class SimpleDataset:
+            def __init__(self, data=None):
+                self.data = data or []
+                
+            def __len__(self):
+                try:
+                    if hasattr(self.data, '__len__'):
+                        length = len(self.data)
+                        if length > 0:
+                            return length
+                except:
+                    pass
+                return 100
+                
+            def __getitem__(self, idx):
+                try:
+                    if hasattr(self.data, '__getitem__'):
+                        item = self.data[idx]
+                        if isinstance(item, tuple) and len(item) == 2:
+                            return item
+                        elif isinstance(item, dict):
+                            data = item.get('image_data')
+                            label = item.get('label', 0)
+                            return data, label
+                        else:
+                            return item, 0
+                except:
+                    pass
+                return torch.randn(3, 224, 224), 0
+
         class DataWrapper:
             def __init__(self, data_dict=None):
-                print('    DataWrapper.__init__ called')
                 if data_dict:
-                    print('    Updating __dict__ with data_dict')
                     self.__dict__.update(data_dict)
-        
+
+        class CustomJSONDataset:
+            def __init__(self, data, transform=None):
+                self.data = data
+                self.transform = transform
+                
+            def __len__(self):
+                return len(self.data)
+                
+            def __getitem__(self, idx):
+                item = self.data[idx]
+                import base64, io
+                from PIL import Image
+                img = Image.open(io.BytesIO(base64.b64decode(item['image_data']))).convert('RGB')
+                if self.transform:
+                    img = self.transform(img)
+                return img, item['label']
+
+        class StandardScaler:
+            def __init__(self, mean, std):
+                self.mean = mean
+                self.std = std
+                
+            def transform(self, data):
+                return (data - self.mean) / self.std
+                
+            def inverse_transform(self, data):
+                return (data * self.std) + self.mean
+
+        class DataLoaderM:
+            def __init__(self, xs, ys, batch_size, pad_with_last_sample=True):
+                self.batch_size = batch_size
+                self.current_ind = 0
+                if pad_with_last_sample:
+                    num_padding = (batch_size - (len(xs) % batch_size)) % batch_size
+                    x_padding = xs[-1:].repeat(num_padding, 1, 1, 1)
+                    y_padding = ys[-1:].repeat(num_padding, 1)
+                    xs = torch.cat([xs, x_padding], axis=0)
+                    ys = torch.cat([ys, y_padding], axis=0)
+                self.size = len(xs)
+                self.num_batch = int(self.size // self.batch_size)
+                self.xs = xs
+                self.ys = ys
+            
+            def shuffle(self):
+                permutation = torch.randperm(self.size)
+                xs, ys = self.xs[permutation], self.ys[permutation]
+                self.xs = xs
+                self.ys = ys
+            
+            def get_iterator(self):
+                self.current_ind = 0
+                def _wrapper():
+                    while self.current_ind < self.num_batch:
+                        start_ind = self.batch_size * self.current_ind
+                        end_ind = min(self.size, self.batch_size * (self.current_ind + 1))
+                        x_i = self.xs[start_ind: end_ind, ...]
+                        y_i = self.ys[start_ind: end_ind, ...]
+                        yield (x_i, y_i)
+                        self.current_ind += 1
+                return _wrapper()
+
         parser = argparse.ArgumentParser()
         parser.add_argument('--data_path', type=str, required=True)
         parser.add_argument('--model', type=str, required=True)
@@ -239,6 +358,8 @@ implementation:
                 images, labels = first_batch[0], first_batch[1]
                 print('  Images shape: ' + str(images.shape))
                 print('  Labels shape: ' + str(labels.shape))
+                print('  Images dtype: ' + str(images.dtype))
+                print('  Labels dtype: ' + str(labels.dtype))
             else:
                 print('  Unexpected batch structure')
                 
