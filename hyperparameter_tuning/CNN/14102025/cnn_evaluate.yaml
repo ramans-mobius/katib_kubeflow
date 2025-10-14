@@ -1,4 +1,4 @@
-name: dataset CNN Evaluate Model
+name: CNN Evaluate Model
 description: Evaluates trained CNN model and generates performance metrics
 inputs:
   - name: trained_model
@@ -36,14 +36,15 @@ implementation:
         parser.add_argument('--metrics_json', type=str, required=True)
         args = parser.parse_args()
 
+        print(f"Starting CNN Evaluation")
         print(f"Trained model path: {args.trained_model}")
         print(f"Data path: {args.data_path}")
 
-        # Load data
+        # Load the preprocessed data
         try:
             with open(args.data_path, "rb") as f:
                 processed_data = pickle.load(f)
-            print("Successfully loaded data")
+            print("Data loaded successfully")
         except Exception as e:
             print(f"Error loading data: {e}")
             exit(1)
@@ -51,7 +52,8 @@ implementation:
         # Load config
         try:
             config = json.loads(args.config)
-            print("Successfully loaded config")
+            model_config = config.get('model', {})
+            print("Config loaded successfully")
         except Exception as e:
             print(f"Error loading config: {e}")
             exit(1)
@@ -59,10 +61,9 @@ implementation:
         # Load model
         try:
             from nesy_factory.CNNs.factory import CNNFactory
-            model_config = config.get('model', {})
             model = CNNFactory.create_model(model_config.get('architecture', 'resnet'), model_config)
             model.load_state_dict(torch.load(args.trained_model, map_location=torch.device('cpu')))
-            print("Successfully loaded model")
+            print("Model loaded successfully")
         except Exception as e:
             print(f"Error loading model: {e}")
             exit(1)
@@ -72,44 +73,56 @@ implementation:
         model = model.to(device)
         model.eval()
 
-        test_loader = processed_data.get('test_loader')
+        test_loader = processed_data.test_loader
         if test_loader is None:
-            print("ERROR: test_loader not found in data")
+            print("test_loader not found in data")
             exit(1)
 
         print("Starting evaluation...")
         
         all_predictions = []
         all_targets = []
+        total_loss = 0.0
+        criterion = torch.nn.CrossEntropyLoss()
         
         with torch.no_grad():
             for data, target in test_loader:
                 data, target = data.to(device), target.to(device)
                 output = model(data)
+                
+                # Calculate loss
+                loss = criterion(output, target)
+                total_loss += loss.item()
+                
                 _, predictions = output.max(1)
                 
                 all_predictions.extend(predictions.cpu().numpy())
                 all_targets.extend(target.cpu().numpy())
 
         # Calculate metrics
-        accuracy = accuracy_score(all_targets, all_predictions) * 100
-        
-        # Classification report
-        class_report = classification_report(all_targets, all_predictions, output_dict=True)
-        
-        # Confusion matrix
-        cm = confusion_matrix(all_targets, all_predictions)
-        
+        if len(all_targets) > 0:
+            accuracy = accuracy_score(all_targets, all_predictions) * 100
+            avg_loss = total_loss / len(test_loader)
+            
+            # Classification report
+            class_report = classification_report(all_targets, all_predictions, output_dict=True)
+            
+            # Confusion matrix
+            cm = confusion_matrix(all_targets, all_predictions)
+        else:
+            accuracy = 0.0
+            avg_loss = 0.0
+            class_report = {}
+            cm = []
+
         # Create comprehensive metrics
         metrics = {
-            'overall_accuracy': accuracy,
+            'accuracy': accuracy,
+            'loss': avg_loss,
+            'total_samples': len(all_targets),
+            'correct_predictions': np.sum(np.array(all_predictions) == np.array(all_targets)),
             'classification_report': class_report,
-            'confusion_matrix': cm.tolist(),
-            'predictions_summary': {
-                'total_samples': len(all_predictions),
-                'correct_predictions': np.sum(np.array(all_predictions) == np.array(all_targets)),
-                'incorrect_predictions': np.sum(np.array(all_predictions) != np.array(all_targets))
-            }
+            'confusion_matrix': cm.tolist() if hasattr(cm, 'tolist') else cm
         }
 
         # Save metrics
@@ -122,9 +135,12 @@ implementation:
         with open(args.metrics_json, 'w') as f:
             json.dump(metrics, f, indent=2)
 
-        print(f"Evaluation completed! Test Accuracy: {accuracy:.2f}%")
-        print(f"Metrics saved to {args.metrics}")
-        print(f"Metrics JSON saved to {args.metrics_json}")
+        print(f"Evaluation complete!")
+        print(f"   Accuracy: {accuracy:.2f}%")
+        print(f"   Loss: {avg_loss:.4f}")
+        print(f"   Correct: {metrics['correct_predictions']}/{metrics['total_samples']}")
+        print(f"Metrics saved to: {args.metrics}")
+        print(f"Metrics JSON saved to: {args.metrics_json}")
 
     args:
       - --trained_model
