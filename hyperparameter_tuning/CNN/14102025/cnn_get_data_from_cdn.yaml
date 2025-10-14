@@ -1,13 +1,14 @@
-name: data CNN Get Data Through CDN
+name: dataset CNN Get Data Through CDN
 description: Downloads image dataset from CDN URL
 inputs:
   - name: process_data_url
     type: String
     description: URL to fetch the image dataset from
 outputs:
-  - name: processed_data_path
+  - name: processed_data
+    type: Dataset
+  - name: config_out
     type: String
-    description: Path to downloaded dataset file
 
 implementation:
   container:
@@ -23,34 +24,46 @@ implementation:
       - -u
       - -c
       - |
-        import argparse, os, requests, pickle
-        
+        import argparse, os, requests, json
+
         parser = argparse.ArgumentParser()
         parser.add_argument('--process_data_url', type=str, required=True)
-        parser.add_argument('--processed_data_path', type=str, required=True)
+        parser.add_argument('--processed_data', type=str, required=True)
+        parser.add_argument('--config_out', type=str, required=True)
         args = parser.parse_args()
 
-        print("Fetching image dataset from CDN: " + args.process_data_url)
+        args.process_data_url = args.process_data_url.replace("$$", "$$$")
+
+        # Download dataset from CDN
+        print(f"Fetching dataset from CDN: {args.process_data_url}")
         resp = requests.get(args.process_data_url)
         resp.raise_for_status()
 
-        # Create output directory
-        output_dir = os.path.dirname(args.processed_data_path)
-        os.makedirs(output_dir, exist_ok=True)
+        # Create output directories
+        os.makedirs(os.path.dirname(args.processed_data), exist_ok=True)
+        os.makedirs(os.path.dirname(args.config_out), exist_ok=True)
 
-        # Save to shared location
-        data_file_path = "/shared-workspace/downloaded_data.pkl"
-        with open(data_file_path, "wb") as f:
+        # Save dataset
+        with open(args.processed_data, "wb") as f:
             f.write(resp.content)
+        print(f"Dataset saved at {args.processed_data}")
 
-        # Write the fixed path to output
-        with open(args.processed_data_path, "w") as f:
-            f.write(data_file_path)
+        # Create basic config
+        config = {
+            "dataset_info": {
+                "source": args.process_data_url,
+                "size_bytes": len(resp.content)
+            }
+        }
         
-        print("Image dataset saved at " + data_file_path)
-        print("Path output written to: " + args.processed_data_path)
+        with open(args.config_out, "w") as f:
+            json.dump(config, f, indent=2)
+        print(f"Config saved at {args.config_out}")
+
     args:
       - --process_data_url
       - { inputValue: process_data_url }
-      - --processed_data_path
-      - { outputPath: processed_data_path }
+      - --processed_data
+      - { outputPath: processed_data }
+      - --config_out
+      - { outputPath: config_out }
