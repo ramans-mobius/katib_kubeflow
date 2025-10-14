@@ -1,4 +1,4 @@
-name: CNN Model Trainer
+name: data CNN Model Trainer
 description: Trains CNN model on preprocessed data
 inputs:
   - name: model_config
