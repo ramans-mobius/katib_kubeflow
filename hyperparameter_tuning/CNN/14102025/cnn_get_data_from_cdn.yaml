@@ -46,7 +46,7 @@ implementation:
         # Save the downloaded pickle directly
         with open(args.processed_data, "wb") as f:
             f.write(resp.content)
-        print(f"✅ Dataset saved to: {args.processed_data}")
+        print(f"Dataset saved to: {args.processed_data}")
 
         # Create basic config
         config = {
@@ -58,7 +58,7 @@ implementation:
         
         with open(args.config_out, "w") as f:
             json.dump(config, f, indent=2)
-        print(f"✅ Config saved to: {args.config_out}")
+        print(f"Config saved to: {args.config_out}")
 
     args:
       - --process_data_url
