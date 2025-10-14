@@ -17,10 +17,6 @@ implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
     command:
-      - sh
-      - -c
-      - |
-        exec "$0" "$@"
       - python3
       - -u
       - -c
@@ -36,11 +32,10 @@ implementation:
         parser.add_argument('--metrics_json', type=str, required=True)
         args = parser.parse_args()
 
-        print(f"Starting CNN Evaluation")
+        print("Starting CNN Evaluation")
         print(f"Trained model path: {args.trained_model}")
         print(f"Data path: {args.data_path}")
 
-        # Load the preprocessed data
         try:
             with open(args.data_path, "rb") as f:
                 processed_data = pickle.load(f)
@@ -49,7 +44,6 @@ implementation:
             print(f"Error loading data: {e}")
             exit(1)
 
-        # Load config
         try:
             config = json.loads(args.config)
             model_config = config.get('model', {})
@@ -58,7 +52,6 @@ implementation:
             print(f"Error loading config: {e}")
             exit(1)
 
-        # Load model
         try:
             from nesy_factory.CNNs.factory import CNNFactory
             model = CNNFactory.create_model(model_config.get('architecture', 'resnet'), model_config)
@@ -68,7 +61,6 @@ implementation:
             print(f"Error loading model: {e}")
             exit(1)
 
-        # Evaluation
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model = model.to(device)
         model.eval()
@@ -90,7 +82,6 @@ implementation:
                 data, target = data.to(device), target.to(device)
                 output = model(data)
                 
-                # Calculate loss
                 loss = criterion(output, target)
                 total_loss += loss.item()
                 
@@ -99,15 +90,11 @@ implementation:
                 all_predictions.extend(predictions.cpu().numpy())
                 all_targets.extend(target.cpu().numpy())
 
-        # Calculate metrics
         if len(all_targets) > 0:
             accuracy = accuracy_score(all_targets, all_predictions) * 100
             avg_loss = total_loss / len(test_loader)
             
-            # Classification report
             class_report = classification_report(all_targets, all_predictions, output_dict=True)
-            
-            # Confusion matrix
             cm = confusion_matrix(all_targets, all_predictions)
         else:
             accuracy = 0.0
@@ -115,7 +102,6 @@ implementation:
             class_report = {}
             cm = []
 
-        # Create comprehensive metrics
         metrics = {
             'accuracy': accuracy,
             'loss': avg_loss,
@@ -125,7 +111,6 @@ implementation:
             'confusion_matrix': cm.tolist() if hasattr(cm, 'tolist') else cm
         }
 
-        # Save metrics
         os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
         os.makedirs(os.path.dirname(args.metrics_json), exist_ok=True)
 
@@ -136,12 +121,11 @@ implementation:
             json.dump(metrics, f, indent=2)
 
         print(f"Evaluation complete!")
-        print(f"   Accuracy: {accuracy:.2f}%")
-        print(f"   Loss: {avg_loss:.4f}")
-        print(f"   Correct: {metrics['correct_predictions']}/{metrics['total_samples']}")
+        print(f"Accuracy: {accuracy:.2f}%")
+        print(f"Loss: {avg_loss:.4f}")
+        print(f"Correct: {metrics['correct_predictions']}/{metrics['total_samples']}")
         print(f"Metrics saved to: {args.metrics}")
         print(f"Metrics JSON saved to: {args.metrics_json}")
-
     args:
       - --trained_model
       - {inputPath: trained_model}
