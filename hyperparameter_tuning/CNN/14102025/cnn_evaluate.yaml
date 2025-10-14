@@ -1,4 +1,4 @@
-name: CNN Model Evaluator
+name: data CNN Model Evaluator
 description: Comprehensive evaluation of trained CNN model
 inputs:
   - name: model_config
