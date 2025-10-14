@@ -52,7 +52,7 @@ implementation:
         
         for param, default_value in defaults.items():
             if param not in model_config:
-                print(f"⚙️ {param} not found, using default: {default_value}")
+                print(f"{param} not found, using default: {default_value}")
                 model_config[param] = default_value
 
         try:
