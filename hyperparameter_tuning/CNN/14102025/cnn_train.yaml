@@ -1,4 +1,4 @@
-name: CNN Train Model
+name: SVT CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
