@@ -1,4 +1,4 @@
-name: F CNN Evaluate Model
+name: G CNN Evaluate Model
 description: Evaluates trained CNN model and generates performance metrics
 inputs:
   - name: trained_model
@@ -84,6 +84,19 @@ implementation:
             def __init__(self, data_dict=None):
                 if data_dict:
                     self.__dict__.update(data_dict)
+
+        # Custom JSON encoder to handle numpy types
+        class NumpyEncoder(json.JSONEncoder):
+            def default(self, obj):
+                if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                    return int(obj)
+                elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, np.bool_):
+                    return bool(obj)
+                return super().default(obj)
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--trained_model', type=str, required=True)
@@ -198,8 +211,12 @@ implementation:
                 all_targets.extend(target.cpu().numpy())
 
         if len(all_targets) > 0:
-            accuracy = accuracy_score(all_targets, all_predictions) * 100
-            avg_loss = total_loss / len(test_loader) if len(test_loader) > 0 else 0.0
+            # Convert numpy arrays to Python native types
+            all_predictions = [int(x) for x in all_predictions]
+            all_targets = [int(x) for x in all_targets]
+            
+            accuracy = float(accuracy_score(all_targets, all_predictions) * 100)
+            avg_loss = float(total_loss / len(test_loader)) if len(test_loader) > 0 else 0.0
             
             class_report = classification_report(all_targets, all_predictions, output_dict=True)
             cm = confusion_matrix(all_targets, all_predictions)
@@ -215,23 +232,44 @@ implementation:
             cm = []
             print("No samples were processed during evaluation")
 
+        # Convert all numpy types to Python native types in metrics
         metrics = {
-            'accuracy': accuracy,
-            'loss': avg_loss,
-            'total_samples': len(all_targets),
-            'correct_predictions': np.sum(np.array(all_predictions) == np.array(all_targets)),
+            'accuracy': float(accuracy),
+            'loss': float(avg_loss),
+            'total_samples': int(len(all_targets)),
+            'correct_predictions': int(np.sum(np.array(all_predictions) == np.array(all_targets))),
             'classification_report': class_report,
             'confusion_matrix': cm.tolist() if hasattr(cm, 'tolist') else cm
         }
 
+        # Recursively convert numpy types in nested structures
+        def convert_numpy_types(obj):
+            if isinstance(obj, dict):
+                return {k: convert_numpy_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numpy_types(item) for item in obj]
+            elif isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+                return float(obj)
+            elif isinstance(obj, np.bool_):
+                return bool(obj)
+            elif isinstance(obj, np.ndarray):
+                return convert_numpy_types(obj.tolist())
+            else:
+                return obj
+
+        metrics = convert_numpy_types(metrics)
+
         os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
         os.makedirs(os.path.dirname(args.metrics_json), exist_ok=True)
 
+        # Save with custom encoder
         with open(args.metrics, 'w') as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, cls=NumpyEncoder)
             
         with open(args.metrics_json, 'w') as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, cls=NumpyEncoder)
 
         print(f"Metrics saved to: {args.metrics}")
         print(f"Metrics JSON saved to: {args.metrics_json}")
