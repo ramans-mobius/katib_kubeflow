@@ -1,0 +1,151 @@
+name: A Trigger CNN Pipeline
+description: Triggers a CNN training pipeline using a curl request.
+inputs:
+  - {name: process_dataset_url, type: String, description: "URL to the processed dataset pickle file"}
+  - {name: model_config, type: String, description: "JSON string for model configuration"}
+  - {name: model_name, type: String, description: "Name of the model to be used"}
+  - {name: access_token, type: string, description: "Bearer token for pipeline trigger authentication"}
+  - {name: domain, type: String, description: "Domain for the pipeline trigger API (e.g., https://ig.gov-cloud.ai)"}
+  - {name: pipeline_id, type: String, description: "ID of the Elyra Kubeflow pipeline to trigger"}
+  - {name: experiment_id, type: String, description: "ID of the Kubeflow experiment"}
+implementation:
+  container:
+    image: python:3.8-slim
+    command:
+      - sh
+      - -ec
+      - |
+        if ! command -v curl &> /dev/null; then
+            echo "curl could not be found, installing..."
+            apt-get update > /dev/null && apt-get install -y curl > /dev/null
+        fi
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import subprocess
+        import json
+        import os
+        import time
+
+        parser = argparse.ArgumentParser(description="Trigger a CNN training pipeline.")
+        parser.add_argument('--process_dataset_url', type=str, required=True, help='URL to the processed dataset pickle file.')
+        parser.add_argument('--model_config', type=str, required=True, help='JSON string for model configuration.')
+        parser.add_argument('--model_name', type=str, required=True, help='Name of the model to be used.')
+        parser.add_argument('--access_token', type=str, required=True, help='Bearer token for pipeline trigger authentication.')
+        parser.add_argument('--domain', type=str, required=True, help='Domain for the pipeline trigger API.')
+        parser.add_argument('--pipeline_id', type=str, required=True, help='ID of the Elyra Kubeflow pipeline to trigger.')
+        parser.add_argument('--experiment_id', type=str, required=True, help='ID of the Kubeflow experiment.')
+        args = parser.parse_args()
+
+        # Escape dollar signs in URLs
+        args.process_dataset_url = args.process_dataset_url.replace("$$", "$$$$")
+
+        trigger_url = f"{args.domain}/bob-service-test/v1.0/pipeline/trigger/ml?pipelineId={args.pipeline_id}"
+        
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {args.access_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "pipelineType": "ML",
+            "containerResources": {},
+            "experimentId": args.experiment_id,
+            "enableCaching": True,
+            "parameters": {
+                "process_dataset_url": args.process_dataset_url,
+                "model_config": args.model_config,
+                "model_name": args.model_name
+            },
+            "version": 1
+        }
+
+        print(f"Triggering CNN pipeline at: {trigger_url}")
+        print(f"Using pipeline ID: {args.pipeline_id}")
+        print(f"Using experiment ID: {args.experiment_id}")
+        print(f"Payload parameters:")
+        print(f"  - process_dataset_url: {args.process_dataset_url}")
+        print(f"  - model_name: {args.model_name}")
+        print(f"  - model_config length: {len(args.model_config)} characters")
+
+        curl_command = [
+            "curl",
+            "--location", trigger_url,
+            "--header", f"accept: {headers['accept']}",
+            "--header", f"Authorization: {headers['Authorization']}",
+            "--header", f"Content-Type: {headers['Content-Type']}",
+            "--data", json.dumps(payload),
+            "--fail",
+            "--show-error",
+            "--connect-timeout", "30",
+            "--max-time", "120"
+        ]
+
+        retries = 5
+        retry_delay = 60
+        
+        for i in range(retries):
+            try:
+                print(f"Attempt {i+1}/{retries}...")
+                process = subprocess.run(
+                    curl_command,
+                    capture_output=True,
+                    check=True,
+                    text=True
+                )
+                print("Pipeline trigger successful!")
+                print("Raw response:")
+                print(process.stdout)
+                
+                # Try to parse and display the run ID if available
+                try:
+                    response_data = json.loads(process.stdout)
+                    if 'runId' in response_data:
+                        print(f"Run created successfully! Run ID: {response_data['runId']}")
+                    elif 'id' in response_data:
+                        print(f"Run created successfully! Run ID: {response_data['id']}")
+                except:
+                    print("Could not parse run ID from response, but request was successful")
+                
+                break
+                
+            except subprocess.CalledProcessError as e:
+                print(f"Attempt {i+1} failed with return code {e.returncode}.")
+                print(f"Stderr: {e.stderr}")
+                print(f"Stdout: {e.stdout}")
+                
+                if i < retries - 1:
+                    # Check if the error is a 5xx server error to retry
+                    if e.returncode == 22:
+                         print(f"Retrying in {retry_delay} seconds...")
+                         time.sleep(retry_delay)
+                         continue
+                    else:
+                        print("Non-retriable error encountered.")
+                        raise e
+                else:
+                    print("Max retries reached. Failing.")
+                    raise e
+                    
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+                raise e
+    args:
+      - --process_dataset_url
+      - {inputValue: process_dataset_url}
+      - --model_config
+      - {inputValue: model_config}
+      - --model_name
+      - {inputValue: model_name}
+      - --access_token
+      - {inputValue: access_token}
+      - --domain
+      - {inputValue: domain}
+      - --pipeline_id
+      - {inputValue: pipeline_id}
+      - --experiment_id
+      - {inputValue: experiment_id}
