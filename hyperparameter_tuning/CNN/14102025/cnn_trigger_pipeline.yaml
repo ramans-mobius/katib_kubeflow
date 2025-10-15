@@ -1,4 +1,4 @@
-name: Trigger CNN Pipeline
+name: A Trigger CNN Pipeline
 description: Triggers a CNN training pipeline using a curl request.
 inputs:
   - {name: process_dataset_url, type: String, description: "URL to the processed dataset pickle file"}
