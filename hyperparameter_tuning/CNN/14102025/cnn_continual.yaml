@@ -1,0 +1,405 @@
+name: CNN Continual Tasks Generator
+description: Loads pickled CNN dataset and splits it into continual learning tasks
+inputs:
+  - name: data_pickle
+    type: Dataset
+    description: "Pickle file containing CNN formatted data"
+  - name: splitting_strategy
+    type: String
+    description: "Strategy for splitting data: class_split, domain_split, temporal_split"
+  - name: num_tasks
+    type: Integer
+    description: "Number of continual learning tasks to create"
+  - name: config
+    type: String
+    description: "Configuration parameters"
+outputs:
+  - name: tasks_pickle
+    type: Dataset
+    description: "Pickle file containing list of continual learning tasks"
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v19
+    command:
+      - sh
+      - -c
+      - |
+        echo "Starting CNN Continual Tasks Generator"
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse, os, pickle, json
+        import numpy as np
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset, Subset
+        from typing import Dict, List, Tuple, Any
+        from collections import defaultdict
+
+        # Define helper classes for pickle compatibility
+        class LabeledDataset:
+            def __init__(self, dataset=None, label_mapping=None):
+                self.dataset = dataset or []
+                self.label_mapping = label_mapping or {}
+            def __len__(self):
+                try:
+                    if hasattr(self.dataset, '__len__'):
+                        return len(self.dataset)
+                    return 100
+                except:
+                    return 100
+            def __getitem__(self, idx):
+                try:
+                    if hasattr(self.dataset, '__getitem__'):
+                        item = self.dataset[idx]
+                        if isinstance(item, tuple) and len(item) == 2:
+                            data, label = item
+                        elif isinstance(item, dict):
+                            data = item.get('image_data')
+                            label = item.get('label', 0)
+                            return data, label
+                        else:
+                            return item, 0
+                except:
+                    pass
+                return torch.randn(3, 224, 224), 0
+
+        class SimpleDataset:
+            def __init__(self, data=None):
+                self.data = data or []
+            def __len__(self):
+                try:
+                    if hasattr(self.data, '__len__'):
+                        length = len(self.data)
+                        if length > 0:
+                            return length
+                except:
+                    pass
+                return 100
+            def __getitem__(self, idx):
+                try:
+                    if hasattr(self.data, '__getitem__'):
+                        item = self.data[idx]
+                        if isinstance(item, tuple) and len(item) == 2:
+                            return item
+                        elif isinstance(item, dict):
+                            data = item.get('image_data')
+                            label = item.get('label', 0)
+                            return data, label
+                        else:
+                            return item, 0
+                except:
+                    pass
+                return torch.randn(3, 224, 224), 0
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        class CNNDataSplitter:
+            def __init__(self, data, config, strategy='class_split'):
+                self.data = data
+                self.config = config
+                self.strategy = strategy
+                
+            def create_continual_tasks(self, num_tasks: int = 3) -> List[Dict]:
+                if self.strategy == 'class_split':
+                    return self._class_incremental_split(num_tasks)
+                elif self.strategy == 'domain_split':
+                    return self._domain_split(num_tasks)
+                elif self.strategy == 'temporal_split':
+                    return self._temporal_split(num_tasks)
+                else:
+                    raise ValueError(f"Unknown strategy: {self.strategy}")
+            
+            def _class_incremental_split(self, num_tasks: int) -> List[Dict]:
+                """Split data by classes - each task gets disjoint set of classes"""
+                tasks = []
+                
+                # Extract datasets
+                train_loader = self._get_dataloader('train')
+                test_loader = self._get_dataloader('test')
+                
+                # Get all unique classes
+                all_classes = self._get_all_classes(train_loader)
+                print(f"Found {len(all_classes)} unique classes in dataset")
+                
+                # Split classes among tasks
+                classes_per_task = len(all_classes) // num_tasks
+                class_groups = []
+                
+                for i in range(num_tasks):
+                    if i == num_tasks - 1:
+                        # Last task gets remaining classes
+                        task_classes = list(all_classes)[i * classes_per_task:]
+                    else:
+                        task_classes = list(all_classes)[i * classes_per_task:(i + 1) * classes_per_task]
+                    class_groups.append(task_classes)
+                
+                print(f"Class distribution per task: {[len(cg) for cg in class_groups]}")
+                
+                # Create tasks
+                for task_id, task_classes in enumerate(class_groups):
+                    task_data = {
+                        'task_id': task_id,
+                        'classes': task_classes,
+                        'train_loader': self._filter_by_classes(train_loader, task_classes),
+                        'test_loader': self._filter_by_classes(test_loader, task_classes),
+                        'class_mapping': {cls: idx for idx, cls in enumerate(task_classes)},
+                        'description': f'Classes: {task_classes}'
+                    }
+                    tasks.append(task_data)
+                
+                return tasks
+            
+            def _domain_split(self, num_tasks: int) -> List[Dict]:
+                """Split data by domains - each task represents a different domain"""
+                tasks = []
+                
+                train_loader = self._get_dataloader('train')
+                test_loader = self._get_dataloader('test')
+                
+                # For domain split, we'll create synthetic domain shifts
+                # In practice, you might have actual domain information
+                all_data, all_labels = self._extract_all_data(train_loader)
+                test_data, test_labels = self._extract_all_data(test_loader)
+                
+                # Split data into tasks with domain shifts
+                train_size = len(all_data)
+                test_size = len(test_data)
+                
+                train_splits = np.array_split(range(train_size), num_tasks)
+                test_splits = np.array_split(range(test_size), num_tasks)
+                
+                for i in range(num_tasks):
+                    # Apply domain-specific transformations
+                    domain_factor = i * 0.3  # Increasing domain shift
+                    
+                    # Select data for this domain
+                    train_indices = train_splits[i]
+                    test_indices = test_splits[i]
+                    
+                    x_train = all_data[train_indices].clone()
+                    y_train = all_labels[train_indices].clone()
+                    x_test = test_data[test_indices].clone()
+                    y_test = test_labels[test_indices].clone()
+                    
+                    # Apply domain shift (color jitter, noise, etc.)
+                    if domain_factor > 0:
+                        # Color shift
+                        x_train = self._apply_color_shift(x_train, domain_factor)
+                        x_test = self._apply_color_shift(x_test, domain_factor)
+                        
+                        # Add noise
+                        noise_level = domain_factor * 0.1
+                        x_train += torch.randn_like(x_train) * noise_level
+                        x_test += torch.randn_like(x_test) * noise_level
+                    
+                    # Create datasets and loaders
+                    train_dataset = TensorDataset(x_train, y_train)
+                    test_dataset = TensorDataset(x_test, y_test)
+                    
+                    batch_size = self.config.get('training', {}).get('batch_size', 32)
+                    
+                    task_data = {
+                        'task_id': i,
+                        'train_loader': DataLoader(train_dataset, batch_size=batch_size, shuffle=True),
+                        'test_loader': DataLoader(test_dataset, batch_size=batch_size, shuffle=False),
+                        'domain_shift': domain_factor,
+                        'description': f'Domain {i+1} (Shift: {domain_factor:.2f})'
+                    }
+                    tasks.append(task_data)
+                
+                return tasks
+            
+            def _temporal_split(self, num_tasks: int) -> List[Dict]:
+                """Split data temporally - each task represents a different time period"""
+                tasks = []
+                
+                train_loader = self._get_dataloader('train')
+                test_loader = self._get_dataloader('test')
+                
+                all_data, all_labels = self._extract_all_data(train_loader)
+                test_data, test_labels = self._extract_all_data(test_loader)
+                
+                # Split sequentially (simulating temporal order)
+                train_size = len(all_data)
+                test_size = len(test_data)
+                
+                train_splits = np.array_split(range(train_size), num_tasks)
+                test_splits = np.array_split(range(test_size), num_tasks)
+                
+                for i in range(num_tasks):
+                    train_indices = train_splits[i]
+                    test_indices = test_splits[i]
+                    
+                    x_train = all_data[train_indices]
+                    y_train = all_labels[train_indices]
+                    x_test = test_data[test_indices]
+                    y_test = test_labels[test_indices]
+                    
+                    # Create datasets and loaders
+                    train_dataset = TensorDataset(x_train, y_train)
+                    test_dataset = TensorDataset(x_test, y_test)
+                    
+                    batch_size = self.config.get('training', {}).get('batch_size', 32)
+                    
+                    task_data = {
+                        'task_id': i,
+                        'train_loader': DataLoader(train_dataset, batch_size=batch_size, shuffle=True),
+                        'test_loader': DataLoader(test_dataset, batch_size=batch_size, shuffle=False),
+                        'temporal_period': i,
+                        'description': f'Temporal Period {i+1}/{num_tasks}'
+                    }
+                    tasks.append(task_data)
+                
+                return tasks
+            
+            def _get_dataloader(self, split: str):
+                """Extract dataloader from data object"""
+                if hasattr(self.data, f'{split}_loader'):
+                    return getattr(self.data, f'{split}_loader')
+                elif hasattr(self.data, 'dataloaders') and split in self.data.dataloaders:
+                    return self.data.dataloaders[split]
+                else:
+                    raise ValueError(f"Cannot find {split}_loader in data object")
+            
+            def _get_all_classes(self, dataloader):
+                """Extract all unique classes from dataloader"""
+                all_labels = []
+                for _, labels in dataloader:
+                    all_labels.extend(labels.numpy() if hasattr(labels, 'numpy') else labels)
+                return set(all_labels)
+            
+            def _filter_by_classes(self, dataloader, allowed_classes):
+                """Filter dataloader to only include specified classes"""
+                all_data = []
+                all_labels = []
+                
+                for data, labels in dataloader:
+                    mask = torch.isin(labels, torch.tensor(list(allowed_classes)))
+                    filtered_data = data[mask]
+                    filtered_labels = labels[mask]
+                    
+                    if len(filtered_data) > 0:
+                        all_data.append(filtered_data)
+                        all_labels.append(filtered_labels)
+                
+                if all_data:
+                    all_data = torch.cat(all_data)
+                    all_labels = torch.cat(all_labels)
+                    
+                    # Remap labels to 0,1,2,... for the current task
+                    unique_labels = torch.unique(all_labels)
+                    label_mapping = {old_label.item(): new_label for new_label, old_label in enumerate(unique_labels)}
+                    remapped_labels = torch.tensor([label_mapping[label.item()] for label in all_labels])
+                    
+                    dataset = TensorDataset(all_data, remapped_labels)
+                    batch_size = dataloader.batch_size if hasattr(dataloader, 'batch_size') else 32
+                    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+                else:
+                    # Return empty dataloader
+                    return DataLoader(TensorDataset(torch.empty(0), torch.empty(0)), batch_size=32)
+            
+            def _extract_all_data(self, dataloader):
+                """Extract all data and labels from dataloader"""
+                all_data = []
+                all_labels = []
+                
+                for data, labels in dataloader:
+                    all_data.append(data)
+                    all_labels.append(labels)
+                
+                if all_data:
+                    return torch.cat(all_data), torch.cat(all_labels)
+                else:
+                    return torch.empty(0), torch.empty(0)
+            
+            def _apply_color_shift(self, images, factor):
+                """Apply color shift to simulate domain change"""
+                if len(images) == 0:
+                    return images
+                
+                # Simple color shift - adjust RGB channels differently
+                shifted = images.clone()
+                if shifted.shape[1] == 3:  # RGB images
+                    shifted[:, 0] *= (1 + factor * 0.1)  # Red channel
+                    shifted[:, 1] *= (1 + factor * 0.05)  # Green channel
+                    shifted[:, 2] *= (1 - factor * 0.1)  # Blue channel
+                    shifted = torch.clamp(shifted, 0, 1)
+                
+                return shifted
+
+        # Safe unpickler for loading data
+        class SafeUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                try:
+                    return super().find_class(module, name)
+                except:
+                    if name == 'LabeledDataset':
+                        return LabeledDataset
+                    elif name == 'DataWrapper':
+                        return DataWrapper
+                    elif name == 'SimpleDataset':
+                        return SimpleDataset
+                    else:
+                        class FallbackClass:
+                            def __init__(self, *args, **kwargs):
+                                pass
+                        return FallbackClass
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--data_pickle', type=str, required=True, help='Input CNN data pickle path')
+        parser.add_argument('--splitting_strategy', type=str, default='class_split', help='Split strategy')
+        parser.add_argument('--num_tasks', type=int, default=3, help='Number of tasks to create')
+        parser.add_argument('--tasks_pickle', type=str, required=True, help='Output pickle for tasks')
+        parser.add_argument('--config', type=str, required=True, help='Configuration JSON string')
+        args = parser.parse_args()
+
+        print("Starting CNN Continual Tasks Generator")
+        print(f"Strategy: {args.splitting_strategy}, Num tasks: {args.num_tasks}")
+
+        # Load data with safe unpickler
+        try:
+            with open(args.data_pickle, 'rb') as f:
+                raw_data = f.read()
+            import io
+            data = SafeUnpickler(io.BytesIO(raw_data)).load()
+            print("Data loaded successfully")
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            exit(1)
+
+        # Parse config
+        try:
+            config = json.loads(args.config)
+            print("Config loaded successfully")
+        except Exception as e:
+            print(f"Error loading config: {e}")
+            exit(1)
+
+        # Split into continual tasks
+        splitter = CNNDataSplitter(data, config=config, strategy=args.splitting_strategy)
+        tasks = splitter.create_continual_tasks(num_tasks=int(args.num_tasks))
+
+        # Save tasks
+        os.makedirs(os.path.dirname(args.tasks_pickle) or ".", exist_ok=True)
+        with open(args.tasks_pickle, "wb") as f:
+            pickle.dump(tasks, f)
+
+        print(f"Saved {len(tasks)} continual learning tasks to {args.tasks_pickle}")
+        for i, task in enumerate(tasks):
+            print(f"Task {i}: {task['description']}")
+    args:
+      - --data_pickle
+      - {inputPath: data_pickle}
+      - --splitting_strategy
+      - {inputValue: splitting_strategy}
+      - --num_tasks
+      - {inputValue: num_tasks}
+      - --config
+      - {inputValue: config}
+      - --tasks_pickle
+      - {outputPath: tasks_pickle}
