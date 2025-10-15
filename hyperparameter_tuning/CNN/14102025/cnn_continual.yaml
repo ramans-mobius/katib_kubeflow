@@ -115,7 +115,6 @@ implementation:
                     raise ValueError(f"Unknown strategy: {self.strategy}")
             
             def _class_incremental_split(self, num_tasks: int) -> List[Dict]:
-                """Split data by classes - each task gets disjoint set of classes"""
                 tasks = []
                 
                 # Extract datasets
@@ -155,7 +154,6 @@ implementation:
                 return tasks
             
             def _domain_split(self, num_tasks: int) -> List[Dict]:
-                """Split data by domains - each task represents a different domain"""
                 tasks = []
                 
                 train_loader = self._get_dataloader('train')
@@ -215,7 +213,6 @@ implementation:
                 return tasks
             
             def _temporal_split(self, num_tasks: int) -> List[Dict]:
-                """Split data temporally - each task represents a different time period"""
                 tasks = []
                 
                 train_loader = self._get_dataloader('train')
@@ -258,7 +255,6 @@ implementation:
                 return tasks
             
             def _get_dataloader(self, split: str):
-                """Extract dataloader from data object"""
                 if hasattr(self.data, f'{split}_loader'):
                     return getattr(self.data, f'{split}_loader')
                 elif hasattr(self.data, 'dataloaders') and split in self.data.dataloaders:
@@ -267,14 +263,12 @@ implementation:
                     raise ValueError(f"Cannot find {split}_loader in data object")
             
             def _get_all_classes(self, dataloader):
-                """Extract all unique classes from dataloader"""
                 all_labels = []
                 for _, labels in dataloader:
                     all_labels.extend(labels.numpy() if hasattr(labels, 'numpy') else labels)
                 return set(all_labels)
             
             def _filter_by_classes(self, dataloader, allowed_classes):
-                """Filter dataloader to only include specified classes"""
                 all_data = []
                 all_labels = []
                 
@@ -304,7 +298,6 @@ implementation:
                     return DataLoader(TensorDataset(torch.empty(0), torch.empty(0)), batch_size=32)
             
             def _extract_all_data(self, dataloader):
-                """Extract all data and labels from dataloader"""
                 all_data = []
                 all_labels = []
                 
@@ -318,7 +311,6 @@ implementation:
                     return torch.empty(0), torch.empty(0)
             
             def _apply_color_shift(self, images, factor):
-                """Apply color shift to simulate domain change"""
                 if len(images) == 0:
                     return images
                 
