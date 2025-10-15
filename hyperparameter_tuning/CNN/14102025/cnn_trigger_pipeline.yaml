@@ -4,7 +4,7 @@ inputs:
   - {name: process_dataset_url, type: String, description: "URL to the processed dataset pickle file"}
   - {name: model_config, type: String, description: "JSON string for model configuration"}
   - {name: model_name, type: String, description: "Name of the model to be used"}
-  - {name: access_token, type: String, description: "Bearer token for pipeline trigger authentication"}
+  - {name: access_token, type: string, description: "Bearer token for pipeline trigger authentication"}
   - {name: domain, type: String, description: "Domain for the pipeline trigger API (e.g., https://ig.gov-cloud.ai)"}
   - {name: pipeline_id, type: String, description: "ID of the Elyra Kubeflow pipeline to trigger"}
   - {name: experiment_id, type: String, description: "ID of the Kubeflow experiment"}
