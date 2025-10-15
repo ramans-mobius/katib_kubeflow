@@ -1,4 +1,4 @@
-name: CNN Continual Tasks Generator
+name: A CNN Continual Tasks Generator
 description: Loads pickled CNN dataset and splits it into continual learning tasks
 inputs:
   - name: data_pickle
