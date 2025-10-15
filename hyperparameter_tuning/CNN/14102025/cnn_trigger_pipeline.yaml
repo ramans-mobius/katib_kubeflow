@@ -1,4 +1,4 @@
-name: A Trigger CNN Pipeline
+name: B Trigger CNN Pipeline
 description: Triggers a CNN training pipeline using a curl request.
 inputs:
   - {name: process_dataset_url, type: String, description: "URL to the processed dataset pickle file"}
@@ -55,7 +55,7 @@ implementation:
             "pipelineType": "ML",
             "containerResources": {},
             "experimentId": args.experiment_id,
-            "enableCaching": True,
+            "enableCaching": true,
             "parameters": {
                 "process_dataset_url": args.process_dataset_url,
                 "model_config": args.model_config,
@@ -71,7 +71,8 @@ implementation:
         print(f"  - process_dataset_url: {args.process_dataset_url}")
         print(f"  - model_name: {args.model_name}")
         print(f"  - model_config length: {len(args.model_config)} characters")
-
+        print("Payload:")
+        print(json.dumps(payload))
         curl_command = [
             "curl",
             "--location", trigger_url,
@@ -81,12 +82,14 @@ implementation:
             "--data", json.dumps(payload),
             "--fail",
             "--show-error",
-            "--connect-timeout", "30",
-            "--max-time", "120"
+            "--connect-timeout", "50",
+            "--max-time", "180"
         ]
+        print("Curl Command:")
+        print(curl_command)
 
         retries = 5
-        retry_delay = 60
+        retry_delay = 100
         
         for i in range(retries):
             try:
