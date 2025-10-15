@@ -16,7 +16,7 @@ implementation:
       - -c
       - |
         python -c "
-        import sys, os, pickle, json, base64, io, zipfile
+        import sys, os, pickle, json, base64, io, zipfile, time
         from collections import Counter
         from torch.utils.data import random_split
         import torch
@@ -26,7 +26,7 @@ implementation:
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
         
-        # Get args directly from command line - FIXED INDICES
+        # Get args directly from command line
         cdn_url = sys.argv[1]
         train_split = float(sys.argv[2])
         shuffle_seed = int(sys.argv[3])
@@ -35,95 +35,217 @@ implementation:
         dataset_info_path = sys.argv[6]
         
         print('Starting dataset download...')
-        print(f'CDN URL: {cdn_url}')
+        print(f'Original CDN URL: {cdn_url}')
         print(f'Train split: {train_split}')
         print(f'Shuffle seed: {shuffle_seed}')
         
-        # Download and extract function
-        def download_and_extract_zip(url):
-            decoded_url = unquote(url)
-            print(f'Downloading from decoded URL: {decoded_url}')
+        # Enhanced download function with multiple domain fallback
+        def download_and_extract_zip_with_fallback(original_url, max_retries=3, timeout=60):
+            decoded_url = unquote(original_url)
+            print(f'Original decoded URL: {decoded_url}')
             
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(decoded_url, headers=headers, timeout=30)
-            response.raise_for_status()
+            # Try multiple CDN domains
+            cdn_domains = ['cdn-new.gov-cloud.ai', 'cdn.gov-cloud.ai']
+            successful_data = None
             
-            zip_content = io.BytesIO(response.content)
-            dataset = []
-            
-            with zipfile.ZipFile(zip_content, 'r') as zip_file:
-                png_files = [f for f in zip_file.namelist() if f.lower().endswith('.png')]
-                print(f'Found {len(png_files)} PNG files')
+            for domain in cdn_domains:
+                print(f'\\n=== Trying domain: {domain} ===')
                 
-                for file_path in png_files:
-                    parts = file_path.split('/')
-                    if len(parts) >= 3 and parts[0] == 'Classification_dataset':
-                        label = parts[1]
+                # Replace domain in URL
+                if 'cdn.gov-cloud.ai' in decoded_url:
+                    modified_url = decoded_url.replace('cdn.gov-cloud.ai', domain)
+                elif 'cdn-new.gov-cloud.ai' in decoded_url:
+                    modified_url = decoded_url.replace('cdn-new.gov-cloud.ai', domain)
+                else:
+                    # If no known domain, try adding the new domain
+                    modified_url = decoded_url
+                    if 'gov-cloud.ai' in decoded_url:
+                        modified_url = decoded_url.replace('gov-cloud.ai', domain)
+                    else:
+                        # Just use the original with new domain
+                        modified_url = f'https://{domain}/' + decoded_url.split('//', 1)[-1] if '//' in decoded_url else f'https://{domain}/{decoded_url}'
+                
+                # Clean up double slashes
+                modified_url = modified_url.replace('///', '//').replace('//', '/')
+                modified_url = modified_url.replace('https:/', 'https://').replace('http:/', 'http://')
+                
+                print(f'Modified URL: {modified_url}')
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+                    'Accept': '*/*',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive'
+                }
+                
+                for attempt in range(max_retries):
+                    try:
+                        print(f'Attempt {attempt + 1}/{max_retries} for {domain}...')
+                        response = requests.get(modified_url, headers=headers, timeout=timeout, stream=True)
+                        response.raise_for_status()
                         
-                        with zip_file.open(file_path) as image_file:
-                            image_data = image_file.read()
-                            base64_image = base64.b64encode(image_data).decode('utf-8')
+                        # Check content type
+                        content_type = response.headers.get('content-type', '').lower()
+                        if 'zip' not in content_type and 'octet-stream' not in content_type:
+                            print(f'Warning: Unexpected content type: {content_type}')
+                        
+                        zip_content = io.BytesIO(response.content)
+                        dataset = []
+                        
+                        with zipfile.ZipFile(zip_content, 'r') as zip_file:
+                            # Test if zip file is valid
+                            test_result = zip_file.testzip()
+                            if test_result is not None:
+                                print(f'Warning: Corrupted file in ZIP: {test_result}')
                             
-                            dataset.append({
-                                'image_data': base64_image,
-                                'label': label,
-                                'filename': file_path
-                            })
+                            png_files = [f for f in zip_file.namelist() if f.lower().endswith('.png')]
+                            print(f'Found {len(png_files)} PNG files')
+                            
+                            if not png_files:
+                                # Try other image formats
+                                image_files = [f for f in zip_file.namelist() if any(f.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.bmp'])]
+                                print(f'Found {len(image_files)} image files (all formats)')
+                                png_files = image_files
+                            
+                            for file_path in png_files:
+                                parts = file_path.split('/')
+                                label = 'unknown'
+                                
+                                # Extract label from path - more flexible parsing
+                                for part in parts:
+                                    if part and part != 'Classification_dataset' and not part.endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                                        label = part
+                                        break
+                                
+                                try:
+                                    with zip_file.open(file_path) as image_file:
+                                        image_data = image_file.read()
+                                        base64_image = base64.b64encode(image_data).decode('utf-8')
+                                        
+                                        dataset.append({
+                                            'image_data': base64_image,
+                                            'label': label,
+                                            'filename': file_path
+                                        })
+                                except Exception as e:
+                                    print(f'Error processing file {file_path}: {e}')
+                                    continue
+                        
+                        print(f'✓ SUCCESS with {domain}: Processed {len(dataset)} images')
+                        return dataset, domain
+                        
+                    except requests.exceptions.Timeout:
+                        print(f'Timeout on attempt {attempt + 1} for {domain}')
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 10
+                            print(f'Waiting {wait_time} seconds before retry...')
+                            time.sleep(wait_time)
+                        else:
+                            print(f'All attempts timed out for {domain}')
+                            continue
+                            
+                    except requests.exceptions.ConnectionError as e:
+                        print(f'Connection error on attempt {attempt + 1} for {domain}: {e}')
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 10
+                            print(f'Waiting {wait_time} seconds before retry...')
+                            time.sleep(wait_time)
+                        else:
+                            print(f'All connection attempts failed for {domain}: {e}')
+                            continue
+                            
+                    except Exception as e:
+                        print(f'Error on attempt {attempt + 1} for {domain}: {e}')
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 5
+                            print(f'Waiting {wait_time} seconds before retry...')
+                            time.sleep(wait_time)
+                        else:
+                            print(f'All attempts failed for {domain}')
+                            continue
             
-            return dataset
+            # If we get here, all domains failed
+            raise Exception(f'All CDN domains failed: {cdn_domains}')
 
-        # Download and process
-        raw_data = download_and_extract_zip(cdn_url)
-        
-        if not raw_data:
-            raise Exception('No images found in ZIP file')
+        try:
+            # Download and process with domain fallback
+            raw_data, successful_domain = download_and_extract_zip_with_fallback(cdn_url, max_retries=3, timeout=120)
+            
+            if not raw_data:
+                raise Exception('No images found in ZIP file')
 
-        # Create dataset info
-        labels = [item['label'] for item in raw_data]
-        unique_labels = sorted(list(set(labels)))
-        label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
-        label_distribution = Counter(labels)
+            # Create dataset info
+            labels = [item['label'] for item in raw_data]
+            unique_labels = sorted(list(set(labels)))
+            label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
+            label_distribution = Counter(labels)
 
-        dataset_info = {
-            'total_samples': len(raw_data),
-            'classes': unique_labels,
-            'class_distribution': dict(label_distribution),
-            'label_to_idx': label_to_idx,
-            'output_dim': len(unique_labels),
-            'train_split_ratio': train_split,
-            'shuffle_seed': shuffle_seed
-        }
+            dataset_info = {
+                'total_samples': len(raw_data),
+                'classes': unique_labels,
+                'class_distribution': dict(label_distribution),
+                'label_to_idx': label_to_idx,
+                'output_dim': len(unique_labels),
+                'train_split_ratio': train_split,
+                'shuffle_seed': shuffle_seed,
+                'successful_cdn_domain': successful_domain,
+                'original_url': cdn_url
+            }
 
-        print(f'Dataset: {len(raw_data)} samples, {len(unique_labels)} classes: {unique_labels}')
+            print(f'Dataset: {len(raw_data)} samples, {len(unique_labels)} classes: {unique_labels}')
+            print(f'Successfully downloaded from: {successful_domain}')
 
-        # Split data
-        train_size = int(train_split * len(raw_data))
-        test_size = len(raw_data) - train_size
-        
-        train_data, test_data = random_split(
-            raw_data, [train_size, test_size],
-            generator=torch.Generator().manual_seed(shuffle_seed)
-        )
+            # Split data
+            train_size = int(train_split * len(raw_data))
+            test_size = len(raw_data) - train_size
+            
+            train_data, test_data = random_split(
+                raw_data, [train_size, test_size],
+                generator=torch.Generator().manual_seed(shuffle_seed)
+            )
 
-        # Convert to lists and save
-        train_data_list = [raw_data[i] for i in train_data.indices]
-        test_data_list = [raw_data[i] for i in test_data.indices]
+            # Convert to lists and save
+            train_data_list = [raw_data[i] for i in train_data.indices]
+            test_data_list = [raw_data[i] for i in test_data.indices]
 
-        os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
-        with open(train_data_path, 'wb') as f:
-            pickle.dump(train_data_list, f)
+            os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+            with open(train_data_path, 'wb') as f:
+                pickle.dump(train_data_list, f)
 
-        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
-        with open(test_data_path, 'wb') as f:
-            pickle.dump(test_data_list, f)
+            os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+            with open(test_data_path, 'wb') as f:
+                pickle.dump(test_data_list, f)
 
-        os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
-        with open(dataset_info_path, 'wb') as f:
-            pickle.dump(dataset_info, f)
+            os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+            with open(dataset_info_path, 'wb') as f:
+                pickle.dump(dataset_info, f)
 
-        print('Dataset loading complete!')
-        print(f'Train samples: {len(train_data_list)}')
-        print(f'Test samples: {len(test_data_list)}')
+            print('Dataset loading complete!')
+            print(f'Train samples: {len(train_data_list)}')
+            print(f'Test samples: {len(test_data_list)}')
+            
+        except Exception as e:
+            print(f'FATAL ERROR: {e}')
+            # Create empty outputs to avoid pipeline failure
+            os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+            with open(train_data_path, 'wb') as f:
+                pickle.dump([], f)
+                
+            os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+            with open(test_data_path, 'wb') as f:
+                pickle.dump([], f)
+                
+            os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+            with open(dataset_info_path, 'wb') as f:
+                pickle.dump({
+                    'error': str(e), 
+                    'total_samples': 0, 
+                    'classes': [],
+                    'successful_cdn_domain': 'none',
+                    'original_url': cdn_url
+                }, f)
+                
+            sys.exit(1)
         " "$0" "$1" "$2" "$3" "$4" "$5"
     args:
       - {inputValue: cdn_url}
