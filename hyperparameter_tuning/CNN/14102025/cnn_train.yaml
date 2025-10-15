@@ -1,4 +1,4 @@
-name: CNN Train Model
+name: F CNN Train Model
 description: Trains CNN model using provided data and configuration
 inputs:
   - name: data_path
@@ -22,19 +22,14 @@ implementation:
       - -c
       - |
         import torch, argparse, pickle, os, json, torch.nn as nn, torch.optim as optim
-        import sys, time, traceback
-        from pathlib import Path
-        
-        print("=" * 80)
-        print("STARTING CNN TRAIN MODEL - OPTIMIZED VERSION")
-        print("=" * 80)
+        import sys, traceback
 
-        # Define essential classes for pickle compatibility
+        print("STARTING CNN TRAIN MODEL")
+
         class LabeledDataset:
             def __init__(self, dataset=None, label_mapping=None):
                 self.dataset = dataset or []
                 self.label_mapping = label_mapping or {}
-                
             def __len__(self):
                 try:
                     if hasattr(self.dataset, '__len__'):
@@ -42,7 +37,6 @@ implementation:
                     return 100
                 except:
                     return 100
-                    
             def __getitem__(self, idx):
                 try:
                     if hasattr(self.dataset, '__getitem__'):
@@ -62,7 +56,6 @@ implementation:
         class SimpleDataset:
             def __init__(self, data=None):
                 self.data = data or []
-                
             def __len__(self):
                 try:
                     if hasattr(self.data, '__len__'):
@@ -72,7 +65,6 @@ implementation:
                 except:
                     pass
                 return 100
-                
             def __getitem__(self, idx):
                 try:
                     if hasattr(self.data, '__getitem__'):
@@ -94,7 +86,6 @@ implementation:
                 if data_dict:
                     self.__dict__.update(data_dict)
 
-        # Parse arguments
         parser = argparse.ArgumentParser()
         parser.add_argument('--data_path', type=str, required=True)
         parser.add_argument('--model', type=str, required=True)
@@ -103,40 +94,19 @@ implementation:
         parser.add_argument('--training_history', type=str, required=True)
         args = parser.parse_args()
 
-        print("\n" + "=" * 50)
-        print("ARGUMENT ANALYSIS")
-        print("=" * 50)
-        print("data_path: " + str(args.data_path))
-        print("model: " + str(args.model))
-        print("config length: " + str(len(args.config)) + " characters")
-        print("trained_model: " + str(args.trained_model))
-        print("training_history: " + str(args.training_history))
+        print("Arguments loaded")
 
-        # Check file existence
-        print("\n" + "=" * 50)
-        print("STEP 1: CHECKING FILE EXISTENCE")
-        print("=" * 50)
-        print("data_path exists: " + str(os.path.exists(args.data_path)))
-        print("model path exists: " + str(os.path.exists(args.model)))
-        
         if not os.path.exists(args.data_path):
             print("ERROR: data_path does not exist!")
             sys.exit(1)
-            
         if not os.path.exists(args.model):
             print("ERROR: model path does not exist!")
             sys.exit(1)
 
-        # Load data pickle
-        print("\n" + "=" * 50)
-        print("STEP 2: LOADING DATA PICKLE")
-        print("=" * 50)
+        processed_data = None
         try:
             with open(args.data_path, 'rb') as f:
                 raw_data = f.read()
-            print("Successfully read " + str(len(raw_data)) + " bytes from pickle file")
-            
-            # Safe unpickler
             class SafeUnpickler(pickle.Unpickler):
                 def find_class(self, module, name):
                     try:
@@ -153,259 +123,136 @@ implementation:
                                 def __init__(self, *args, **kwargs):
                                     pass
                             return FallbackClass
-            
+            import io
             processed_data = SafeUnpickler(io.BytesIO(raw_data)).load()
-            print("SUCCESS: Pickle loaded successfully!")
-            print("Loaded object type: " + str(type(processed_data)))
-            
+            print("Data loaded successfully")
         except Exception as e:
             print("ERROR loading pickle: " + str(e))
-            traceback.print_exc()
             sys.exit(1)
 
-        # Analyze data structure
-        print("\n" + "=" * 50)
-        print("STEP 3: ANALYZING LOADED DATA STRUCTURE")
-        print("=" * 50)
-        if hasattr(processed_data, '__dict__'):
-            print("Data is an object with __dict__")
-            attributes = list(processed_data.__dict__.keys())
-            print("Number of attributes: " + str(len(attributes)))
-            for attr_name in attributes:
-                attr_value = getattr(processed_data, attr_name)
-                print("\n " + str(attr_name) + ":")
-                print(" Type: " + str(type(attr_value)))
-                if hasattr(attr_value, '__len__'):
-                    try:
-                        print(" Length: " + str(len(attr_value)))
-                    except:
-                        pass
-
-        # Access data loaders
-        print("\n" + "=" * 50)
-        print("STEP 4: ACCESSING DATA LOADERS")
-        print("=" * 50)
         train_loader = None
         test_loader = None
-        
         if hasattr(processed_data, 'train_loader'):
             train_loader = processed_data.train_loader
-            print("train_loader: " + str(type(train_loader)))
-            if hasattr(train_loader, '__len__'):
-                print(" Number of batches: " + str(len(train_loader)))
         else:
-            print("ERROR: train_loader attribute not found!")
+            print("ERROR: train_loader not found!")
             sys.exit(1)
-            
         if hasattr(processed_data, 'test_loader'):
             test_loader = processed_data.test_loader
-            print("test_loader: " + str(type(test_loader)))
-            if hasattr(test_loader, '__len__'):
-                print(" Number of batches: " + str(len(test_loader)))
-        else:
-            print("WARNING: test_loader attribute not found")
 
-        # Load config
-        print("\n" + "=" * 50)
-        print("STEP 5: LOADING CONFIG")
-        print("=" * 50)
         try:
             config = json.loads(args.config)
-            print("SUCCESS: Config parsed as JSON")
-            
             training_config = config.get('training', {})
             model_config = config.get('model', {})
-            
             epochs = training_config.get('epochs', 5)
             learning_rate = training_config.get('optimizer', {}).get('learning_rate', 0.001)
-            
-            print("Epochs: " + str(epochs))
-            print("Learning rate: " + str(learning_rate))
-            print("Model architecture: " + str(model_config.get('architecture', 'resnet')))
-            
+            print("Config loaded: " + str(epochs) + " epochs, lr=" + str(learning_rate))
         except Exception as e:
             print("ERROR loading config: " + str(e))
-            traceback.print_exc()
             sys.exit(1)
 
-        # Load model
-        print("\n" + "=" * 50)
-        print("STEP 6: LOADING MODEL")
-        print("=" * 50)
         try:
-            # Import CNN factory directly
             sys.path.insert(0, '/usr/local/lib/python3.10/site-packages')
             from nesy_factory.CNNs.registry import create_model as create_cnn_model
-            
             model_architecture = model_config.get('architecture', 'resnet')
-            print("Creating model with architecture: " + model_architecture)
-            
-            # Get number of classes from data
             if hasattr(processed_data, 'num_classes'):
                 model_config['output_dim'] = processed_data.num_classes
-                print("Set output_dim from data: " + str(processed_data.num_classes))
             elif hasattr(processed_data, 'class_names'):
                 model_config['output_dim'] = len(processed_data.class_names)
-                print("Set output_dim from class_names: " + str(len(processed_data.class_names)))
-            
             model = create_cnn_model(model_architecture, model_config)
-            print("SUCCESS: Model created")
-            
-            # Load weights
             model.load_state_dict(torch.load(args.model, map_location=torch.device('cpu')))
-            print("SUCCESS: Model weights loaded")
-            
+            print("Model loaded: " + model_architecture)
         except Exception as e:
             print("ERROR loading model: " + str(e))
-            traceback.print_exc()
             sys.exit(1)
 
-        # Training (following your pipeline approach)
-        print("\n" + "=" * 50)
-        print("STEP 7: STARTING TRAINING")
-        print("=" * 50)
-        
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print("Using device: " + str(device))
-        
         model = model.to(device)
-        
-        # Setup optimizer and criterion from config
-        optimizer_config = training_config.get('optimizer', {})
-        criterion_config = training_config.get('criterion', {})
-        
-        # Use Adam optimizer (more stable than AdamW for compatibility)
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=optimizer_config.get('learning_rate', 1e-4),
-            weight_decay=optimizer_config.get('weight_decay', 1e-4)
-        )
-        
-        criterion = nn.CrossEntropyLoss(label_smoothing=criterion_config.get('label_smoothing', 0.1))
-        
-        # Training history (following your approach)
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+
         history = {
             'train_loss': [], 'train_acc': [],
             'val_loss': [], 'val_acc': [],
-            'best_val_acc': 0.0,
-            'best_val_loss': float('inf')
+            'best_val_acc': 0.0, 'best_val_loss': float('inf')
         }
-        
-        print("Starting training for " + str(epochs) + " epochs...")
-        
+
+        print("Starting training...")
         for epoch in range(epochs):
-            print("\n--- Epoch " + str(epoch+1) + "/" + str(epochs) + " ---")
-            
-            # Training phase
             model.train()
             train_loss = 0.0
             train_correct = 0
             train_total = 0
-            
-            for batch_idx, (images, labels) in enumerate(train_loader):
-                # Skip empty batches
+
+            for images, labels in train_loader:
                 if images.numel() == 0:
                     continue
-                    
                 images, labels = images.to(device), labels.to(device)
-                
-                # Ensure correct data type
                 if images.dtype != torch.float32:
                     images = images.float()
-                
                 optimizer.zero_grad()
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-                
                 train_loss += loss.item()
                 _, predicted = outputs.max(1)
                 train_total += labels.size(0)
                 train_correct += predicted.eq(labels).sum().item()
-            
+
             train_acc = 100.0 * train_correct / train_total if train_total > 0 else 0.0
             train_epoch_loss = train_loss / len(train_loader) if len(train_loader) > 0 else 0.0
-            
-            # Validation phase
+
             val_acc = 0.0
             val_loss = 0.0
-            
             if test_loader:
                 model.eval()
                 val_correct = 0
                 val_total = 0
-                
                 with torch.no_grad():
                     for images, labels in test_loader:
                         if images.numel() == 0:
                             continue
-                            
                         images, labels = images.to(device), labels.to(device)
                         if images.dtype != torch.float32:
                             images = images.float()
-                            
                         outputs = model(images)
                         loss = criterion(outputs, labels)
                         val_loss += loss.item()
-                        
                         _, predicted = outputs.max(1)
                         val_total += labels.size(0)
                         val_correct += predicted.eq(labels).sum().item()
-                
                 val_acc = 100.0 * val_correct / val_total if val_total > 0 else 0.0
                 val_epoch_loss = val_loss / len(test_loader) if len(test_loader) > 0 else 0.0
             else:
-                val_epoch_loss = train_epoch_loss  # Use train loss if no val data
-            
-            # Update history
+                val_epoch_loss = train_epoch_loss
+
             history['train_loss'].append(train_epoch_loss)
             history['train_acc'].append(train_acc)
             history['val_loss'].append(val_epoch_loss)
             history['val_acc'].append(val_acc)
-            
+
             if val_acc > history['best_val_acc']:
                 history['best_val_acc'] = val_acc
-            
             if val_epoch_loss < history['best_val_loss']:
                 history['best_val_loss'] = val_epoch_loss
-            
-            print("Epoch " + str(epoch+1) + " Summary:")
-            print(" Train Loss: " + str(train_epoch_loss))
-            print(" Train Accuracy: " + str(train_acc))
-            print(" Val Loss: " + str(val_epoch_loss))
-            print(" Val Accuracy: " + str(val_acc))
 
-        print("\n" + "=" * 50)
-        print("STEP 8: SAVING RESULTS")
-        print("=" * 50)
+            print(f"Epoch {epoch+1}: Train Loss: {train_epoch_loss:.4f}, Acc: {train_acc:.2f}%, Val Loss: {val_epoch_loss:.4f}, Acc: {val_acc:.2f}%")
+
         try:
             os.makedirs(os.path.dirname(args.trained_model), exist_ok=True)
             os.makedirs(os.path.dirname(args.training_history), exist_ok=True)
-            
-            # Save model checkpoint (following your approach)
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'history': history,
             }, args.trained_model)
-            
-            # Save training history
             with open(args.training_history, 'w') as f:
                 json.dump(history, f, indent=2)
-                
-            print("SUCCESS: All outputs saved")
-            print("Final validation loss: " + str(history['val_loss'][-1]))
-            print("Best validation accuracy: " + str(history['best_val_acc']))
-            
+            print("Training completed successfully")
         except Exception as e:
             print("ERROR saving results: " + str(e))
-            traceback.print_exc()
             sys.exit(1)
-
-        print("\n" + "=" * 80)
-        print("TRAINING COMPLETED SUCCESSFULLY!")
-        print("=" * 80)
     args:
       - --data_path
       - {inputPath: data_path}
