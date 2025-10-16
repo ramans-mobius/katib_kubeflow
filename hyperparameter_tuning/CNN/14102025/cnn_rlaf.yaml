@@ -1,0 +1,584 @@
+name: DQN RLAF Loop CNN
+description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
+inputs:
+  - {name: trained_model, type: Model}
+  - {name: init_metrics, type: Metrics}
+  - {name: data_path, type: Dataset}
+  - {name: config, type: String}
+  - {name: domain, type: String}
+  - {name: schema_id, type: String}
+  - {name: model_id, type: String}
+  - {name: dqn_pipeline_id, type: String}
+  - {name: pipeline_domain, type: String}
+  - {name: dqn_experiment_id, type: String}
+  - {name: access_token, type: string}
+  - {name: tasks, type: Dataset}
+outputs:
+  - {name: rlaf_output, type: Dataset}
+  - {name: retrained_model, type: Model}
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v19
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import torch
+        import os
+        import json
+        import argparse
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        import time
+        import pickle
+        from typing import List, Dict, Any
+        import numpy as np
+        from torch.utils.data import DataLoader
+        import torch.nn as nn
+        import torch.optim as optim
+
+        # Define helper classes for pickle compatibility
+        class LabeledDataset:
+            def __init__(self, dataset=None, label_mapping=None):
+                self.dataset = dataset or []
+                self.label_mapping = label_mapping or {}
+            def __len__(self):
+                try:
+                    if hasattr(self.dataset, '__len__'):
+                        return len(self.dataset)
+                    return 100
+                except:
+                    return 100
+            def __getitem__(self, idx):
+                try:
+                    if hasattr(self.dataset, '__getitem__'):
+                        item = self.dataset[idx]
+                        if isinstance(item, tuple) and len(item) == 2:
+                            data, label = item
+                        elif isinstance(item, dict):
+                            data = item.get('image_data')
+                            label = item.get('label', 0)
+                            return data, label
+                        else:
+                            return item, 0
+                except:
+                    pass
+                return torch.randn(3, 224, 224), 0
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        # CNN Continual Learning Trainer
+        class ContinualCNNTrainer:
+            
+            def __init__(self, config: Dict[str, Any]):
+                self.config = config
+                self.results = {}
+                
+            def train_continual_cnn(
+                self, 
+                tasks: List[Dict], 
+                model, 
+                strategies: List[str] = ['naive']
+            ) -> Dict[str, Any]:
+                results = {}
+                
+                for strategy_name in strategies:
+                    print(f'Training with {strategy_name.upper()} strategy')
+                    strategy_results = self._train_single_strategy(tasks, strategy_name, model)
+                    results[strategy_name] = strategy_results
+                    
+                return results
+            
+            def _train_single_strategy(self, tasks: List[Dict], strategy_name: str, model) -> Dict[str, Any]:
+                
+                # Track metrics across tasks
+                task_metrics = []
+                all_task_performance = []
+                previous_task_data = []
+                
+                print(f" Learning {len(tasks)} sequential tasks")
+                
+                for task_idx, task_data in enumerate(tasks):
+                    print(f"Learning Task {task_idx + 1}: {task_data['description']}")
+                    
+                    # Apply strategy-specific training
+                    if strategy_name == 'naive':
+                        training_data = task_data
+                    elif strategy_name == 'replay':
+                        if previous_task_data:
+                            training_data = self._create_replay_data(task_data, previous_task_data)
+                        else:
+                            training_data = task_data
+                    else:
+                        training_data = task_data
+                    
+                    # Train on current task
+                    print(f"  Training on Task {task_idx + 1}")
+                    train_loader = training_data['train_loader']
+                    
+                    # Setup optimizer and loss
+                    optimizer = optim.AdamW(
+                        model.parameters(), 
+                        lr=self.config.get('training', {}).get('optimizer', {}).get('learning_rate', 0.001),
+                        weight_decay=self.config.get('training', {}).get('optimizer', {}).get('weight_decay', 0.0001)
+                    )
+                    criterion = nn.CrossEntropyLoss()
+                    
+                    model.train()
+                    for epoch in range(self.config.get('training', {}).get('epochs', 10)):
+                        total_loss = 0
+                        correct = 0
+                        total = 0
+                        
+                        for batch_idx, (data, targets) in enumerate(train_loader):
+                            optimizer.zero_grad()
+                            outputs = model(data)
+                            loss = criterion(outputs, targets)
+                            loss.backward()
+                            optimizer.step()
+                            
+                            total_loss += loss.item()
+                            _, predicted = outputs.max(1)
+                            total += targets.size(0)
+                            correct += predicted.eq(targets).sum().item()
+                        
+                        epoch_acc = 100. * correct / total
+                        if epoch % 5 == 0:
+                            print(f"    Epoch {epoch:03d} | Loss: {total_loss/len(train_loader):.4f} | Acc: {epoch_acc:.2f}%")
+                    
+                    # Store task data for potential replay
+                    if strategy_name == 'replay':
+                        previous_task_data.append(task_data)
+                        if len(previous_task_data) > 2:  # Limit memory for CNN
+                            previous_task_data = previous_task_data[-2:]
+                    
+                    # Evaluate on current task
+                    current_task_metrics = self._evaluate_model(model, task_data)
+                    task_metrics.append(current_task_metrics)
+                    
+                    print(f"     Task {task_idx + 1} Test Accuracy: {current_task_metrics['accuracy']:.2f}%")
+                    
+                    # Evaluate on all previous tasks (including current)
+                    task_performance = []
+                    for eval_task_idx in range(task_idx + 1):
+                        eval_metrics = self._evaluate_model(model, tasks[eval_task_idx])
+                        task_performance.append({
+                            'task_id': eval_task_idx,
+                            'accuracy': eval_metrics['accuracy'],
+                            'description': tasks[eval_task_idx]['description']
+                        })
+                    
+                    all_task_performance.append(task_performance)
+                    
+                    # Print backward transfer analysis
+                    if task_idx > 0:
+                        print(f"Performance on previous tasks:")
+                        for prev_task in task_performance[:-1]:
+                            print(f"    Task {prev_task['task_id'] + 1}: {prev_task['accuracy']:.2f}%")
+                
+                # Calculate continual learning metrics
+                cl_metrics = self._calculate_continual_metrics(all_task_performance)
+                
+                # Calculate average metrics across all tasks
+                final_eval_metrics = [self._evaluate_model(model, tasks[i]) for i in range(len(tasks))]
+                
+                avg_metrics = {}
+                if final_eval_metrics:
+                    for key in final_eval_metrics[0]:
+                        if key != 'confusion_matrix':  # Skip non-scalar metrics
+                            avg_metrics[key] = np.mean([m[key] for m in final_eval_metrics])
+
+                results = {
+                    'strategy': strategy_name,
+                    'task_metrics': task_metrics,
+                    'all_task_performance': all_task_performance,
+                    'continual_metrics': cl_metrics,
+                    'final_model': model,
+                    'average_eval_metrics': avg_metrics
+                }
+                
+                return results
+            
+            def _evaluate_model(self, model, task_data):
+                model.eval()
+                test_loader = task_data['test_loader']
+                criterion = nn.CrossEntropyLoss()
+                
+                total_loss = 0
+                correct = 0
+                total = 0
+                
+                with torch.no_grad():
+                    for data, targets in test_loader:
+                        outputs = model(data)
+                        loss = criterion(outputs, targets)
+                        total_loss += loss.item()
+                        
+                        _, predicted = outputs.max(1)
+                        total += targets.size(0)
+                        correct += predicted.eq(targets).sum().item()
+                
+                accuracy = 100. * correct / total
+                avg_loss = total_loss / len(test_loader)
+                
+                return {
+                    'accuracy': accuracy,
+                    'loss': avg_loss,
+                    'correct': correct,
+                    'total': total
+                }
+            
+            def _create_replay_data(self, current_task: Dict, previous_tasks: List[Dict]) -> Dict:
+                # Simple replay: combine data from current and previous tasks
+                replay_ratio = 0.2  # 20% replay data
+                
+                # For CNN, we'll create a new DataLoader with combined data
+                all_data = []
+                all_labels = []
+                
+                # Add current task data
+                for data, labels in current_task['train_loader']:
+                    all_data.append(data)
+                    all_labels.append(labels)
+                
+                # Add replay data from previous tasks
+                replay_samples_per_task = int(len(all_data) * replay_ratio / len(previous_tasks))
+                
+                for prev_task in previous_tasks:
+                    samples_added = 0
+                    for data, labels in prev_task['train_loader']:
+                        if samples_added >= replay_samples_per_task:
+                            break
+                        all_data.append(data)
+                        all_labels.append(labels)
+                        samples_added += data.size(0)
+                
+                # Combine all data
+                if all_data:
+                    combined_data = torch.cat(all_data)
+                    combined_labels = torch.cat(all_labels)
+                    
+                    # Create new dataset and loader
+                    from torch.utils.data import TensorDataset
+                    combined_dataset = TensorDataset(combined_data, combined_labels)
+                    combined_loader = DataLoader(
+                        combined_dataset, 
+                        batch_size=current_task['train_loader'].batch_size,
+                        shuffle=True
+                    )
+                    
+                    # Create new task data
+                    replay_task = current_task.copy()
+                    replay_task['train_loader'] = combined_loader
+                    return replay_task
+                else:
+                    return current_task
+            
+            def _calculate_continual_metrics(self, all_task_performance: List[List[Dict]]) -> Dict[str, float]:
+                if not all_task_performance:
+                    return {'average_accuracy': 0.0, 'forgetting': 0.0, 'num_tasks': 0}
+                
+                # Average accuracy across all tasks at the end
+                final_performance = all_task_performance[-1]
+                average_accuracy = np.mean([task['accuracy'] for task in final_performance])
+                
+                # Forgetting: decrease in performance on previous tasks
+                forgetting_scores = []
+                for task_idx in range(len(all_task_performance) - 1):
+                    max_acc = all_task_performance[task_idx][task_idx]['accuracy']
+                    final_acc = all_task_performance[-1][task_idx]['accuracy']
+                    forgetting = max_acc - final_acc
+                    forgetting_scores.append(max(0, forgetting))
+                
+                avg_forgetting = np.mean(forgetting_scores) if forgetting_scores else 0.0
+                
+                return {
+                    'average_accuracy': average_accuracy,
+                    'forgetting': avg_forgetting,
+                    'num_tasks': len(all_task_performance)
+                }
+
+        # API/DB Helper Functions (same as STGNN version)
+        def get_retry_session():
+            retry_strategy = Retry(
+                total=5,
+                status_forcelist=[500, 502, 503, 504],
+                backoff_factor=1
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session = requests.Session()
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            return session
+
+        def trigger_pipeline(config, pipeline_domain, dqn_params=None):
+            http = get_retry_session()
+            url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/trigger/ml?pipelineId={config['pipeline_id']}"
+            pipeline_params = {"param_json": json.dumps(dqn_params)} if dqn_params else {}
+            payload = json.dumps({
+                "pipelineType": "ML", "containerResources": {}, "experimentId": config['experiment_id'],
+                "enableCaching": True, "parameters": pipeline_params, "version": 1
+            })
+            print(f"{payload}")
+            headers = {
+                'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}",
+                'Content-Type': 'application/json'
+            }
+            response = http.post(url, headers=headers, data=payload, timeout=30)
+            response.raise_for_status()
+            print(f"Triggered pipeline. Response: {response.json()}")
+            return response.json()['runId']
+
+        def get_pipeline_status(config, pipeline_domain):
+            http = get_retry_session()
+            url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/{config['pipeline_id']}/status/ml/{config['run_id']}"
+            headers = {'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}"}
+            response = http.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            pipeline_status = response.json()
+            print(f"Full response from get_pipeline_status: {pipeline_status}")
+            latest_state = pipeline_status['run_details']['state_history'][-1]
+            return latest_state['state']
+
+        def get_instance(access_token, domain, schema_id, model_id):
+            http = get_retry_session()
+            url = f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            payload = {"dbType": "TIDB", "ownedOnly": True, "filter": {"model_id": model_id}}
+            response = http.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            print(f"Full response from get_instance: {response.json()}")
+            return response.json()['content'][0]
+
+        def update_instance_field(access_token, domain, schema_id, model_id, field, value):
+            http = get_retry_session()
+            url = f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            payload = {
+                "dbType": "TIDB",
+                "conditionalFilter": {"conditions": [{"field": "model_id", "operator": "EQUAL", "value": model_id}]},
+                "partialUpdateRequests": [{"patch": [{"operation": "REPLACE", "path": f"{field}", "value": value}]}]
+            }
+            print("cURL command for update_instance_field")
+            headers_str = " ".join([f"-H '{k}: {v}'" for k, v in headers.items()])
+            print(f"curl -X PATCH '{url}' {headers_str} -d '{json.dumps(payload)}'")    
+            response = http.patch(url, headers=headers, data=json.dumps(payload), timeout=30)
+            response.raise_for_status()
+            print(f"Full response from update_instance_field: {response.json()}")
+            print(f"Successfully updated field '{field}' for model_id '{model_id}'")
+
+        # Core Logic 
+        def trigger_and_wait_for_dqn_pipeline(config, pipeline_domain, dqn_params):
+            run_id = trigger_pipeline(config, pipeline_domain, dqn_params)
+            config["run_id"] = run_id
+            while True:
+                status = get_pipeline_status(config, pipeline_domain)
+                print(f"Current DQN pipeline status: {status}")
+                if status == 'SUCCEEDED':
+                    print("DQN Pipeline execution completed.")
+                    break
+                elif status in ['FAILED', 'ERROR']:
+                    raise RuntimeError(f"DQN Pipeline failed with status {status}")
+                time.sleep(60)
+
+        def model_retraining(action, model_path, data_path, config_path, tasks_path, output_model_path, previous_metrics, dqn_params):
+            # Load CNN model using nesy_factory
+            try:
+                from nesy_factory.CNNs.factory import CNNFactory
+            except ImportError:
+                print("Warning: nesy_factory.CNNs not available, using fallback")
+                # Fallback - you might need to implement basic CNN loading
+                return {"metrics": previous_metrics, "model_path": model_path}
+            
+            with open(config_path, 'r') as f: 
+                config = json.load(f)
+            with open(tasks_path, "rb") as f: 
+                tasks = pickle.load(f)
+            
+            # Update config with DQN action
+            model_config = config.get('model', {})
+            training_config = config.get('training', {})
+            
+            # Apply action parameters to config
+            for param_key, param_value in action.items():
+                if 'learning_rate' in param_key:
+                    training_config['optimizer']['learning_rate'] = float(param_value)
+                elif 'batch_size' in param_key:
+                    training_config['batch_size'] = int(param_value)
+                elif 'epochs' in param_key:
+                    training_config['epochs'] = int(param_value)
+                # Add more parameter mappings as needed
+            
+            config['model'] = model_config
+            config['training'] = training_config
+            
+            # Create and load model
+            model_architecture = model_config.get('architecture', 'resnet')
+            model = CNNFactory.create_model(model_architecture, model_config)
+            model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+            
+            print("Starting continual learning experiments for CNN")
+            trainer = ContinualCNNTrainer(config)
+            continual_strategies = ['naive']  # Simple strategy for CNN
+            
+            results = trainer.train_continual_cnn(tasks=tasks, strategies=continual_strategies, model=model)
+            print(f"Training results: {results}")
+            
+            average_eval_metrics = results['naive']['average_eval_metrics']
+            
+            # Compare with previous metrics to decide whether to save the model
+            improvement_score = 0
+            for param in dqn_params:
+                key = param['key']
+                sign = 1 if param['sign'] == '+' else -1
+                if key in average_eval_metrics and key in previous_metrics:
+                    improvement = (average_eval_metrics[key] - previous_metrics[key]) * sign
+                    improvement_score += improvement
+
+            if improvement_score > 0:
+                print(f"Metrics improved (score: {improvement_score:.4f}). Saving model.")
+                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+                final_model = results['naive']['final_model']
+                torch.save(final_model.state_dict(), output_model_path)
+                print(f"Saved retrained CNN model to {output_model_path}")
+            else:
+                print(f"No improvement in metrics (score: {improvement_score:.4f}). Model not saved.")
+                # Copy original model if no improvement
+                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+                torch.save(model.state_dict(), output_model_path)
+
+            return {"metrics": average_eval_metrics, "model_path": output_model_path}
+
+        # Main Execution
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--trained_model', type=str, required=True)
+            parser.add_argument('--init_metrics', type=str, required=True)
+            parser.add_argument('--rlaf_output', type=str, required=True)
+            parser.add_argument('--data_path', type=str, required=True)
+            parser.add_argument('--config', type=str, required=True)
+            parser.add_argument('--domain', type=str, required=True)
+            parser.add_argument('--schema_id', type=str, required=True)
+            parser.add_argument('--model_id', type=str, required=True)
+            parser.add_argument('--dqn_pipeline_id', type=str, required=True)
+            parser.add_argument('--dqn_experiment_id', type=str, required=True)
+            parser.add_argument('--access_token', type=str, required=True)
+            parser.add_argument('--tasks', type=str, required=True)
+            parser.add_argument('--pipeline_domain', type=str, required=True)
+            parser.add_argument('--retrained_model', type=str, required=True)
+            args = parser.parse_args()
+
+            with open(args.access_token, 'r') as f:
+                access_token = f.read().strip()
+            with open(args.init_metrics, 'r') as f:
+                current_metrics = json.load(f)
+ 
+            action_id_for_next_pierce = -1
+ 
+            for i in range(2):  # Reduced iterations for CNN
+                print(f" RLAF Loop Iteration {i+1}")
+                
+                cleaned_metrics = {}
+                dqn_params = []
+                for key, value in current_metrics.items():
+                    try:
+                        cleaned_metrics[key] = float(value)
+                        if "loss" in key.lower() or "accuracy" in key.lower():
+                            sign = "+" if "accuracy" in key.lower() or "f1" in key.lower() else "-"
+                            dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
+                    except (ValueError, TypeError):
+                        print(f"Warning: Could not convert metric '{key}' with value '{value}' to float. Skipping.")
+                
+                print(f"Dynamically generated param_json for DQN: {json.dumps(dqn_params)}")
+
+                instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
+                print(f"Instance: {instance}")
+                
+                if instance.get('pierce2rlaf'):
+                    latest_pierce2rlaf = instance['pierce2rlaf'][-1]
+                    previous_state = latest_pierce2rlaf['current_state']
+                    episode = latest_pierce2rlaf['episode']
+                else:
+                    previous_state = {key: 0.0 for key in cleaned_metrics.keys()}
+                    episode = 0
+ 
+                new_pierce2rlaf_entry = {
+                    "action_id": action_id_for_next_pierce, "previous_state": previous_state,
+                    "current_state": cleaned_metrics, "episode": episode, "timestamp": int(time.time())
+                }
+                pierce2rlaf_history = instance.get("pierce2rlaf", [])
+                pierce2rlaf_history.append(new_pierce2rlaf_entry)
+                update_instance_field(access_token, args.domain, args.schema_id, args.model_id, "pierce2rlaf", pierce2rlaf_history)
+
+                dqn_config = {
+                    "pipeline_id": args.dqn_pipeline_id, "experiment_id": args.dqn_experiment_id, "access_token": access_token
+                }
+                print(f"DQN Config: {dqn_config}")
+                trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, dqn_params)
+
+                updated_instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
+                latest_rlaf2pierce = updated_instance['rlaf2pierce'][-1]
+                
+                if not latest_rlaf2pierce.get("pierce_or_not", True):
+                    print("pierce_or_not is false. Exiting loop.")
+                    break
+                
+                print(f"RLAF2Pierce: {latest_rlaf2pierce}")
+                rlaf_actions = updated_instance.get('rlaf_actions', {}).get('actions', [])
+                action_id_for_next_pierce = latest_rlaf2pierce['action_id']
+                action_details = next((a for a in rlaf_actions if a["id"] == action_id_for_next_pierce), None)
+                if not action_details:
+                    raise ValueError(f"Action with ID {action_id_for_next_pierce} not found in rlaf_actions")
+ 
+                print(f"DQN pipeline recommended action: {action_details}. Retraining CNN model.")
+                retraining_results = model_retraining(
+                    action_details['params'], args.trained_model, args.data_path, args.config, args.tasks,
+                    args.retrained_model, previous_state, dqn_params
+                )
+                current_metrics = retraining_results["metrics"]
+
+            os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
+            with open(args.rlaf_output, 'w') as f:
+                json.dump({"final_metrics": current_metrics}, f, indent=4)
+            print(f"RLAF loop finished. Final parameters written to {args.rlaf_output}")
+
+        if __name__ == '__main__':
+            main()
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --init_metrics
+      - {inputPath: init_metrics}
+      - --rlaf_output
+      - {outputPath: rlaf_output}
+      - --data_path
+      - {inputPath: data_path}
+      - --config
+      - {inputPath: config}
+      - --domain
+      - {inputValue: domain}
+      - --schema_id
+      - {inputValue: schema_id}
+      - --model_id
+      - {inputValue: model_id}
+      - --dqn_pipeline_id
+      - {inputValue: dqn_pipeline_id}
+      - --dqn_experiment_id
+      - {inputValue: dqn_experiment_id}
+      - --access_token
+      - {inputPath: access_token}
+      - --tasks
+      - {inputPath: tasks}
+      - --pipeline_domain
+      - {inputValue: pipeline_domain}
+      - --retrained_model
+      - {outputPath: retrained_model}
