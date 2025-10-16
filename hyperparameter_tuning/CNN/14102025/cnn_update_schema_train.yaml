@@ -1,4 +1,4 @@
-name: CNN Update Schema Row
+name: CNN Train Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
