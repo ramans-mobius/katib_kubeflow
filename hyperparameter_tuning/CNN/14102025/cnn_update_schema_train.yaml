@@ -86,7 +86,6 @@ implementation:
 
         # Process training history to extract epoch losses
         def process_training_history(training_history):
-            """Convert training history to epoch-level records"""
             if not training_history:
                 return []
             
