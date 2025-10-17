@@ -1,5 +1,5 @@
 name: CNN Train Update Schema Row
-description: Updates a row in a schema based on a mapping between column names and a JSON object.
+description: Updates training metrics and epoch losses in a schema based on training history
 
 inputs:
   - { name: schema_id, type: String, description: "The ID of the schema to update." }
@@ -61,7 +61,12 @@ implementation:
         
         update_data = json.loads(args.update_data_json)
         mapping = json.loads(args.mapping_json)
-        float_keys = json.loads(args.float_keys_json)
+        
+        # Handle float_keys_json safely
+        if args.float_keys_json and args.float_keys_json != '-1':
+            float_keys = json.loads(args.float_keys_json)
+        else:
+            float_keys = []
 
         headers = {
             'Content-Type': 'application/json',
@@ -79,24 +84,56 @@ implementation:
         http.mount("https://", adapter)
         http.mount("http://", adapter)
 
+        # Process training history to extract epoch losses
+        def process_training_history(training_history):
+            """Convert training history to epoch-level records"""
+            if not training_history:
+                return []
+            
+            epoch_records = []
+            
+            # Extract epoch data from training history
+            train_losses = training_history.get('train_loss', [])
+            val_losses = training_history.get('val_loss', [])
+            train_accuracies = training_history.get('train_accuracy', [])
+            val_accuracies = training_history.get('val_accuracy', [])
+            
+            # Create epoch records
+            num_epochs = max(len(train_losses), len(val_losses), len(train_accuracies), len(val_accuracies))
+            
+            for epoch in range(num_epochs):
+                record = {
+                    'epoch': epoch + 1,
+                    'train_loss': train_losses[epoch] if epoch < len(train_losses) else None,
+                    'val_loss': val_losses[epoch] if epoch < len(val_losses) else None,
+                    'train_accuracy': train_accuracies[epoch] if epoch < len(train_accuracies) else None,
+                    'val_accuracy': val_accuracies[epoch] if epoch < len(val_accuracies) else None,
+                    'execution_id': args.execution_id,
+                    'model_id': args.model_id
+                }
+                epoch_records.append(record)
+            
+            return epoch_records
+
         if args.multiple_rows_json != '-1':
-            rows_to_create = json.loads(args.multiple_rows_json)
+            # Process training history for multiple rows (epoch losses)
+            training_history = json.loads(args.multiple_rows_json)
+            rows_to_create = process_training_history(training_history)
+            
             for row in rows_to_create:
                 if args.tenant_id != '-1':
-                    with open(args.tenant_id, 'r') as f:
-                        row['tenant_id'] = f.read().strip()
+                    row['tenant_id'] = tenant_id
                 if args.project_id != '-1':
                     row['project_id'] = args.project_id
                 if args.architecture_type != '-1':
                     row['architecture_type'] = args.architecture_type
                 if 'execution_id' not in row and args.execution_id != '-1':
-                    row['execution_id']=args.execution_id
-                    
+                    row['execution_id'] = args.execution_id
             
             create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
             create_payload = {"data": rows_to_create}
             
-            print(f" Creating Multiple Rows ")
+            print(f" Creating Multiple Epoch Records ")
             print(f"Request URL: POST {create_url}")
             print(f"Request Headers: {json.dumps(headers)}")
             print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
@@ -104,10 +141,10 @@ implementation:
             try:
                 response = http.post(create_url, headers=headers, data=json.dumps(create_payload), timeout=60)
                 response.raise_for_status()
-                print("Successfully created multiple model instances.")
+                print(f"Successfully created {len(rows_to_create)} epoch records.")
                 print(f"Response: {response.json()}")
             except requests.exceptions.RequestException as e:
-                print(f"Error creating multiple model instances: {e}")
+                print(f"Error creating epoch records: {e}")
                 print(f"Failed Request Payload: {json.dumps(create_payload, indent=2)}")
                 if e.response:
                     print(f"Response Status Code: {e.response.status_code}")
