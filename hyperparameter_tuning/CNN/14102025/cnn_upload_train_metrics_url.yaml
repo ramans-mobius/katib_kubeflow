@@ -1,4 +1,4 @@
-name: CNN Upload Model to CDN
+name: Fixed CNN Upload Model to CDN
 description: Uploads trained CNN model artifacts to CDN and generates URLs for inference
 inputs:
   - name: trained_model
@@ -149,7 +149,6 @@ implementation:
                 raise e
 
         def extract_class_labels(data_path):
-            """Extract class labels from training data"""
             try:
                 with open(data_path, 'rb') as f:
                     data = pickle.load(f)
@@ -179,7 +178,6 @@ implementation:
                 return {"0": "class_0", "1": "class_1"}
 
         def create_model_config(original_config, training_history_path):
-            """Create inference-ready model configuration"""
             try:
                 with open(training_history_path, 'r') as f:
                     training_history = json.load(f)
@@ -229,7 +227,6 @@ implementation:
                 }
 
         def create_inference_config():
-            """Create configuration specifically for inference"""
             inference_config = {
                 "model_type": "cnn_classification",
                 "preprocessing": {
