@@ -1,0 +1,372 @@
+name: CNN Upload Model to CDN
+description: Uploads trained CNN model artifacts to CDN and generates URLs for inference
+inputs:
+  - name: trained_model
+    type: Model
+    description: Trained model weights from CNN train brick
+  - name: training_history
+    type: String
+    description: Training history JSON from CNN train brick
+  - name: config
+    type: String
+    description: Original training configuration
+  - name: data_path
+    type: Dataset
+    description: Dataset used for training (to extract class labels)
+  - name: bearer_token
+    type: string
+    description: Bearer token for CDN authentication
+  - name: domain
+    type: String
+    description: Domain for CDN upload service
+  - name: get_cdn
+    type: String
+    description: Domain for CDN download service
+  - name: model_name
+    type: String
+    description: Name for the model (e.g., "resnet50_cifar10")
+outputs:
+  - name: model_weights_url
+    type: String
+    description: CDN URL for model weights
+  - name: model_config_url
+    type: String
+    description: CDN URL for model configuration
+  - name: class_labels_url
+    type: String
+    description: CDN URL for class labels
+  - name: inference_config_url
+    type: String
+    description: CDN URL for inference configuration
+  - name: upload_summary
+    type: String
+    description: Summary of uploaded artifacts and URLs
+
+implementation:
+  container:
+    image: python:3.8-slim
+    command:
+      - sh
+      - -ec
+      - |
+        # The container image needs curl
+        if ! command -v curl &> /dev/null; then
+            echo "curl could not be found, installing..."
+            apt-get update > /dev/null && apt-get install -y curl > /dev/null
+        fi
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import subprocess
+        import json
+        import os
+        import uuid
+        import pickle
+        import torch
+
+        parser = argparse.ArgumentParser(description="Upload CNN model artifacts to CDN.")
+        parser.add_argument('--trained_model', type=str, required=True, help='Path to the trained model file.')
+        parser.add_argument('--training_history', type=str, required=True, help='Path to training history JSON.')
+        parser.add_argument('--config', type=str, required=True, help='Original training configuration.')
+        parser.add_argument('--data_path', type=str, required=True, help='Path to training dataset.')
+        parser.add_argument('--bearer_token', type=str, required=True, help='Bearer token for CDN authentication.')
+        parser.add_argument('--domain', type=str, required=True, help='Domain for CDN upload service.')
+        parser.add_argument('--get_cdn', type=str, required=True, help='Domain for CDN download service.')
+        parser.add_argument('--model_name', type=str, required=True, help='Name for the model.')
+        
+        # Output paths
+        parser.add_argument('--model_weights_url', type=str, required=True)
+        parser.add_argument('--model_config_url', type=str, required=True)
+        parser.add_argument('--class_labels_url', type=str, required=True)
+        parser.add_argument('--inference_config_url', type=str, required=True)
+        parser.add_argument('--upload_summary', type=str, required=True)
+        
+        args = parser.parse_args()
+
+        with open(args.bearer_token, 'r') as f:
+            bearer_token = f.read().strip()
+        upload_url = f"{args.domain}/mobius-content-service/v1.0/content/upload?filePathAccess=private&filePath=%2Fbottle%2Flimka%2Fsoda%2F"
+
+        def upload_file_to_cdn(file_path, output_cdn_url_path, filename_prefix, file_extension):
+            # Create a unique filename for CDN
+            cdn_filename = f"{filename_prefix}_{args.model_name}_{uuid.uuid4()}{file_extension}"
+            
+            print(f"Uploading file from {file_path} with CDN name {cdn_filename} to {upload_url}...")
+
+            curl_command = [
+                "curl",
+                "--location", upload_url,
+                "--header", f"Authorization: Bearer {bearer_token}",
+                "--form", f"file=@{file_path}",
+                "--fail",
+                "--show-error"
+            ]
+            print(f"Executing curl command: {' '.join(curl_command)}")
+
+            try:
+                process = subprocess.run(
+                    curl_command,
+                    capture_output=True,
+                    check=True
+                )
+                
+                print("Upload successful. Raw response:")
+                print(process.stdout.decode('utf-8'))
+
+                response_json = json.loads(process.stdout.decode('utf-8'))
+                relative_cdn_url = response_json.get("cdnUrl", "URL_NOT_FOUND")
+
+                if relative_cdn_url == "URL_NOT_FOUND":
+                    print("Error: Could not find 'cdnUrl' in the server response.")
+                    print("Full response:", process.stdout.decode('utf-8'))
+                    raise ValueError("Failed to parse cdnUrl from CDN response.")
+                
+                content_url_value = f"{args.get_cdn}{relative_cdn_url}"
+
+                print(f"Extracted CDN URL: {content_url_value}")
+
+                # Write URL to output file
+                output_dir = os.path.dirname(output_cdn_url_path)
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+                
+                with open(output_cdn_url_path, "w") as f:
+                    f.write(content_url_value)
+                
+                return content_url_value
+
+            except subprocess.CalledProcessError as e:
+                print("Error executing curl command:")
+                print(f"Return code: {e.returncode}")
+                print(f"Output: {e.stdout.decode('utf-8')}")
+                print(f"Error Output: {e.stderr.decode('utf-8')}")
+                raise e
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"Error processing the server response: {e}")
+                raise e
+
+        def extract_class_labels(data_path):
+            """Extract class labels from training data"""
+            try:
+                with open(data_path, 'rb') as f:
+                    data = pickle.load(f)
+                
+                class_labels = {}
+                
+                # Try different ways to extract class labels
+                if hasattr(data, 'class_names') and data.class_names:
+                    for i, class_name in enumerate(data.class_names):
+                        class_labels[str(i)] = class_name
+                elif hasattr(data, 'label_mapping') and data.label_mapping:
+                    class_labels = data.label_mapping
+                elif hasattr(data, 'num_classes'):
+                    # Create generic labels if no specific names available
+                    for i in range(data.num_classes):
+                        class_labels[str(i)] = f"class_{i}"
+                else:
+                    # Default fallback for binary classification
+                    class_labels = {"0": "class_0", "1": "class_1"}
+                
+                print(f"Extracted class labels: {class_labels}")
+                return class_labels
+                
+            except Exception as e:
+                print(f"Warning: Could not extract class labels: {e}")
+                # Return default binary classification labels
+                return {"0": "class_0", "1": "class_1"}
+
+        def create_model_config(original_config, training_history_path):
+            """Create inference-ready model configuration"""
+            try:
+                with open(training_history_path, 'r') as f:
+                    training_history = json.load(f)
+                
+                with open(args.config, 'r') as f:
+                    original_config_data = json.loads(f.read())
+                
+                model_config = {
+                    "model_info": {
+                        "name": args.model_name,
+                        "architecture": original_config_data.get('model', {}).get('architecture', 'resnet'),
+                        "input_size": original_config_data.get('model', {}).get('input_size', [3, 224, 224]),
+                        "num_classes": original_config_data.get('model', {}).get('output_dim', 10),
+                        "training_date": str(uuid.uuid1())[:8]  # Simple timestamp
+                    },
+                    "training_performance": {
+                        "best_val_accuracy": training_history.get('best_val_acc', 0.0),
+                        "best_val_loss": training_history.get('best_val_loss', 0.0),
+                        "final_train_accuracy": training_history.get('train_acc', [0])[-1] if training_history.get('train_acc') else 0.0,
+                        "final_val_accuracy": training_history.get('val_acc', [0])[-1] if training_history.get('val_acc') else 0.0
+                    },
+                    "inference_config": {
+                        "batch_size": 32,
+                        "image_size": [224, 224],
+                        "normalization": {
+                            "mean": [0.485, 0.456, 0.406],
+                            "std": [0.229, 0.224, 0.225]
+                        },
+                        "preprocess": True
+                    }
+                }
+                return model_config
+            except Exception as e:
+                print(f"Error creating model config: {e}")
+                # Return minimal config
+                return {
+                    "model_info": {
+                        "name": args.model_name,
+                        "architecture": "resnet",
+                        "input_size": [3, 224, 224],
+                        "num_classes": 10
+                    },
+                    "inference_config": {
+                        "batch_size": 32,
+                        "image_size": [224, 224]
+                    }
+                }
+
+        def create_inference_config():
+            """Create configuration specifically for inference"""
+            inference_config = {
+                "model_type": "cnn_classification",
+                "preprocessing": {
+                    "resize": [224, 224],
+                    "normalize": True,
+                    "mean": [0.485, 0.456, 0.406],
+                    "std": [0.229, 0.224, 0.225],
+                    "input_range": [0, 1]
+                },
+                "inference": {
+                    "batch_size": 32,
+                    "top_k": 5,
+                    "confidence_threshold": 0.5
+                },
+                "output": {
+                    "format": "json",
+                    "include_confidence": True,
+                    "include_class_names": True
+                }
+            }
+            return inference_config
+
+        # Upload trained model weights
+        print("=== Uploading Model Weights ===")
+        model_weights_url = upload_file_to_cdn(
+            args.trained_model, 
+            args.model_weights_url, 
+            "cnn_model", 
+            ".pt"
+        )
+
+        # Create and upload model configuration
+        print("=== Creating and Uploading Model Configuration ===")
+        model_config_data = create_model_config(args.config, args.training_history)
+        model_config_str = json.dumps(model_config_data, indent=2)
+        
+        model_config_temp_file = f"/tmp/model_config_{uuid.uuid4()}.json"
+        with open(model_config_temp_file, 'w') as f:
+            f.write(model_config_str)
+        
+        model_config_url = upload_file_to_cdn(
+            model_config_temp_file,
+            args.model_config_url,
+            "model_config",
+            ".json"
+        )
+        os.remove(model_config_temp_file)
+
+        # Extract and upload class labels
+        print("=== Extracting and Uploading Class Labels ===")
+        class_labels = extract_class_labels(args.data_path)
+        class_labels_str = json.dumps(class_labels, indent=2)
+        
+        class_labels_temp_file = f"/tmp/class_labels_{uuid.uuid4()}.json"
+        with open(class_labels_temp_file, 'w') as f:
+            f.write(class_labels_str)
+        
+        class_labels_url = upload_file_to_cdn(
+            class_labels_temp_file,
+            args.class_labels_url,
+            "class_labels",
+            ".json"
+        )
+        os.remove(class_labels_temp_file)
+
+        # Create and upload inference configuration
+        print("=== Creating and Uploading Inference Configuration ===")
+        inference_config_data = create_inference_config()
+        inference_config_str = json.dumps(inference_config_data, indent=2)
+        
+        inference_config_temp_file = f"/tmp/inference_config_{uuid.uuid4()}.json"
+        with open(inference_config_temp_file, 'w') as f:
+            f.write(inference_config_str)
+        
+        inference_config_url = upload_file_to_cdn(
+            inference_config_temp_file,
+            args.inference_config_url,
+            "inference_config",
+            ".json"
+        )
+        os.remove(inference_config_temp_file)
+
+        # Create upload summary
+        print("=== Creating Upload Summary ===")
+        upload_summary = {
+            "model_name": args.model_name,
+            "upload_timestamp": str(uuid.uuid1())[:8],
+            "urls": {
+                "model_weights": model_weights_url,
+                "model_config": model_config_url,
+                "class_labels": class_labels_url,
+                "inference_config": inference_config_url
+            },
+            "artifacts": {
+                "model_weights_uploaded": os.path.exists(args.trained_model),
+                "training_history_available": os.path.exists(args.training_history),
+                "class_labels_extracted": len(class_labels) > 0
+            }
+        }
+
+        # Write upload summary
+        output_dir = os.path.dirname(args.upload_summary)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(args.upload_summary, 'w') as f:
+            json.dump(upload_summary, f, indent=2)
+
+        print("=== CDN Upload Complete ===")
+        print(f"Model Weights URL: {model_weights_url}")
+        print(f"Model Config URL: {model_config_url}")
+        print(f"Class Labels URL: {class_labels_url}")
+        print(f"Inference Config URL: {inference_config_url}")
+        print(f"Upload summary saved to: {args.upload_summary}")
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --training_history
+      - {inputPath: training_history}
+      - --config
+      - {inputValue: config}
+      - --data_path
+      - {inputPath: data_path}
+      - --bearer_token
+      - {inputPath: bearer_token}
+      - --domain
+      - {inputValue: domain}
+      - --get_cdn
+      - {inputValue: get_cdn}
+      - --model_name
+      - {inputValue: model_name}
+      - --model_weights_url
+      - {outputPath: model_weights_url}
+      - --model_config_url
+      - {outputPath: model_config_url}
+      - --class_labels_url
+      - {outputPath: class_labels_url}
+      - --inference_config_url
+      - {outputPath: inference_config_url}
+      - --upload_summary
+      - {outputPath: upload_summary}
