@@ -67,11 +67,6 @@ inputs:
     description: Maximum number of failed trials
 
   # IMAGE CONFIGURATION INPUTS
-  - name: component_image
-    type: String
-    default: sanram00/cnn-image:v3
-    description: Docker image for this Katib tuner component
-
   - name: training_image
     type: String
     default: sanram00/cnn-image:v3
@@ -124,7 +119,7 @@ outputs:
   
 implementation:
   container:
-    image: {inputValue: component_image}
+    image: sanram00/cnn-image:v3 # Put your training_image here... tried to take it as input didn't work
     command:
       - python3
       - -u
@@ -185,7 +180,6 @@ implementation:
         parser.add_argument("--model_type", type=str, required=True)
         parser.add_argument("--config_json", type=str, required=True)
         # IMAGE CONFIGURATION ARGUMENTS
-        parser.add_argument("--component_image", type=str, required=True)
         parser.add_argument("--training_image", type=str, required=True)
         parser.add_argument("--training_script", type=str, required=True)
         # RESOURCE CONFIGURATION ARGUMENTS
@@ -212,7 +206,6 @@ implementation:
         print(f"DEBUG: parameters_to_tune length: {len(args.parameters_to_tune)}")
         print(f"DEBUG: process_data_url: {args.process_data_url}")
         # IMAGE CONFIGURATION DEBUG LINES
-        print(f"DEBUG: component_image: {args.component_image}")
         print(f"DEBUG: training_image: {args.training_image}")
         print(f"DEBUG: training_script: {args.training_script}")
         # RESOURCE CONFIGURATION DEBUG LINES
@@ -553,8 +546,6 @@ implementation:
       - --projectid
       - {inputValue: projectid}
       # IMAGE CONFIGURATION ARGUMENT MAPPINGS
-      - --component_image
-      - {inputValue: component_image}
       - --training_image
       - {inputValue: training_image}
       - --training_script
