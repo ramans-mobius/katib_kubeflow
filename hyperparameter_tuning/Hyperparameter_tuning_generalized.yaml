@@ -66,7 +66,6 @@ inputs:
     default: '2'
     description: Maximum number of failed trials
 
-  # NEW INPUTS
   - name: training_image
     type: String
     default: sanram00/cnn-image:v3
@@ -88,7 +87,7 @@ outputs:
   
 implementation:
   container:
-    image: {inputValue: component_image}
+    image: {inputValue: training_image}
     command:
       - python3
       - -u
@@ -294,8 +293,8 @@ implementation:
                             "containers": [
                                 {
                                     "name": "training-container",
-                                    "image": args.training_image,  # USING INPUT PARAMETER
-                                    "command": ["python", args.training_script],  # USING INPUT PARAMETER
+                                    "image": args.training_image, 
+                                    "command": ["python", args.training_script], 
                                     "args": trial_args,
                                     "resources": {
                                         "limits": {"cpu": "2", "memory": "4Gi"}
@@ -482,7 +481,6 @@ implementation:
       - {inputValue: max_failed_trial_count}
       - --projectid
       - {inputValue: projectid}
-      # NEW ARGUMENT MAPPINGS
       - --training_image
       - {inputValue: training_image}
       - --training_script
