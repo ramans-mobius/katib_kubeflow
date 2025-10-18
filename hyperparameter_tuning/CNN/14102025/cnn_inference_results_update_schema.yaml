@@ -1,33 +1,24 @@
 name: CNN Store Inference Results
-description: Stores CNN inference results in a database schema with model metadata and predictions
+description: Stores CNN inference results in database schema with basic columns
 inputs:
   - name: schema_id
     type: String
-    description: The ID of the schema to update
   - name: inference_results
     type: String
-    description: JSON string containing CNN inference results
   - name: model_id
     type: String
-    description: The ID of the model
   - name: execution_id
     type: String
-    description: The ID of the execution
   - name: tenant_id
     type: string
-    description: The ID of the tenant
   - name: project_id
     type: String
-    description: The ID of the project
   - name: architecture_type
     type: String
-    description: The architecture type (CNN)
   - name: bearer_auth_token
     type: string
-    description: Bearer token for authentication
   - name: domain
     type: String
-    description: The domain for the API endpoint
 
 implementation:
   container:
@@ -45,8 +36,7 @@ implementation:
         import json
         import argparse
         import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
+        from datetime import datetime
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--schema_id', type=str, required=True)
@@ -60,253 +50,71 @@ implementation:
         parser.add_argument('--domain', type=str, required=True)
         args = parser.parse_args()
 
+        # Read auth token and tenant_id
         with open(args.bearer_auth_token, 'r') as f:
             bearer_auth_token = f.read().strip()
-
         with open(args.tenant_id, 'r') as f:
             tenant_id = f.read().strip()
 
-        # Load inference results
+        # Load CNN inference results
         with open(args.inference_results, 'r') as f:
-            inference_data = json.load(f)
+            cnn_data = json.load(f)
 
-        print("=== CNN Inference Results Data ===")
-        print(f"Model: {inference_data.get('model_info', {}).get('name', 'Unknown')}")
-        print(f"Total predictions: {inference_data.get('total_predictions', 0)}")
-        print(f"Average confidence: {inference_data.get('summary', {}).get('average_confidence', 0):.4f}")
+        print("=== Processing CNN Inference Results ===")
+        
+        # Extract predictions for summary
+        predictions = cnn_data.get("predictions", [])
+        total_samples = len(predictions)
+        
+        # Get most common prediction as representative output
+        representative_pred = predictions[0] if predictions else {}
+        predicted_class = representative_pred.get("predicted_class", "unknown")
+        confidence = representative_pred.get("confidence", 0)
 
-        # Define mapping for CNN inference results
-        mapping = {
-            "model_id": "model_id",
-            "execution_id": "execution_id",
-            "tenant_id": "tenant_id",
-            "project_id": "project_id",
-            "architecture_type": "architecture_type",
-            "model_name": ["model_info", "name"],
-            "model_architecture": ["model_info", "architecture"],
-            "input_size": ["model_info", "input_size"],
-            "num_classes": ["model_info", "num_classes"],
-            "total_predictions": "total_predictions",
-            "average_confidence": ["summary", "average_confidence"],
-            "samples_processed": ["summary", "samples_processed"],
-            "inference_timestamp": "timestamp",
-            "batch_size": ["inference_config", "inference", "batch_size"],
-            "confidence_threshold": ["inference_config", "inference", "confidence_threshold"],
-            "top_predictions": "top_predictions",
-            "class_distribution": "class_distribution",
-            "performance_metrics": "performance_metrics",
-            "inference_config": "inference_config",
-            "predictions_summary": "predictions_summary"
-        }
-
-        # Define float keys for numeric conversion
-        float_keys = [
-            "average_confidence",
-            "confidence_threshold"
-        ]
-
-        # Prepare update data
-        update_data = {
-            "model_id": args.model_id,
-            "execution_id": args.execution_id,
+        # Prepare data matching your schema structure with basic columns only
+        schema_data = {
+            # Existing columns from SLM schema
             "tenant_id": tenant_id,
             "project_id": args.project_id,
+            "execution_id": args.execution_id,
+            "inference_input": "image_classification",
+            "inference_output": predicted_class,
+            "inference_score_blue": None,  # Not used for CNN
+            "inference_score_rouge": None, # Not used for CNN
+            
+            # New basic CNN columns
+            "model_id": args.model_id,
             "architecture_type": args.architecture_type,
-            "timestamp": inference_data.get("timestamp"),  # You might want to add this in inference
+            "inference_confidence": float(confidence),
+            "predicted_class": predicted_class,
+            "total_samples": total_samples
         }
 
-        # Extract nested values from inference data
-        def get_nested_value(data, keys):
-            if isinstance(keys, str):
-                return data.get(keys)
-            elif isinstance(keys, list):
-                current = data
-                for key in keys:
-                    if isinstance(current, dict) and key in current:
-                        current = current[key]
-                    else:
-                        return None
-                return current
-            return None
+        print("=== Prepared Schema Data ===")
+        print(json.dumps(schema_data, indent=2))
 
-        # Map inference data to schema columns
-        for column, keys in mapping.items():
-            if column in ["model_id", "execution_id", "tenant_id", "project_id", "architecture_type", "timestamp"]:
-                continue  # Already handled above
-            
-            value = get_nested_value(inference_data, keys)
-            if value is not None:
-                update_data[column] = value
-
-        # Calculate additional metrics
-        predictions = inference_data.get("predictions", [])
-        if predictions:
-            # Top predictions (most confident)
-            confident_predictions = sorted(
-                [p for p in predictions if "confidence" in p],
-                key=lambda x: x.get("confidence", 0),
-                reverse=True
-            )[:5]  # Top 5 most confident predictions
-            
-            update_data["top_predictions"] = confident_predictions
-            
-            # Class distribution
-            class_counts = {}
-            for pred in predictions:
-                pred_class = pred.get("predicted_class", "unknown")
-                class_counts[pred_class] = class_counts.get(pred_class, 0) + 1
-            
-            update_data["class_distribution"] = class_counts
-            
-            # Performance metrics
-            correct_predictions = 0
-            total_with_labels = 0
-            
-            for pred in predictions:
-                if "true_label" in pred and "predicted_label" in pred:
-                    total_with_labels += 1
-                    if pred["true_label"] == pred["predicted_label"]:
-                        correct_predictions += 1
-            
-            accuracy = correct_predictions / total_with_labels if total_with_labels > 0 else 0
-            update_data["performance_metrics"] = {
-                "accuracy": accuracy,
-                "total_samples": len(predictions),
-                "samples_with_labels": total_with_labels,
-                "correct_predictions": correct_predictions
-            }
-            
-            # Predictions summary
-            update_data["predictions_summary"] = {
-                "total": len(predictions),
-                "average_confidence": inference_data.get("summary", {}).get("average_confidence", 0),
-                "max_confidence": max([p.get("confidence", 0) for p in predictions]) if predictions else 0,
-                "min_confidence": min([p.get("confidence", 0) for p in predictions]) if predictions else 0
-            }
-
-        # Add inference config
-        update_data["inference_config"] = inference_data.get("inference_config", {})
-
-        print("=== Prepared Update Data ===")
-        print(json.dumps(update_data, indent=2))
-
+        # API call to store data
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {bearer_auth_token}'
         }
 
-        retry_strategy = Retry(
-            total=3,
-            status_forcelist=[408, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "PUT", "POST", "DELETE", "OPTIONS", "TRACE"],
-            backoff_factor=1
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        http = requests.Session()
-        http.mount("https://", adapter)
-        http.mount("http://", adapter)
-
-        # Check if execution_id exists
-        check_url = f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
-        check_payload = {
-            "dbType": "TIDB",
-            "ownedOnly": True,
-            "filter": {
-                "execution_id": args.execution_id
-            }
+        create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
+        create_payload = {
+            "data": [schema_data]
         }
 
-        print(f"=== Checking for Existing Row with execution_id: {args.execution_id} ===")
-        
         try:
-            response = http.post(check_url, headers=headers, data=json.dumps(check_payload), timeout=60)
+            response = requests.post(create_url, headers=headers, json=create_payload, timeout=60)
             response.raise_for_status()
-            response_data = response.json()
-            
-            if response_data.get("content"):
-                print("=== Instance Found: Updating Row ===")
-                patch_requests = []
-                for column, keys in mapping.items():
-                    if column in update_data:
-                        value = update_data[column]
-                        # Convert to float if in float_keys
-                        if column in float_keys and value is not None:
-                            try:
-                                value = float(value)
-                            except (ValueError, TypeError):
-                                value = str(value)
-                        elif isinstance(value, (dict, list)):
-                            # Keep complex objects as JSON
-                            value = value
-                        else:
-                            value = str(value) if value is not None else None
-                        
-                        if value is not None:
-                            patch_requests.append({
-                                "operation": "REPLACE",
-                                "path": column,
-                                "value": value
-                            })
-
-                update_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
-                update_payload = {
-                    "dbType": "TIDB",
-                    "conditionalFilter": {
-                        "conditions": [
-                            {
-                                "field": "execution_id",
-                                "operator": "EQUAL",
-                                "value": args.execution_id
-                            }
-                        ]
-                    },
-                    "partialUpdateRequests": [
-                        {
-                            "patch": patch_requests
-                        }
-                    ]
-                }
-                
-                print(f"Request URL: PATCH {update_url}")
-                print(f"Request Payload: {json.dumps(update_payload, indent=2)}")
-                
-                response = http.patch(update_url, headers=headers, data=json.dumps(update_payload), timeout=60)
-                response.raise_for_status()
-                print("Successfully updated CNN inference results.")
-                
-            else:
-                print("=== No Instance Found: Creating New Row ===")
-                creation_data = {}
-                for column in mapping.keys():
-                    if column in update_data:
-                        value = update_data[column]
-                        # Convert to float if in float_keys
-                        if column in float_keys and value is not None:
-                            try:
-                                value = float(value)
-                            except (ValueError, TypeError):
-                                value = str(value)
-                        creation_data[column] = value
-
-                create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
-                create_payload = {
-                    "data": [creation_data]
-                }
-
-                print(f"Request URL: POST {create_url}")
-                print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
-                
-                response = http.post(create_url, headers=headers, data=json.dumps(create_payload), timeout=60)
-                response.raise_for_status()
-                print("Successfully created new CNN inference results.")
-                
+            print("Successfully stored CNN inference results")
             print(f"Response: {response.json()}")
-
+            
         except requests.exceptions.RequestException as e:
-            print(f"Error: {e}")
+            print(f"Error storing results: {e}")
             if e.response is not None:
-                print(f"Response Status Code: {e.response.status_code}")
-                print(f"Response Content: {e.response.text}")
+                print(f"Status Code: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
             exit(1)
 
     args:
