@@ -1,4 +1,4 @@
-name: 2 CNN Store Inference Results
+name: CNN Store Inference Results
 description: Stores CNN inference results in database schema with basic columns
 inputs:
   - name: schema_id
@@ -70,12 +70,16 @@ implementation:
         predicted_class = representative_pred.get("predicted_class", "unknown")
         confidence = representative_pred.get("confidence", 0)
 
-        # Prepare data with ONLY columns that exist in your schema
+        # Prepare data with ALL required fields from original SLM schema
         schema_data = {
-            # Existing columns that are confirmed to be in your schema
+            # Required fields from original SLM schema
             "tenant_id": tenant_id,
             "project_id": args.project_id,
             "execution_id": args.execution_id,
+            "inference_input": "image_classification",  # Required
+            "inference_output": predicted_class,        # Required  
+            "inference_score_blue": 0.0,                # Required - set to 0 for CNN
+            "inference_score_rouge": 0.0,               # Required - set to 0 for CNN
             
             # New basic CNN columns you added
             "model_id": args.model_id,
