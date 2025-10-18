@@ -46,6 +46,7 @@ implementation:
       - python3
       - -u
       - -c
+      - |
         import argparse, os, requests, json, pickle
         import io
 
@@ -55,13 +56,11 @@ implementation:
         parser.add_argument('--class_labels_url', type=str, required=True)
         parser.add_argument('--inference_config_url', type=str, required=True)
         parser.add_argument('--preprocess_data_url', type=str, required=True)
-        
         parser.add_argument('--model_weights', type=str, required=True)
         parser.add_argument('--model_config', type=str, required=True)
         parser.add_argument('--class_labels', type=str, required=True)
         parser.add_argument('--inference_config', type=str, required=True)
         parser.add_argument('--preprocess_data', type=str, required=True)
-        
         args = parser.parse_args()
 
         def download_file(url, output_path, description):
@@ -263,7 +262,6 @@ implementation:
 
         print("DEBUG COMPLETE")
         print("All CNN artifacts downloaded successfully")
-
     args:
       - --model_weights_url
       - { inputValue: model_weights_url }
