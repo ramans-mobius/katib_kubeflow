@@ -1,4 +1,4 @@
-name: Fixed CNN Upload Model to CDN
+name: 3 Fixed CNN Upload Model to CDN
 description: Uploads trained CNN model artifacts to CDN and generates URLs for inference
 inputs:
   - name: trained_model
@@ -44,7 +44,7 @@ outputs:
 
 implementation:
   container:
-    image: python:3.8-slim
+    image: gurpreetgandhi/nesy-factory:v19
     command:
       - sh
       - -ec
