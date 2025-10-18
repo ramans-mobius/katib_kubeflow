@@ -45,7 +45,6 @@ implementation:
 
         print("=== CNN Inference ===")
 
-        # Define the same helper classes as in train brick for pickle compatibility
         class LabeledDataset:
             def __init__(self, dataset=None, label_mapping=None):
                 self.dataset = dataset or []
@@ -123,24 +122,6 @@ implementation:
                                 pass
                         return FallbackClass
 
-        # Simple image preprocessing without torchvision
-        def simple_preprocess(image_tensor, target_size=(224, 224)):
-            if len(image_tensor.shape) == 3:
-                image_tensor = image_tensor.unsqueeze(0)
-            
-            # Simple resize (nearest neighbor)
-            if image_tensor.shape[2] != target_size[0] or image_tensor.shape[3] != target_size[1]:
-                # Basic interpolation for resizing
-                import torch.nn.functional as F
-                image_tensor = F.interpolate(image_tensor, size=target_size, mode='nearest')
-            
-            # Normalize (ImageNet stats)
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-            image_tensor = (image_tensor - mean) / std
-            
-            return image_tensor
-
         parser = argparse.ArgumentParser()
         parser.add_argument('--model_weights', type=str, required=True)
         parser.add_argument('--model_config', type=str, required=True)
@@ -152,30 +133,49 @@ implementation:
         parser.add_argument('--predictions', type=str, required=True)
         args = parser.parse_args()
 
-        print("=== CNN Inference Configuration ===")
-        print(f"Input images parameter: {args.input_images}")
+        print("Input images parameter:", args.input_images)
 
-        # Load configurations
         with open(args.model_config, 'r') as f:
-            model_config = json.load(f)
+            model_config_data = json.load(f)
         with open(args.class_labels, 'r') as f:
-            class_labels = json.load(f)
+            class_labels_json = json.load(f)
         with open(args.inference_config, 'r') as f:
             inference_config = json.load(f)
 
-        print("Loaded configurations:")
-        print(f"Model: {model_config.get('model_info', {}).get('name', 'Unknown')}")
-        print(f"Classes: {len(class_labels)}")
+        print("Model config num_classes:", model_config_data.get('model_info', {}).get('num_classes'))
+        print("Class labels count:", len(class_labels_json))
 
-        # Load model using the same approach as train brick
+        with open(args.preprocess_data, 'rb') as f:
+            raw_data = f.read()
+        processed_data = SafeUnpickler(io.BytesIO(raw_data)).load()
+
+        real_class_names = []
+        if hasattr(processed_data, 'class_names'):
+            real_class_names = processed_data.class_names
+            print("Real class names from data:", real_class_names)
+        elif hasattr(processed_data, 'label_to_idx'):
+            real_class_names = list(processed_data.label_to_idx.keys())
+            print("Real class names from label_to_idx:", real_class_names)
+
+        actual_num_classes = len(real_class_names) if real_class_names else len(class_labels_json)
+        print("Actual number of classes:", actual_num_classes)
+
+        model_config = model_config_data.get('model_info', {}).copy()
+        if 'num_classes' in model_config:
+            model_config['output_dim'] = actual_num_classes
+            print("Fixed model config - added output_dim:", actual_num_classes)
+
+        print("Loading model...")
         try:
             sys.path.insert(0, '/usr/local/lib/python3.10/site-packages')
             from nesy_factory.CNNs.registry import create_model as create_cnn_model
             
-            model_architecture = model_config.get('model_info', {}).get('architecture', 'resnet')
-            model = create_cnn_model(model_architecture, model_config.get('model_info', {}))
+            model_architecture = model_config.get('architecture', 'resnet')
+            print("Creating model with architecture:", model_architecture)
+            print("Model config for creation:", model_config)
             
-            # Load checkpoint using same method as train brick
+            model = create_cnn_model(model_architecture, model_config)
+            
             checkpoint = torch.load(args.model_weights, map_location='cpu')
             if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                 model.load_state_dict(checkpoint['model_state_dict'])
@@ -183,56 +183,29 @@ implementation:
                 model.load_state_dict(checkpoint)
             
             model.eval()
-            print(f"Model loaded: {model_architecture}")
+            print("Model loaded successfully:", model_architecture)
             
         except Exception as e:
-            print(f"Error loading model: {e}")
-            # Fallback to basic CNN (same as train brick)
-            class SimpleCNN(nn.Module):
-                def __init__(self, num_classes):
-                    super(SimpleCNN, self).__init__()
-                    self.features = nn.Sequential(
-                        nn.Conv2d(3, 64, kernel_size=3, padding=1),
-                        nn.ReLU(),
-                        nn.MaxPool2d(2),
-                        nn.Conv2d(64, 128, kernel_size=3, padding=1),
-                        nn.ReLU(),
-                        nn.MaxPool2d(2),
-                    )
-                    self.classifier = nn.Linear(128 * 56 * 56, num_classes)
-                
-                def forward(self, x):
-                    x = self.features(x)
-                    x = x.view(x.size(0), -1)
-                    x = self.classifier(x)
-                    return x
-            
-            num_classes = len(class_labels)
-            model = SimpleCNN(num_classes)
-            checkpoint = torch.load(args.model_weights, map_location='cpu')
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                model.load_state_dict(checkpoint)
-            model.eval()
-            print("Loaded fallback SimpleCNN model")
+            print("Error loading model:", e)
+            print("Trying to load as full model...")
+            try:
+                model = torch.load(args.model_weights, map_location='cpu')
+                if isinstance(model, dict):
+                    raise Exception("Checkpoint dict, not model")
+                model.eval()
+                print("Loaded as full model object")
+            except Exception as e2:
+                print("Failed to load as full model:", e2)
+                sys.exit(1)
 
         predictions = []
         
-        # Handle input_images parameter
         if args.input_images == "-1":
             print("Using test data from preprocessed dataset")
-            # Load preprocess_data using same unpickling method as train brick
             try:
-                with open(args.preprocess_data, 'rb') as f:
-                    raw_data = f.read()
-                
-                processed_data = SafeUnpickler(io.BytesIO(raw_data)).load()
-                print("Preprocessed data loaded successfully")
-                
                 if hasattr(processed_data, 'test_loader'):
                     test_loader = processed_data.test_loader
-                    print("Found test_loader in preprocessed data")
+                    print("Found test_loader")
                     
                     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                     model.to(device)
@@ -240,43 +213,59 @@ implementation:
                     all_predictions = []
                     with torch.no_grad():
                         for batch_idx, (images, labels) in enumerate(test_loader):
-                            if batch_idx >= 5:  # Limit to first 5 batches for demo
+                            if batch_idx >= 3:
                                 break
                             
-                            # Preprocess images if needed
-                            images = simple_preprocess(images)
                             images = images.to(device)
-                            
                             outputs = model(images)
                             probabilities = F.softmax(outputs, dim=1)
                             confidences, predicted = torch.max(probabilities, 1)
                             
                             for i in range(len(images)):
+                                predicted_idx = int(predicted[i].item())
+                                true_idx = int(labels[i].item()) if labels is not None else None
+                                
+                                if real_class_names and predicted_idx < len(real_class_names):
+                                    predicted_class = real_class_names[predicted_idx]
+                                else:
+                                    predicted_class = class_labels_json.get(str(predicted_idx), f"class_{predicted_idx}")
+                                
+                                if real_class_names and true_idx is not None and true_idx < len(real_class_names):
+                                    true_class = real_class_names[true_idx]
+                                elif true_idx is not None:
+                                    true_class = class_labels_json.get(str(true_idx), f"class_{true_idx}")
+                                else:
+                                    true_class = "unknown"
+                                
                                 pred_info = {
                                     'batch': batch_idx,
                                     'sample': i,
-                                    'true_label': int(labels[i].item()) if labels is not None else None,
-                                    'true_class': class_labels.get(str(int(labels[i].item())), f"class_{int(labels[i].item())}") if labels is not None else "unknown",
-                                    'predicted_label': int(predicted[i].item()),
-                                    'predicted_class': class_labels.get(str(int(predicted[i].item())), f"class_{int(predicted[i].item())}"),
+                                    'true_label': true_idx,
+                                    'true_class': true_class,
+                                    'predicted_label': predicted_idx,
+                                    'predicted_class': predicted_class,
                                     'confidence': float(confidences[i].item()),
-                                    'all_probabilities': {
-                                        class_labels.get(str(j), f"class_{j}"): float(probabilities[i][j].item())
-                                        for j in range(len(class_labels))
-                                    }
+                                    'all_probabilities': {}
                                 }
+                                
+                                for j in range(actual_num_classes):
+                                    if real_class_names and j < len(real_class_names):
+                                        class_name = real_class_names[j]
+                                    else:
+                                        class_name = class_labels_json.get(str(j), f"class_{j}")
+                                    pred_info['all_probabilities'][class_name] = float(probabilities[i][j].item())
+                                
                                 all_predictions.append(pred_info)
                                 predictions.append(pred_info)
                     
-                    print(f"Processed {len(all_predictions)} test samples from preprocessed data")
+                    print(f"Processed {len(all_predictions)} test samples")
                     
                 else:
-                    print("No test loader found in dataset")
-                    raise Exception("No test data available")
+                    print("No test loader found")
+                    raise Exception("No test data")
                     
             except Exception as e:
-                print(f"Error using test data: {e}")
-                # Create dummy inference as fallback
+                print("Error using test data:", e)
                 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
                 model.to(device)
                 dummy_image = torch.randn(1, 3, 224, 224).to(device)
@@ -285,58 +274,34 @@ implementation:
                     probabilities = F.softmax(output, dim=1)
                     confidence, predicted = torch.max(probabilities, 1)
                     
+                    predicted_idx = int(predicted.item())
+                    if real_class_names and predicted_idx < len(real_class_names):
+                        predicted_class = real_class_names[predicted_idx]
+                    else:
+                        predicted_class = class_labels_json.get(str(predicted_idx), f"class_{predicted_idx}")
+                    
                     pred_info = {
                         'sample': 'dummy',
-                        'predicted_label': int(predicted.item()),
-                        'predicted_class': class_labels.get(str(int(predicted.item())), f"class_{int(predicted.item())}"),
+                        'predicted_label': predicted_idx,
+                        'predicted_class': predicted_class,
                         'confidence': float(confidence.item()),
-                        'note': 'Dummy inference - no real data available'
+                        'note': 'Dummy inference'
                     }
                     predictions.append(pred_info)
-                    
-        else:
-            print(f"Using external input from: {args.input_images}")
-            try:
-                # For external inputs, we'll use a simple approach with dummy data
-                # since we don't have torchvision for image loading
-                print("Note: External image loading requires torchvision. Using dummy data instead.")
-                
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                model.to(device)
-                
-                # Create dummy batch for demonstration
-                dummy_batch = torch.randn(4, 3, 224, 224).to(device)
-                with torch.no_grad():
-                    outputs = model(dummy_batch)
-                    probabilities = F.softmax(outputs, dim=1)
-                    confidences, predicted = torch.max(probabilities, 1)
-                    
-                    for i in range(len(dummy_batch)):
-                        pred_info = {
-                            'sample': i,
-                            'predicted_label': int(predicted[i].item()),
-                            'predicted_class': class_labels.get(str(int(predicted[i].item())), f"class_{int(predicted[i].item())}"),
-                            'confidence': float(confidences[i].item()),
-                            'note': 'Dummy data - external input not fully supported without torchvision',
-                            'all_probabilities': {
-                                class_labels.get(str(j), f"class_{j}"): float(probabilities[i][j].item())
-                                for j in range(len(class_labels))
-                            }
-                        }
-                        predictions.append(pred_info)
-                
-                print(f"Created {len(predictions)} dummy predictions for demonstration")
-                    
-            except Exception as e:
-                print(f"Error with external input: {e}")
 
-        # Prepare results
+        final_class_mapping = {}
+        for i in range(actual_num_classes):
+            if real_class_names and i < len(real_class_names):
+                final_class_mapping[str(i)] = real_class_names[i]
+            else:
+                final_class_mapping[str(i)] = class_labels_json.get(str(i), f"class_{i}")
+
         inference_results = {
-            'model_info': model_config.get('model_info', {}),
+            'model_info': model_config_data.get('model_info', {}),
             'inference_config': inference_config,
             'total_predictions': len(predictions),
             'predictions': predictions,
-            'class_mapping': class_labels,
+            'class_mapping': final_class_mapping,
             'input_source': 'test_data' if args.input_images == "-1" else 'external_input',
             'summary': {
                 'samples_processed': len(predictions),
@@ -344,7 +309,6 @@ implementation:
             }
         }
 
-        # Save results
         os.makedirs(os.path.dirname(args.inference_results) or ".", exist_ok=True)
         with open(args.inference_results, 'w') as f:
             json.dump(inference_results, f, indent=2)
@@ -354,8 +318,8 @@ implementation:
             json.dump(predictions, f, indent=2)
 
         print(f"Inference completed. Processed {len(predictions)} samples.")
-        print(f"Input source: {'Test data' if args.input_images == '-1' else 'External input'}")
-        print(f"Results saved to {args.inference_results}")
+        print("Real class names used:", real_class_names)
+        print("Results saved")
 
     args:
       - --model_weights
