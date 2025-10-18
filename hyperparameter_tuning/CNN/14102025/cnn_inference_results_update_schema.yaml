@@ -1,4 +1,4 @@
-name: CNN Store Inference Results
+name: 2 CNN Store Inference Results
 description: Stores CNN inference results in database schema with basic columns
 inputs:
   - name: schema_id
@@ -36,7 +36,6 @@ implementation:
         import json
         import argparse
         import requests
-        from datetime import datetime
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--schema_id', type=str, required=True)
@@ -71,18 +70,14 @@ implementation:
         predicted_class = representative_pred.get("predicted_class", "unknown")
         confidence = representative_pred.get("confidence", 0)
 
-        # Prepare data matching your schema structure with basic columns only
+        # Prepare data with ONLY columns that exist in your schema
         schema_data = {
-            # Existing columns from SLM schema
+            # Existing columns that are confirmed to be in your schema
             "tenant_id": tenant_id,
             "project_id": args.project_id,
             "execution_id": args.execution_id,
-            "inference_input": "image_classification",
-            "inference_output": predicted_class,
-            "inference_score_blue": None,  # Not used for CNN
-            "inference_score_rouge": None, # Not used for CNN
             
-            # New basic CNN columns
+            # New basic CNN columns you added
             "model_id": args.model_id,
             "architecture_type": args.architecture_type,
             "inference_confidence": float(confidence),
