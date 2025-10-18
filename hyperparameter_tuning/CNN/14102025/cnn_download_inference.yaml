@@ -1,5 +1,5 @@
-name: CNN Download Artifacts
-description: Downloads CNN model artifacts from CDN URLs for inference
+name: 2 CNN Download Artifacts
+description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
     type: String
@@ -46,8 +46,8 @@ implementation:
       - python3
       - -u
       - -c
-      - |
-        import argparse, os, requests, json
+        import argparse, os, requests, json, pickle
+        import io
 
         parser = argparse.ArgumentParser(description="Download CNN model artifacts from CDN URLs.")
         parser.add_argument('--model_weights_url', type=str, required=True)
@@ -66,23 +66,202 @@ implementation:
 
         def download_file(url, output_path, description):
             print(f"Fetching {description} from: {url}")
-            # Handle URL encoding issues
             url = url.replace("$$", "$$$").replace("%24%24", "$$")
             r = requests.get(url)
             r.raise_for_status()
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             with open(output_path, "wb") as f:
                 f.write(r.content)
-            print(f" {description} saved to {output_path}")
+            print(f"{description} saved to {output_path}")
             return output_path
 
-        # Download all artifacts
         download_file(args.model_weights_url, args.model_weights, "model weights")
         download_file(args.model_config_url, args.model_config, "model config")
         download_file(args.class_labels_url, args.class_labels, "class labels")
         download_file(args.inference_config_url, args.inference_config, "inference config")
         download_file(args.preprocess_data_url, args.preprocess_data, "preprocessed data")
 
+        print("DEBUG INFORMATION - PRINTING ALL CONFIGURATIONS")
+
+        print("MODEL CONFIG:")
+        with open(args.model_config, 'r') as f:
+            model_config = json.load(f)
+        print(json.dumps(model_config, indent=2))
+        
+        model_info = model_config.get('model_info', {})
+        if 'output_dim' not in model_info and 'num_classes' not in model_info:
+            print("WARNING: output_dim or num_classes not found in model config")
+        else:
+            output_dim = model_info.get('output_dim') or model_info.get('num_classes')
+            print(f"Model output dimension: {output_dim}")
+
+        print("CLASS LABELS:")
+        with open(args.class_labels, 'r') as f:
+            class_labels = json.load(f)
+        print(f"Number of classes: {len(class_labels)}")
+        print("Class mapping:")
+        for class_id, class_name in class_labels.items():
+            print(f"  {class_id} -> {class_name}")
+
+        print("INFERENCE CONFIG:")
+        with open(args.inference_config, 'r') as f:
+            inference_config = json.load(f)
+        print(json.dumps(inference_config, indent=2))
+
+        print("PREPROCESSED DATA ANALYSIS:")
+        try:
+            with open(args.preprocess_data, 'rb') as f:
+                raw_data = f.read()
+            
+            class LabeledDataset:
+                def __init__(self, dataset=None, label_mapping=None):
+                    self.dataset = dataset or []
+                    self.label_mapping = label_mapping or {}
+                def __len__(self):
+                    try:
+                        if hasattr(self.dataset, '__len__'):
+                            return len(self.dataset)
+                        return 100
+                    except:
+                        return 100
+                def __getitem__(self, idx):
+                    try:
+                        if hasattr(self.dataset, '__getitem__'):
+                            item = self.dataset[idx]
+                            if isinstance(item, tuple) and len(item) == 2:
+                                data, label = item
+                            elif isinstance(item, dict):
+                                data = item.get('image_data')
+                                label = item.get('label', 0)
+                                return data, label
+                            else:
+                                return item, 0
+                    except:
+                        pass
+                    return "dummy_data", 0
+
+            class SimpleDataset:
+                def __init__(self, data=None):
+                    self.data = data or []
+                def __len__(self):
+                    try:
+                        if hasattr(self.data, '__len__'):
+                            length = len(self.data)
+                            if length > 0:
+                                return length
+                    except:
+                        pass
+                    return 100
+                def __getitem__(self, idx):
+                    try:
+                        if hasattr(self.data, '__getitem__'):
+                            item = self.data[idx]
+                            if isinstance(item, tuple) and len(item) == 2:
+                                return item
+                            elif isinstance(item, dict):
+                                data = item.get('image_data')
+                                label = item.get('label', 0)
+                                return data, label
+                            else:
+                                return item, 0
+                    except:
+                        pass
+                    return "dummy_data", 0
+
+            class DataWrapper:
+                def __init__(self, data_dict=None):
+                    if data_dict:
+                        self.__dict__.update(data_dict)
+
+            class SafeUnpickler(pickle.Unpickler):
+                def find_class(self, module, name):
+                    try:
+                        return super().find_class(module, name)
+                    except:
+                        if name == 'LabeledDataset':
+                            return LabeledDataset
+                        elif name == 'DataWrapper':
+                            return DataWrapper
+                        elif name == 'SimpleDataset':
+                            return SimpleDataset
+                        else:
+                            class FallbackClass:
+                                def __init__(self, *args, **kwargs):
+                                    pass
+                            return FallbackClass
+
+            processed_data = SafeUnpickler(io.BytesIO(raw_data)).load()
+            print("Preprocessed data loaded successfully")
+            
+            print(f"Data type: {type(processed_data)}")
+            print(f"Data attributes: {[attr for attr in dir(processed_data) if not attr.startswith('_')]}")
+            
+            found_output_dim = None
+            
+            if hasattr(processed_data, 'class_names'):
+                print(f"Found class_names: {processed_data.class_names}")
+                found_output_dim = len(processed_data.class_names)
+                print(f"Number of classes in data: {found_output_dim}")
+                
+            if hasattr(processed_data, 'num_classes'):
+                print(f"Found num_classes: {processed_data.num_classes}")
+                found_output_dim = processed_data.num_classes
+                
+            if hasattr(processed_data, 'label_mapping'):
+                print(f"Found label_mapping: {processed_data.label_mapping}")
+                if found_output_dim is None:
+                    found_output_dim = len(processed_data.label_mapping)
+                    
+            if hasattr(processed_data, 'train_loader'):
+                print("Found train_loader")
+                
+            if hasattr(processed_data, 'test_loader'):
+                print("Found test_loader")
+                try:
+                    test_loader = processed_data.test_loader
+                    if hasattr(test_loader, 'dataset'):
+                        dataset = test_loader.dataset
+                        print(f"Test dataset length: {len(dataset)}")
+                        if hasattr(dataset, 'classes'):
+                            print(f"Dataset classes: {dataset.classes}")
+                            if found_output_dim is None:
+                                found_output_dim = len(dataset.classes)
+                except Exception as e:
+                    print(f"Could not analyze test_loader: {e}")
+                    
+            if found_output_dim:
+                print(f"OUTPUT_DIM FOUND FROM DATA: {found_output_dim}")
+                
+                if 'output_dim' not in model_info and 'num_classes' not in model_info:
+                    print("SUGGESTION: Add output_dim to model config:")
+                    print(f'  "output_dim": {found_output_dim}')
+                else:
+                    config_output_dim = model_info.get('output_dim') or model_info.get('num_classes')
+                    if config_output_dim != found_output_dim:
+                        print(f"WARNING: Config output_dim ({config_output_dim}) != Data output_dim ({found_output_dim})")
+                    else:
+                        print("SUCCESS: Config output_dim matches data output_dim")
+            else:
+                print("WARNING: Could not determine output_dim from data")
+                
+        except Exception as e:
+            print(f"Error analyzing preprocessed data: {e}")
+            import traceback
+            traceback.print_exc()
+
+        print("CONSISTENCY CHECK:")
+        expected_classes = model_info.get('output_dim') or model_info.get('num_classes')
+        actual_classes = len(class_labels)
+        
+        if expected_classes and actual_classes:
+            if expected_classes == actual_classes:
+                print(f"SUCCESS: Model output_dim ({expected_classes}) matches class labels count ({actual_classes})")
+            else:
+                print(f"ERROR: Model output_dim ({expected_classes}) != class labels count ({actual_classes})")
+        else:
+            print("WARNING: Cannot perform consistency check - missing output_dim or class labels")
+
+        print("DEBUG COMPLETE")
         print("All CNN artifacts downloaded successfully")
 
     args:
