@@ -1,0 +1,137 @@
+name: 2 CNN Store Inference Results
+description: Stores CNN inference results in database schema with basic columns
+inputs:
+  - name: schema_id
+    type: String
+  - name: inference_results
+    type: String
+  - name: model_id
+    type: String
+  - name: execution_id
+    type: String
+  - name: tenant_id
+    type: string
+  - name: project_id
+    type: String
+  - name: architecture_type
+    type: String
+  - name: bearer_auth_token
+    type: string
+  - name: domain
+    type: String
+
+implementation:
+  container:
+    image: python:3.9-slim
+    command:
+      - sh
+      - -c
+      - |
+        pip install requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        import requests
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--schema_id', type=str, required=True)
+        parser.add_argument('--inference_results', type=str, required=True)
+        parser.add_argument('--model_id', type=str, required=True)
+        parser.add_argument('--execution_id', type=str, required=True)
+        parser.add_argument('--tenant_id', type=str, required=True)
+        parser.add_argument('--project_id', type=str, required=True)
+        parser.add_argument('--architecture_type', type=str, required=True)
+        parser.add_argument('--bearer_auth_token', type=str, required=True)
+        parser.add_argument('--domain', type=str, required=True)
+        args = parser.parse_args()
+
+        # Read auth token and tenant_id
+        with open(args.bearer_auth_token, 'r') as f:
+            bearer_auth_token = f.read().strip()
+        with open(args.tenant_id, 'r') as f:
+            tenant_id = f.read().strip()
+
+        # Load CNN inference results
+        with open(args.inference_results, 'r') as f:
+            cnn_data = json.load(f)
+
+        print("=== Processing CNN Inference Results ===")
+        
+        # Extract predictions for summary
+        predictions = cnn_data.get("predictions", [])
+        total_samples = len(predictions)
+        
+        # Get most common prediction as representative output
+        representative_pred = predictions[0] if predictions else {}
+        predicted_class = representative_pred.get("predicted_class", "unknown")
+        confidence = representative_pred.get("confidence", 0)
+
+        # Prepare data with CORRECT column names from original SLM schema
+        schema_data = {
+            # Required fields from original SLM schema - CORRECTED NAMES
+            "tenant_id": tenant_id,
+            "project_id": args.project_id,
+            "execution_id": args.execution_id,
+            "infernce_input": "image_classification",  # CORRECTED: missing 'e'
+            "infernce_output": predicted_class,        # CORRECTED: missing 'e'
+            "infernce_score_blue": 0.0,                # CORRECTED: missing 'e'
+            "inference_score_rouge": 0.0,              # This one was correct
+            
+            # New basic CNN columns you added
+            "model_id": args.model_id,
+            "architecture_type": args.architecture_type,
+            "inference_confidence": float(confidence),
+            "predicted_class": predicted_class,
+            "total_samples": total_samples
+        }
+
+        print("=== Prepared Schema Data ===")
+        print(json.dumps(schema_data, indent=2))
+
+        # API call to store data
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {bearer_auth_token}'
+        }
+
+        create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
+        create_payload = {
+            "data": [schema_data]
+        }
+
+        try:
+            response = requests.post(create_url, headers=headers, json=create_payload, timeout=60)
+            response.raise_for_status()
+            print("Successfully stored CNN inference results")
+            print(f"Response: {response.json()}")
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error storing results: {e}")
+            if e.response is not None:
+                print(f"Status Code: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
+            exit(1)
+
+    args:
+      - --schema_id
+      - {inputValue: schema_id}
+      - --inference_results
+      - {inputPath: inference_results}
+      - --model_id
+      - {inputValue: model_id}
+      - --execution_id
+      - {inputValue: execution_id}
+      - --tenant_id
+      - {inputPath: tenant_id}
+      - --project_id
+      - {inputValue: project_id}
+      - --architecture_type
+      - {inputValue: architecture_type}
+      - --bearer_auth_token
+      - {inputPath: bearer_auth_token}
+      - --domain
+      - {inputValue: domain}
