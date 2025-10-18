@@ -1,0 +1,108 @@
+name: CNN Download Artifacts
+description: Downloads CNN model artifacts from CDN URLs for inference
+inputs:
+  - name: model_weights_url
+    type: String
+    description: URL to fetch the model weights file
+  - name: model_config_url
+    type: String
+    description: URL to fetch the model configuration
+  - name: class_labels_url
+    type: String
+    description: URL to fetch class labels mapping
+  - name: inference_config_url
+    type: String
+    description: URL to fetch inference configuration
+  - name: preprocess_data_url
+    type: String
+    description: URL to fetch preprocessed dataset
+outputs:
+  - name: model_weights
+    type: Model
+    description: Downloaded model weights
+  - name: model_config
+    type: String
+    description: Downloaded model configuration
+  - name: class_labels
+    type: String
+    description: Downloaded class labels
+  - name: inference_config
+    type: String
+    description: Downloaded inference configuration
+  - name: preprocess_data
+    type: Dataset
+    description: Downloaded preprocessed dataset
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse, os, requests, json
+
+        parser = argparse.ArgumentParser(description="Download CNN model artifacts from CDN URLs.")
+        parser.add_argument('--model_weights_url', type=str, required=True)
+        parser.add_argument('--model_config_url', type=str, required=True)
+        parser.add_argument('--class_labels_url', type=str, required=True)
+        parser.add_argument('--inference_config_url', type=str, required=True)
+        parser.add_argument('--preprocess_data_url', type=str, required=True)
+        
+        parser.add_argument('--model_weights', type=str, required=True)
+        parser.add_argument('--model_config', type=str, required=True)
+        parser.add_argument('--class_labels', type=str, required=True)
+        parser.add_argument('--inference_config', type=str, required=True)
+        parser.add_argument('--preprocess_data', type=str, required=True)
+        
+        args = parser.parse_args()
+
+        def download_file(url, output_path, description):
+            print(f"Fetching {description} from: {url}")
+            # Handle URL encoding issues
+            url = url.replace("$$", "$$$").replace("%24%24", "$$")
+            r = requests.get(url)
+            r.raise_for_status()
+            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+            print(f" {description} saved to {output_path}")
+            return output_path
+
+        # Download all artifacts
+        download_file(args.model_weights_url, args.model_weights, "model weights")
+        download_file(args.model_config_url, args.model_config, "model config")
+        download_file(args.class_labels_url, args.class_labels, "class labels")
+        download_file(args.inference_config_url, args.inference_config, "inference config")
+        download_file(args.preprocess_data_url, args.preprocess_data, "preprocessed data")
+
+        print("All CNN artifacts downloaded successfully")
+
+    args:
+      - --model_weights_url
+      - { inputValue: model_weights_url }
+      - --model_config_url
+      - { inputValue: model_config_url }
+      - --class_labels_url
+      - { inputValue: class_labels_url }
+      - --inference_config_url
+      - { inputValue: inference_config_url }
+      - --preprocess_data_url
+      - { inputValue: preprocess_data_url }
+      - --model_weights
+      - { outputPath: model_weights }
+      - --model_config
+      - { outputPath: model_config }
+      - --class_labels
+      - { outputPath: class_labels }
+      - --inference_config
+      - { outputPath: inference_config }
+      - --preprocess_data
+      - { outputPath: preprocess_data }
