@@ -1,0 +1,240 @@
+name: CNN Inference
+description: Runs CNN inference on images using downloaded model artifacts
+inputs:
+  - name: model_weights
+    type: Model
+    description: Trained CNN model weights
+  - name: model_config
+    type: String
+    description: Model configuration JSON
+  - name: class_labels
+    type: String
+    description: Class labels mapping JSON
+  - name: inference_config
+    type: String
+    description: Inference configuration JSON
+  - name: preprocess_data
+    type: Dataset
+    description: Preprocessed dataset for reference
+  - name: input_images
+    type: Dataset
+    description: Input images for inference (optional - can use test data)
+outputs:
+  - name: inference_results
+    type: String
+    description: JSON results of inference predictions
+  - name: predictions
+    type: Dataset
+    description: Detailed predictions with confidence scores
+
+implementation:
+  container:
+    image: gurpreetgandhi/nesy-factory:v19
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse, os, torch, json, pickle, numpy as np
+        from PIL import Image
+        import torch.nn.functional as F
+        from torchvision import transforms
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--model_weights', type=str, required=True)
+        parser.add_argument('--model_config', type=str, required=True)
+        parser.add_argument('--class_labels', type=str, required=True)
+        parser.add_argument('--inference_config', type=str, required=True)
+        parser.add_argument('--preprocess_data', type=str, required=True)
+        parser.add_argument('--input_images', type=str, required=False)
+        parser.add_argument('--inference_results', type=str, required=True)
+        parser.add_argument('--predictions', type=str, required=True)
+        args = parser.parse_args()
+
+        # Load configurations
+        with open(args.model_config, 'r') as f:
+            model_config = json.load(f)
+        with open(args.class_labels, 'r') as f:
+            class_labels = json.load(f)
+        with open(args.inference_config, 'r') as f:
+            inference_config = json.load(f)
+
+        print("Loaded configurations:")
+        print(f"Model: {model_config.get('model_info', {}).get('name', 'Unknown')}")
+        print(f"Classes: {len(class_labels)}")
+        print(f"Inference config: {inference_config}")
+
+        # Load model
+        try:
+            sys.path.insert(0, '/usr/local/lib/python3.10/site-packages')
+            from nesy_factory.CNNs.registry import create_model as create_cnn_model
+            
+            model_architecture = model_config.get('model_info', {}).get('architecture', 'resnet')
+            model = create_cnn_model(model_architecture, model_config.get('model_info', {}))
+            
+            checkpoint = torch.load(args.model_weights, map_location='cpu')
+            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+            else:
+                model.load_state_dict(checkpoint)
+            
+            model.eval()
+            print(f"Model loaded: {model_architecture}")
+            
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            # Fallback to basic CNN
+            import torch.nn as nn
+            class SimpleCNN(nn.Module):
+                def __init__(self, num_classes):
+                    super(SimpleCNN, self).__init__()
+                    self.features = nn.Sequential(
+                        nn.Conv2d(3, 64, kernel_size=3, padding=1),
+                        nn.ReLU(),
+                        nn.MaxPool2d(2),
+                        nn.Conv2d(64, 128, kernel_size=3, padding=1),
+                        nn.ReLU(),
+                        nn.MaxPool2d(2),
+                    )
+                    self.classifier = nn.Linear(128 * 56 * 56, num_classes)
+                
+                def forward(self, x):
+                    x = self.features(x)
+                    x = x.view(x.size(0), -1)
+                    x = self.classifier(x)
+                    return x
+            
+            num_classes = len(class_labels)
+            model = SimpleCNN(num_classes)
+            checkpoint = torch.load(args.model_weights, map_location='cpu')
+            model.load_state_dict(checkpoint)
+            model.eval()
+            print("Loaded fallback SimpleCNN model")
+
+        # Create preprocessing transforms
+        preprocess_config = inference_config.get('preprocessing', {})
+        transform = transforms.Compose([
+            transforms.Resize(preprocess_config.get('resize', [224, 224])),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=preprocess_config.get('mean', [0.485, 0.456, 0.406]),
+                std=preprocess_config.get('std', [0.229, 0.224, 0.225])
+            )
+        ])
+
+        # Load test data for inference if no input images provided
+        predictions = []
+        try:
+            with open(args.preprocess_data, 'rb') as f:
+                dataset = pickle.load(f)
+            
+            if hasattr(dataset, 'test_loader'):
+                test_loader = dataset.test_loader
+                print("Using test data from preprocessed dataset")
+                
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                model.to(device)
+                
+                all_predictions = []
+                with torch.no_grad():
+                    for batch_idx, (images, labels) in enumerate(test_loader):
+                        if batch_idx >= 10:  # Limit to first 10 batches for demo
+                            break
+                        
+                        images = images.to(device)
+                        outputs = model(images)
+                        probabilities = F.softmax(outputs, dim=1)
+                        confidences, predicted = torch.max(probabilities, 1)
+                        
+                        for i in range(len(images)):
+                            pred_info = {
+                                'batch': batch_idx,
+                                'sample': i,
+                                'true_label': int(labels[i].item()),
+                                'true_class': class_labels.get(str(int(labels[i].item())), f"class_{int(labels[i].item())}"),
+                                'predicted_label': int(predicted[i].item()),
+                                'predicted_class': class_labels.get(str(int(predicted[i].item())), f"class_{int(predicted[i].item())}"),
+                                'confidence': float(confidences[i].item()),
+                                'all_probabilities': {
+                                    class_labels.get(str(j), f"class_{j}"): float(probabilities[i][j].item())
+                                    for j in range(len(class_labels))
+                                }
+                            }
+                            all_predictions.append(pred_info)
+                            predictions.append(pred_info)
+                
+                print(f"Processed {len(all_predictions)} test samples")
+                
+            else:
+                print("No test loader found in dataset, using dummy inference")
+                # Create dummy inference
+                dummy_image = torch.randn(1, 3, 224, 224)
+                with torch.no_grad():
+                    output = model(dummy_image)
+                    probabilities = F.softmax(output, dim=1)
+                    confidence, predicted = torch.max(probabilities, 1)
+                    
+                    pred_info = {
+                        'sample': 'dummy',
+                        'predicted_label': int(predicted.item()),
+                        'predicted_class': class_labels.get(str(int(predicted.item())), f"class_{int(predicted.item())}"),
+                        'confidence': float(confidence.item()),
+                        'note': 'Dummy inference - no real data provided'
+                    }
+                    predictions.append(pred_info)
+                    
+        except Exception as e:
+            print(f"Error during inference: {e}")
+            # Create fallback result
+            pred_info = {
+                'error': str(e),
+                'note': 'Inference failed, check model and data compatibility'
+            }
+            predictions.append(pred_info)
+
+        # Prepare results
+        inference_results = {
+            'model_info': model_config.get('model_info', {}),
+            'inference_config': inference_config,
+            'total_predictions': len(predictions),
+            'predictions': predictions,
+            'class_mapping': class_labels,
+            'summary': {
+                'samples_processed': len(predictions),
+                'average_confidence': np.mean([p.get('confidence', 0) for p in predictions if 'confidence' in p]) if predictions else 0
+            }
+        }
+
+        # Save results
+        os.makedirs(os.path.dirname(args.inference_results) or ".", exist_ok=True)
+        with open(args.inference_results, 'w') as f:
+            json.dump(inference_results, f, indent=2)
+
+        os.makedirs(os.path.dirname(args.predictions) or ".", exist_ok=True)
+        with open(args.predictions, 'w') as f:
+            json.dump(predictions, f, indent=2)
+
+        print(f"Inference completed. Processed {len(predictions)} samples.")
+        print(f"Results saved to {args.inference_results}")
+
+    args:
+      - --model_weights
+      - { inputPath: model_weights }
+      - --model_config
+      - { inputPath: model_config }
+      - --class_labels
+      - { inputPath: class_labels }
+      - --inference_config
+      - { inputPath: inference_config }
+      - --preprocess_data
+      - { inputPath: preprocess_data }
+      - --input_images
+      - { inputPath: input_images }
+      - --inference_results
+      - { outputPath: inference_results }
+      - --predictions
+      - { outputPath: predictions }
