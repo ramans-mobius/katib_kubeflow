@@ -1,4 +1,4 @@
-name: CNN Inference
+name: 2 CNN Inference
 description: Runs CNN inference on images using downloaded model artifacts
 inputs:
   - name: model_weights
@@ -125,7 +125,6 @@ implementation:
 
         # Simple image preprocessing without torchvision
         def simple_preprocess(image_tensor, target_size=(224, 224)):
-            """Basic image preprocessing without torchvision"""
             if len(image_tensor.shape) == 3:
                 image_tensor = image_tensor.unsqueeze(0)
             
