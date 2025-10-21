@@ -1,4 +1,4 @@
-name: 2 DQN RLAF Loop CNN
+name: 3 DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
@@ -161,7 +161,6 @@ implementation:
                 raise
 
         def get_default_action(rlaf_actions, current_metrics):
-            """Get a sensible default action based on current metrics"""
             if not rlaf_actions:
                 return {
                     'id': 0,
@@ -187,7 +186,6 @@ implementation:
                 return next((a for a in rlaf_actions if a["id"] == 3), rlaf_actions[0])
 
         def trigger_and_wait_for_dqn_pipeline_with_fallback(config, pipeline_domain, dqn_params, max_wait_minutes=5):
-            """Trigger DQN pipeline with timeout and fallback handling"""
             print("Attempting to trigger DQN pipeline...")
             
             # Try to trigger the pipeline
@@ -221,7 +219,6 @@ implementation:
             return False
 
         def simple_model_retraining(action, model_path, output_model_path, previous_metrics):
-            """Simplified model retraining that always works"""
             try:
                 # Load the existing model
                 model = torch.load(model_path, map_location=torch.device('cpu'))
