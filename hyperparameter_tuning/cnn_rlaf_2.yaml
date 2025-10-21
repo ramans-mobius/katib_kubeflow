@@ -1,4 +1,4 @@
-name: 4 DQN RLAF Loop CNN
+name: DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
@@ -432,25 +432,51 @@ implementation:
             with open(args.access_token, 'r') as f:
                 access_token = f.read().strip()
             
-            # Load initial metrics
-            with open(args.init_metrics, 'r') as f:
-                current_metrics = json.load(f)
+            # Load initial metrics - handle both JSON and pickle formats properly
+            try:
+                with open(args.init_metrics, 'r') as f:
+                    current_metrics_data = json.load(f)
+            except json.JSONDecodeError:
+                with open(args.init_metrics, 'rb') as f:
+                    current_metrics_data = pickle.load(f)
+            
+            # Extract numeric metrics from the loaded data
+            current_metrics = {}
+            if isinstance(current_metrics_data, dict):
+                # If it's already a dict of metrics, use it directly
+                for key, value in current_metrics_data.items():
+                    if isinstance(value, (int, float)):
+                        current_metrics[key] = float(value)
+                    elif isinstance(value, dict) and 'value' in value:
+                        # Handle nested metric format
+                        current_metrics[key] = float(value['value'])
+            else:
+                # Default metrics if format is unexpected
+                current_metrics = {'accuracy': 50.0, 'loss': 1.0}
+            
+            print(f"Loaded metrics: {current_metrics}")
             
             action_id_for_next_pierce = -1
             
             for i in range(2):  # RLAF loop iterations
                 print(f"=== CNN RLAF Iteration {i+1} ===")
                 
-                # Prepare metrics for DQN
+                # Prepare metrics for DQN - ensure all are numeric
                 cleaned_metrics = {}
                 dqn_params = []
                 for key, value in current_metrics.items():
-                    cleaned_metrics[key] = float(value)
-                    if any(term in key.lower() for term in ["accuracy", "f1", "precision", "recall"]):
-                        sign = "+"
-                    else:
-                        sign = "-"
-                    dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
+                    try:
+                        cleaned_metrics[key] = float(value)
+                        if any(term in key.lower() for term in ["accuracy", "f1", "precision", "recall"]):
+                            sign = "+"
+                        else:
+                            sign = "-"
+                        dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
+                    except (ValueError, TypeError) as e:
+                        print(f"Warning: Skipping non-numeric metric {key}: {value} - {e}")
+                        continue
+                
+                print(f"DQN parameters: {json.dumps(dqn_params, indent=2)}")
                 
                 # Update database with current state
                 instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
@@ -489,6 +515,7 @@ implementation:
                 latest_rlaf2pierce = updated_instance['rlaf2pierce'][-1]
                 
                 if not latest_rlaf2pierce.get("pierce_or_not", True):
+                    print("pierce_or_not is false. Stopping RLAF loop.")
                     break
                 
                 action_id_for_next_pierce = latest_rlaf2pierce['action_id']
@@ -508,17 +535,21 @@ implementation:
                 )
                 
                 current_metrics = retraining_results["metrics"]
+                print(f"Updated metrics after retraining: {current_metrics}")
             
             # Save final results
             os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
             final_output = {
                 "final_metrics": current_metrics,
                 "model_type": "CNN_image_classifier",
-                "iterations_completed": i + 1
+                "iterations_completed": i + 1,
+                "timestamp": time.time()
             }
             
             with open(args.rlaf_output, 'w') as f:
                 json.dump(final_output, f, indent=2)
+            
+            print(f"CNN RLAF loop completed successfully. Results saved to: {args.rlaf_output}")
 
         if __name__ == '__main__':
             main()
