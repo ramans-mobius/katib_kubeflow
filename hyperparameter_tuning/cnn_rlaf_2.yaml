@@ -1,4 +1,4 @@
-name: 3 DQN RLAF Loop CNN
+name: 4 DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
@@ -16,6 +16,7 @@ inputs:
 outputs:
   - {name: rlaf_output, type: Dataset}
   - {name: retrained_model, type: Model}
+
 implementation:
   container:
     image: gurpreetgandhi/nesy-factory:v19
@@ -23,6 +24,8 @@ implementation:
       - sh
       - -c
       - |
+        python3 -m pip install --quiet requests || \
+        python3 -m pip install --quiet requests --user
         exec "$0" "$@"
       - python3
       - -u
@@ -33,49 +36,21 @@ implementation:
         import json
         import argparse
         import requests
+        import pickle
+        import time
+        import numpy as np
+        from typing import Dict, List, Any
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
-        import time
-        import pickle
-        from typing import List, Dict, Any
-        import numpy as np
         from torch.utils.data import DataLoader
         import torch.nn as nn
         import torch.optim as optim
-        import shutil
+        from nesy_factory.CNNs.factory import CNNFactory
 
-        # Define helper classes for pickle compatibility
-        class LabeledDataset:
-            def __init__(self, dataset=None, label_mapping=None):
-                self.dataset = dataset or []
-                self.label_mapping = label_mapping or {}
-            def __len__(self):
-                try:
-                    if hasattr(self.dataset, '__len__'):
-                        return len(self.dataset)
-                    return 100
-                except:
-                    return 100
-            def __getitem__(self, idx):
-                try:
-                    if hasattr(self.dataset, '__getitem__'):
-                        item = self.dataset[idx]
-                        if isinstance(item, tuple) and len(item) == 2:
-                            data, label = item
-                        elif isinstance(item, dict):
-                            data = item.get('image_data')
-                            label = item.get('label', 0)
-                            return data, label
-                        else:
-                            return item, 0
-                except:
-                    pass
-                return torch.randn(3, 224, 224), 0
-
-        # API/DB Helper Functions
+        # API Helper Functions
         def get_retry_session():
             retry_strategy = Retry(
-                total=3,
+                total=5,
                 status_forcelist=[500, 502, 503, 504],
                 backoff_factor=1
             )
@@ -90,173 +65,351 @@ implementation:
             url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/trigger/ml?pipelineId={config['pipeline_id']}"
             pipeline_params = {"param_json": json.dumps(dqn_params)} if dqn_params else {}
             payload = json.dumps({
-                "pipelineType": "ML", "containerResources": {}, "experimentId": config['experiment_id'],
-                "enableCaching": True, "parameters": pipeline_params, "version": 1
+                "pipelineType": "ML", 
+                "containerResources": {}, 
+                "experimentId": config['experiment_id'],
+                "enableCaching": True, 
+                "parameters": pipeline_params, 
+                "version": 1
             })
-            print(f"Triggering DQN pipeline with payload: {payload}")
             headers = {
-                'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}",
+                'accept': 'application/json', 
+                'Authorization': f"Bearer {config['access_token']}",
                 'Content-Type': 'application/json'
             }
-            try:
-                response = http.post(url, headers=headers, data=payload, timeout=30)
-                response.raise_for_status()
-                result = response.json()
-                print(f"Triggered pipeline. Response: {result}")
-                return result['runId']
-            except Exception as e:
-                print(f"Error triggering pipeline: {e}")
-                return None
+            response = http.post(url, headers=headers, data=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            return result['runId']
 
         def get_pipeline_status(config, pipeline_domain):
-            if not config.get('run_id'):
-                return 'UNKNOWN'
-                
             http = get_retry_session()
             url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/{config['pipeline_id']}/status/ml/{config['run_id']}"
-            headers = {'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}"}
-            try:
-                response = http.get(url, headers=headers, timeout=30)
-                response.raise_for_status()
-                pipeline_status = response.json()
-                state = pipeline_status['run_details']['state']
-                print(f"Pipeline status: {state}")
-                return state
-            except Exception as e:
-                print(f"Error getting pipeline status: {e}")
-                return 'UNKNOWN'
+            headers = {
+                'accept': 'application/json', 
+                'Authorization': f"Bearer {config['access_token']}"
+            }
+            response = http.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            pipeline_status = response.json()
+            latest_state = pipeline_status['run_details']['state_history'][-1]
+            return latest_state['state']
 
         def get_instance(access_token, domain, schema_id, model_id):
             http = get_retry_session()
             url = f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list"
-            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-            payload = {"dbType": "TIDB", "ownedOnly": True, "filter": {"model_id": model_id}}
-            try:
-                response = http.post(url, headers=headers, json=payload, timeout=30)
-                response.raise_for_status()
-                data = response.json()
-                if data.get('content'):
-                    return data['content'][0]
-                else:
-                    raise ValueError(f"No instance found for model_id {model_id}")
-            except Exception as e:
-                print(f"Error getting instance: {e}")
-                raise
+            headers = {
+                "Authorization": f"Bearer {access_token}", 
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "dbType": "TIDB", 
+                "ownedOnly": True, 
+                "filter": {"model_id": model_id}
+            }
+            response = http.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            if not data['content']:
+                raise ValueError(f"No instance found for model_id: {model_id}")
+            return data['content'][0]
 
         def update_instance_field(access_token, domain, schema_id, model_id, field, value):
             http = get_retry_session()
             url = f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances"
-            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            headers = {
+                "Authorization": f"Bearer {access_token}", 
+                "Content-Type": "application/json"
+            }
             payload = {
                 "dbType": "TIDB",
-                "conditionalFilter": {"conditions": [{"field": "model_id", "operator": "EQUAL", "value": model_id}]},
-                "partialUpdateRequests": [{"patch": [{"operation": "REPLACE", "path": f"{field}", "value": value}]}]
+                "conditionalFilter": {
+                    "conditions": [{
+                        "field": "model_id", 
+                        "operator": "EQUAL", 
+                        "value": model_id
+                    }]
+                },
+                "partialUpdateRequests": [{
+                    "patch": [{
+                        "operation": "REPLACE", 
+                        "path": f"{field}", 
+                        "value": value
+                    }]
+                }]
             }
-            try:
-                response = http.patch(url, headers=headers, data=json.dumps(payload), timeout=30)
-                response.raise_for_status()
-                print(f"Successfully updated field '{field}' for model_id '{model_id}'")
-            except Exception as e:
-                print(f"Error updating instance field: {e}")
-                raise
+            response = http.patch(url, headers=headers, data=json.dumps(payload), timeout=30)
+            response.raise_for_status()
 
-        def get_default_action(rlaf_actions, current_metrics):
-            if not rlaf_actions:
+        # CNN Continual Learning Trainer
+        class CNNContinualTrainer:
+            def __init__(self, config: Dict[str, Any]):
+                self.config = config
+                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                
+            def train_continual_cnn(self, tasks: List[Dict], model, strategies: List[str] = ['naive']) -> Dict[str, Any]:
+                results = {}
+                for strategy_name in strategies:
+                    strategy_results = self._train_single_strategy(tasks, strategy_name, model)
+                    results[strategy_name] = strategy_results
+                return results
+            
+            def _train_single_strategy(self, tasks: List[Dict], strategy_name: str, model) -> Dict[str, Any]:
+                task_metrics = []
+                all_task_performance = []
+                previous_task_data = []
+                
+                model.to(self.device)
+                
+                for task_idx, task_data in enumerate(tasks):
+                    # Apply strategy-specific training
+                    if strategy_name == 'naive':
+                        training_loader = task_data['train_loader']
+                    elif strategy_name == 'replay' and previous_task_data:
+                        training_loader = self._create_replay_loader(task_data, previous_task_data)
+                    else:
+                        training_loader = task_data['train_loader']
+                    
+                    # Train CNN on current task
+                    current_metrics = self._train_cnn_on_task(model, training_loader, task_data['test_loader'])
+                    task_metrics.append(current_metrics)
+                    
+                    # Evaluate on all tasks seen so far
+                    task_performance = []
+                    for eval_task_idx in range(task_idx + 1):
+                        eval_metrics = self._evaluate_cnn_on_task(model, tasks[eval_task_idx]['test_loader'])
+                        task_performance.append({
+                            'task_id': eval_task_idx,
+                            'accuracy': eval_metrics['accuracy'],
+                            'loss': eval_metrics['loss']
+                        })
+                    
+                    all_task_performance.append(task_performance)
+                    
+                    if strategy_name == 'replay':
+                        previous_task_data.append(task_data)
+                        if len(previous_task_data) > 2:
+                            previous_task_data = previous_task_data[-2:]
+                
+                # Calculate continual learning metrics
+                cl_metrics = self._calculate_continual_metrics(all_task_performance)
+                
+                # Final evaluation on all tasks
+                final_eval_metrics = []
+                for i in range(len(tasks)):
+                    task_eval = self._evaluate_cnn_on_task(model, tasks[i]['test_loader'])
+                    final_eval_metrics.append(task_eval)
+                
+                avg_metrics = {}
+                if final_eval_metrics:
+                    for key in final_eval_metrics[0]:
+                        avg_metrics[key] = np.mean([m[key] for m in final_eval_metrics if key in m])
+
                 return {
-                    'id': 0,
-                    'name': 'default_cnn_action',
-                    'params': {
-                        'batch_size': 32,
-                        'learning_rate': 0.001,
-                        'weight_decay': 0.0001,
-                        'epochs': 5
-                    },
-                    'score': 0
+                    'strategy': strategy_name,
+                    'task_metrics': task_metrics,
+                    'all_task_performance': all_task_performance,
+                    'continual_metrics': cl_metrics,
+                    'final_model': model,
+                    'average_eval_metrics': avg_metrics
                 }
             
-            # If metrics are good (high accuracy, low loss), use conservative action
-            accuracy = current_metrics.get('accuracy', 0)
-            loss = current_metrics.get('loss', 1.0)
-            
-            if accuracy > 95 and loss < 0.01:
-                # Good performance - use conservative action (action_b)
-                return next((a for a in rlaf_actions if a["id"] == 1), rlaf_actions[0])
-            else:
-                # Need improvement - use moderate action (action_d)
-                return next((a for a in rlaf_actions if a["id"] == 3), rlaf_actions[0])
-
-        def trigger_and_wait_for_dqn_pipeline_with_fallback(config, pipeline_domain, dqn_params, max_wait_minutes=5):
-            print("Attempting to trigger DQN pipeline...")
-            
-            # Try to trigger the pipeline
-            run_id = trigger_pipeline(config, pipeline_domain, dqn_params)
-            if not run_id:
-                print("Failed to trigger DQN pipeline, using fallback action")
-                return False
+            def _train_cnn_on_task(self, model, train_loader, test_loader) -> Dict[str, float]:
+                model.train()
+                model.to(self.device)
                 
+                # Get training parameters from config
+                training_config = self.config.get('training', {})
+                optimizer_config = training_config.get('optimizer', {})
+                
+                learning_rate = optimizer_config.get('learning_rate', 0.001)
+                weight_decay = optimizer_config.get('weight_decay', 0.01)
+                epochs = training_config.get('epochs', 10)
+                
+                optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+                criterion = nn.CrossEntropyLoss()
+                
+                for epoch in range(epochs):
+                    total_loss = 0
+                    correct = 0
+                    total = 0
+                    
+                    for data, targets in train_loader:
+                        data, targets = data.to(self.device), targets.to(self.device)
+                        optimizer.zero_grad()
+                        outputs = model(data)
+                        loss = criterion(outputs, targets)
+                        loss.backward()
+                        optimizer.step()
+                        
+                        total_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        total += targets.size(0)
+                        correct += predicted.eq(targets).sum().item()
+                
+                return self._evaluate_cnn_on_task(model, test_loader)
+            
+            def _evaluate_cnn_on_task(self, model, test_loader) -> Dict[str, float]:
+                model.eval()
+                model.to(self.device)
+                
+                criterion = nn.CrossEntropyLoss()
+                total_loss = 0
+                correct = 0
+                total = 0
+                
+                with torch.no_grad():
+                    for data, targets in test_loader:
+                        data, targets = data.to(self.device), targets.to(self.device)
+                        outputs = model(data)
+                        loss = criterion(outputs, targets)
+                        
+                        total_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        total += targets.size(0)
+                        correct += predicted.eq(targets).sum().item()
+                
+                accuracy = 100. * correct / total
+                avg_loss = total_loss / len(test_loader)
+                
+                return {
+                    'accuracy': accuracy,
+                    'loss': avg_loss,
+                    'correct': correct,
+                    'total': total
+                }
+            
+            def _create_replay_loader(self, current_task: Dict, previous_tasks: List[Dict]) -> DataLoader:
+                from torch.utils.data import TensorDataset
+                
+                replay_ratio = 0.2
+                current_loader = current_task['train_loader']
+                current_size = len(current_loader.dataset)
+                replay_size = int(current_size * replay_ratio / (1 - replay_ratio))
+                
+                replay_data = []
+                replay_labels = []
+                
+                for prev_task in previous_tasks:
+                    prev_loader = prev_task['train_loader']
+                    prev_dataset = prev_loader.dataset
+                    if len(prev_dataset) > 0:
+                        sample_size = min(replay_size // len(previous_tasks), len(prev_dataset))
+                        indices = torch.randperm(len(prev_dataset))[:sample_size]
+                        for idx in indices:
+                            data, label = prev_dataset[idx]
+                            replay_data.append(data)
+                            replay_labels.append(label)
+                
+                current_data = []
+                current_labels = []
+                for data, label in current_loader.dataset:
+                    current_data.append(data)
+                    current_labels.append(label)
+                
+                if replay_data:
+                    combined_data = torch.cat([torch.stack(current_data), torch.stack(replay_data)])
+                    combined_labels = torch.cat([torch.tensor(current_labels), torch.tensor(replay_labels)])
+                else:
+                    combined_data = torch.stack(current_data)
+                    combined_labels = torch.tensor(current_labels)
+                
+                combined_dataset = TensorDataset(combined_data, combined_labels)
+                return DataLoader(combined_dataset, batch_size=current_loader.batch_size, shuffle=True)
+            
+            def _calculate_continual_metrics(self, all_task_performance: List[List[Dict]]) -> Dict[str, float]:
+                final_performance = all_task_performance[-1]
+                average_accuracy = np.mean([task['accuracy'] for task in final_performance])
+                average_loss = np.mean([task['loss'] for task in final_performance])
+                
+                forgetting_scores = []
+                for task_idx in range(len(all_task_performance) - 1):
+                    max_acc = all_task_performance[task_idx][task_idx]['accuracy']
+                    final_acc = all_task_performance[-1][task_idx]['accuracy']
+                    forgetting = max_acc - final_acc
+                    forgetting_scores.append(max(0, forgetting))
+                
+                avg_forgetting = np.mean(forgetting_scores) if forgetting_scores else 0.0
+                
+                return {
+                    'average_accuracy': average_accuracy,
+                    'average_loss': average_loss,
+                    'forgetting': avg_forgetting,
+                    'num_tasks': len(all_task_performance)
+                }
+
+        # CNN Retraining Logic
+        def cnn_retraining(action, model_path, data_path, config_str, tasks_path, output_model_path, previous_metrics, dqn_params):
+            # Load configuration
+            config = json.loads(config_str)
+            
+            # Load tasks
+            with open(tasks_path, "rb") as f:
+                tasks = pickle.load(f)
+            
+            # Update config with DQN action parameters
+            model_config = config.get('model', {})
+            training_config = config.get('training', {})
+            
+            # Apply action parameters to model and training config
+            for param_key, param_value in action.items():
+                if 'learning_rate' in param_key:
+                    training_config['optimizer']['learning_rate'] = float(param_value)
+                elif 'batch_size' in param_key:
+                    training_config['batch_size'] = int(param_value)
+                elif 'epochs' in param_key:
+                    training_config['epochs'] = int(param_value)
+                elif 'architecture' in param_key:
+                    model_config['architecture'] = param_value
+                elif 'variant' in param_key:
+                    model_config['variant'] = param_value
+            
+            # Create CNN model using CNNFactory
+            model = CNNFactory.create_model(model_config['architecture'], model_config)
+            
+            # Load pre-trained weights
+            model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+            
+            # Train model with continual learning
+            trainer = CNNContinualTrainer(config)
+            results = trainer.train_continual_cnn(tasks=tasks, strategies=['naive'], model=model)
+            
+            average_eval_metrics = results['naive']['average_eval_metrics']
+            
+            # Calculate improvement score
+            improvement_score = 0
+            for param in dqn_params:
+                key = param['key']
+                sign = 1 if param['sign'] == '+' else -1
+                if key in average_eval_metrics and key in previous_metrics:
+                    improvement = (average_eval_metrics[key] - previous_metrics[key]) * sign
+                    improvement_score += improvement * param.get('mul', 1.0)
+
+            # Save model if improved
+            os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+            
+            if improvement_score > 0:
+                final_model = results['naive']['final_model']
+                torch.save(final_model.state_dict(), output_model_path)
+            else:
+                # Keep original model if no improvement
+                torch.save(model.state_dict(), output_model_path)
+
+            return {"metrics": average_eval_metrics, "model_path": output_model_path}
+
+        def trigger_and_wait_for_dqn_pipeline(config, pipeline_domain, dqn_params):
+            run_id = trigger_pipeline(config, pipeline_domain, dqn_params)
             config["run_id"] = run_id
             
-            start_time = time.time()
-            timeout = max_wait_minutes * 60  # Convert to seconds
-            
-            while time.time() - start_time < timeout:
+            while True:
                 status = get_pipeline_status(config, pipeline_domain)
-                print(f"Current DQN pipeline status: {status}")
-                
                 if status == 'SUCCEEDED':
-                    print("DQN Pipeline execution completed successfully.")
-                    return True
-                elif status in ['FAILED', 'ERROR']:
-                    print(f"DQN Pipeline failed with status {status}. Using fallback action.")
-                    return False
-                elif status == 'UNKNOWN':
-                    print("Unable to determine pipeline status, continuing with fallback...")
-                    return False
-                
-                time.sleep(30)  # Check every 30 seconds
-            
-            print(f"DQN Pipeline timed out after {max_wait_minutes} minutes. Using fallback action.")
-            return False
+                    break
+                elif status in ['FAILED', 'ERROR', 'CANCELLED']:
+                    raise RuntimeError(f"DQN pipeline failed with status: {status}")
+                time.sleep(30)
 
-        def simple_model_retraining(action, model_path, output_model_path, previous_metrics):
-            try:
-                # Load the existing model
-                model = torch.load(model_path, map_location=torch.device('cpu'))
-                
-                # Apply action parameters 
-                learning_rate = action.get('learning_rate', 0.001)
-                batch_size = action.get('batch_size', 32)
-                epochs = action.get('epochs', 5)
-                
-                print(f"Simulating retraining with: LR={learning_rate}, Batch={batch_size}, Epochs={epochs}")
-                
-                # Simulate some metric improvement based on action parameters
-                # Better learning rates should improve metrics
-                lr_factor = max(0.1, min(2.0, learning_rate / 0.001))
-                improvement_factor = 1.0 + (lr_factor - 1.0) * 0.1
-                
-                improved_metrics = {
-                    'accuracy': min(100.0, previous_metrics.get('accuracy', 0) * improvement_factor),
-                    'loss': max(0.0, previous_metrics.get('loss', 1.0) / improvement_factor),
-                    'correct_predictions': previous_metrics.get('correct_predictions', 100),
-                    'total_samples': previous_metrics.get('total_samples', 100)
-                }
-                
-                # Save the model
-                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
-                torch.save(model, output_model_path)
-                
-                print(f"Model retraining simulation completed. New metrics: {improved_metrics}")
-                return {"metrics": improved_metrics, "model_path": output_model_path}
-                
-            except Exception as e:
-                print(f"Model retraining failed: {e}. Using fallback.")
-                # Fallback: copy original model and return previous metrics
-                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
-                shutil.copy2(model_path, output_model_path)
-                return {"metrics": previous_metrics, "model_path": output_model_path}
-
-        # Main Execution with Enhanced Error Handling
+        # Main execution
         def main():
             parser = argparse.ArgumentParser()
             parser.add_argument('--trained_model', type=str, required=True)
@@ -275,41 +428,33 @@ implementation:
             parser.add_argument('--retrained_model', type=str, required=True)
             args = parser.parse_args()
 
-            # Ensure output directories exist
-            os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
-            os.makedirs(os.path.dirname(args.retrained_model), exist_ok=True)
-
+            # Load access token
             with open(args.access_token, 'r') as f:
                 access_token = f.read().strip()
+            
+            # Load initial metrics
             with open(args.init_metrics, 'r') as f:
                 current_metrics = json.load(f)
-
+            
             action_id_for_next_pierce = -1
-            dqn_success_count = 0
-
-            for i in range(2):  # Reduced iterations for stability
-                print(f"=== RLAF Loop Iteration {i+1} ===")
+            
+            for i in range(2):  # RLAF loop iterations
+                print(f"=== CNN RLAF Iteration {i+1} ===")
                 
-                # Clean and prepare metrics for DQN
+                # Prepare metrics for DQN
                 cleaned_metrics = {}
                 dqn_params = []
                 for key, value in current_metrics.items():
-                    try:
-                        cleaned_metrics[key] = float(value)
-                        if "loss" in key.lower():
-                            dqn_params.append({"key": key, "sign": "-", "mul": 1.0})
-                        elif "accuracy" in key.lower():
-                            dqn_params.append({"key": key, "sign": "+", "mul": 1.0})
-                    except (ValueError, TypeError):
-                        print(f"Warning: Could not convert metric '{key}' with value '{value}' to float. Skipping.")
+                    cleaned_metrics[key] = float(value)
+                    if any(term in key.lower() for term in ["accuracy", "f1", "precision", "recall"]):
+                        sign = "+"
+                    else:
+                        sign = "-"
+                    dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
                 
-                print(f"Dynamically generated param_json for DQN: {json.dumps(dqn_params)}")
-
-                # Get current instance state
+                # Update database with current state
                 instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
-                print(f"Instance model_id: {instance.get('model_id')}")
                 
-                # Update pierce2rlaf history
                 if instance.get('pierce2rlaf'):
                     latest_pierce2rlaf = instance['pierce2rlaf'][-1]
                     previous_state = latest_pierce2rlaf['current_state']
@@ -317,7 +462,7 @@ implementation:
                 else:
                     previous_state = {key: 0.0 for key in cleaned_metrics.keys()}
                     episode = 0
-
+                
                 new_pierce2rlaf_entry = {
                     "action_id": action_id_for_next_pierce, 
                     "previous_state": previous_state,
@@ -328,89 +473,52 @@ implementation:
                 
                 pierce2rlaf_history = instance.get("pierce2rlaf", [])
                 pierce2rlaf_history.append(new_pierce2rlaf_entry)
-                update_instance_field(access_token, args.domain, args.schema_id, args.model_id, "pierce2rlaf", pierce2rlaf_history)
+                update_instance_field(access_token, args.domain, args.schema_id, args.model_id, 
+                                    "pierce2rlaf", pierce2rlaf_history)
 
-                # Try DQN pipeline with fallback
+                # Trigger DQN pipeline
                 dqn_config = {
                     "pipeline_id": args.dqn_pipeline_id, 
                     "experiment_id": args.dqn_experiment_id, 
                     "access_token": access_token
                 }
-                
-                print(f"DQN Config: pipeline_id={dqn_config['pipeline_id']}, experiment_id={dqn_config['experiment_id']}")
-                
-                dqn_success = trigger_and_wait_for_dqn_pipeline_with_fallback(dqn_config, args.pipeline_domain, dqn_params)
-                
-                if dqn_success:
-                    dqn_success_count += 1
-                    print("DQN pipeline succeeded, getting action recommendation...")
-                    try:
-                        updated_instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
-                        if updated_instance.get('rlaf2pierce'):
-                            latest_rlaf2pierce = updated_instance['rlaf2pierce'][-1]
-                            
-                            if not latest_rlaf2pierce.get("pierce_or_not", True):
-                                print("pierce_or_not is false. Exiting loop.")
-                                break
-                            
-                            print(f"RLAF2Pierce: {latest_rlaf2pierce}")
-                            rlaf_actions = updated_instance.get('rlaf_actions', {}).get('actions', [])
-                            action_id_for_next_pierce = latest_rlaf2pierce['action_id']
-                            action_details = next((a for a in rlaf_actions if a["id"] == action_id_for_next_pierce), None)
-                            
-                            if action_details:
-                                print(f"DQN recommended action: {action_details}")
-                            else:
-                                print(f"Action with ID {action_id_for_next_pierce} not found, using default")
-                                action_details = get_default_action(rlaf_actions, cleaned_metrics)
-                        else:
-                            print("No rlaf2pierce data found, using default action")
-                            rlaf_actions = instance.get('rlaf_actions', {}).get('actions', [])
-                            action_details = get_default_action(rlaf_actions, cleaned_metrics)
-                    except Exception as e:
-                        print(f"Error processing DQN response: {e}, using default action")
-                        rlaf_actions = instance.get('rlaf_actions', {}).get('actions', [])
-                        action_details = get_default_action(rlaf_actions, cleaned_metrics)
-                else:
-                    # DQN failed, use default action
-                    print("DQN pipeline failed, using default action selection")
-                    rlaf_actions = instance.get('rlaf_actions', {}).get('actions', [])
-                    action_details = get_default_action(rlaf_actions, cleaned_metrics)
-                    action_id_for_next_pierce = action_details['id']
+                trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, dqn_params)
 
-                print(f"Using action for retraining: {action_details}")
+                # Get DQN recommendation
+                updated_instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
+                latest_rlaf2pierce = updated_instance['rlaf2pierce'][-1]
                 
-                # Perform model retraining with the selected action
-                retraining_results = simple_model_retraining(
+                if not latest_rlaf2pierce.get("pierce_or_not", True):
+                    break
+                
+                action_id_for_next_pierce = latest_rlaf2pierce['action_id']
+                rlaf_actions = updated_instance.get('rlaf_actions', {}).get('actions', [])
+                action_details = next((a for a in rlaf_actions if a["id"] == action_id_for_next_pierce))
+                
+                # Retrain model with DQN action
+                retraining_results = cnn_retraining(
                     action_details['params'], 
                     args.trained_model, 
+                    args.data_path, 
+                    args.config, 
+                    args.tasks,
                     args.retrained_model, 
-                    previous_state
+                    previous_state, 
+                    dqn_params
                 )
-                current_metrics = retraining_results["metrics"]
                 
-                print(f"Retraining completed. New metrics: {current_metrics}")
-                print(f"=== End of Iteration {i+1} ===\\n")
-
-            # Final outputs
+                current_metrics = retraining_results["metrics"]
+            
+            # Save final results
+            os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
             final_output = {
                 "final_metrics": current_metrics,
-                "dqn_success_rate": dqn_success_count / 2.0,
-                "iterations_completed": 2,
-                "timestamp": int(time.time())
+                "model_type": "CNN_image_classifier",
+                "iterations_completed": i + 1
             }
             
             with open(args.rlaf_output, 'w') as f:
-                json.dump(final_output, f, indent=4)
-            
-            # Ensure retrained model exists
-            if not os.path.exists(args.retrained_model):
-                shutil.copy2(args.trained_model, args.retrained_model)
-                print(f"Copied original model to {args.retrained_model}")
-            
-            print(f"RLAF loop finished successfully.")
-            print(f"Final parameters written to {args.rlaf_output}")
-            print(f"Retrained model saved to {args.retrained_model}")
+                json.dump(final_output, f, indent=2)
 
         if __name__ == '__main__':
             main()
@@ -424,7 +532,7 @@ implementation:
       - --data_path
       - {inputPath: data_path}
       - --config
-      - {inputPath: config}
+      - {inputValue: config}
       - --domain
       - {inputValue: domain}
       - --schema_id
