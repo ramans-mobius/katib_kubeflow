@@ -1,4 +1,4 @@
-name: DQN RLAF Loop CNN
+name: 2 DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
