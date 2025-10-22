@@ -1,4 +1,4 @@
-name: Generalized CNN Update Schema Row
+name: Final Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -86,7 +86,6 @@ implementation:
 
         # Discover schema structure
         def get_schema_info(http, domain, schema_id, headers):
-            """Get schema attributes and required fields"""
             try:
                 schema_url = f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}"
                 response = http.get(schema_url, headers=headers, timeout=30)
@@ -129,7 +128,6 @@ implementation:
         attributes_map = schema_info['attributes_map']
 
         def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
-            """Validate data against schema and prepare it for API calls"""
             validated_data = {}
             
             # Check for required attributes
