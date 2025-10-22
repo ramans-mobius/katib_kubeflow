@@ -1,4 +1,4 @@
-name: T Generalized CNN Update Schema Row 
+name: P Generalized CNN Update Schema Row 
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -130,7 +130,6 @@ implementation:
         attributes_map = schema_info['attributes_map']
 
         def extract_epoch_from_data(update_data):
-            """Extract epoch information from the input data dynamically"""
             # Check if we have training history arrays that can indicate epoch count
             if isinstance(update_data, dict):
                 # Look for array fields that might contain epoch data
