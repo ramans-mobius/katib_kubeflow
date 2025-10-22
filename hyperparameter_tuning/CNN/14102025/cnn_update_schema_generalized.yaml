@@ -1,4 +1,4 @@
-name: 2 Generalized CNN Update Schema Row
+name: 3 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -31,6 +31,8 @@ implementation:
         import json
         import argparse
         import requests
+        import random
+        import time
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
 
@@ -73,11 +75,13 @@ implementation:
             'Authorization': f'Bearer {bearer_auth_token}'
         }
 
+        # Enhanced retry strategy for 500 errors
         retry_strategy = Retry(
-            total=3,
+            total=5,  # Increased from 3 to 5
             status_forcelist=[408, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "PUT", "POST", "DELETE", "OPTIONS", "TRACE"],
-            backoff_factor=1
+            backoff_factor=2,  # Increased backoff
+            backoff_jitter=0.5  # Added jitter
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         http = requests.Session()
@@ -144,32 +148,72 @@ implementation:
 
         def extract_epoch_from_data(update_data):
             print("Extracting epoch from data...")
+            print(f"Available keys in data: {list(update_data.keys())}")
             
-            # Check if we have training history arrays that can indicate epoch count
             if isinstance(update_data, dict):
-                # Look for array fields that might contain epoch data
-                array_fields = ['train_loss', 'train_acc', 'val_loss', 'val_acc']
-                for field in array_fields:
+                # DEBUG: Print what we're seeing
+                for key, value in update_data.items():
+                    if isinstance(value, list):
+                        print(f"Found list '{key}' with {len(value)} elements: {value[:3]}...")  # First 3 elements
+                    else:
+                        print(f"Found '{key}': {value}")
+                
+                # Method 1: Check for training history arrays (most reliable)
+                training_arrays = ['train_loss', 'train_acc', 'val_loss', 'val_acc']
+                epoch_count = None
+                
+                for field in training_arrays:
                     if field in update_data and isinstance(update_data[field], list):
-                        epoch_count = len(update_data[field])
-                        print(f"Found {epoch_count} epochs from {field} array")
-                        return epoch_count - 1  # Return last epoch index (0-indexed)
+                        current_count = len(update_data[field])
+                        print(f"Found {current_count} epochs from {field} array")
+                        if epoch_count is None:
+                            epoch_count = current_count
+                        elif current_count != epoch_count:
+                            print(f"WARNING: Inconsistent array lengths: {field} has {current_count}, expected {epoch_count}")
                 
-                # Check for best_epoch field
+                if epoch_count and epoch_count > 0:
+                    # For training history, use the final epoch (0-indexed)
+                    final_epoch = epoch_count - 1
+                    print(f"Using final epoch from training history: {final_epoch} (0-indexed, {epoch_count} total epochs)")
+                    return final_epoch
+                
+                # Method 2: Check for explicit epoch fields
                 if 'best_epoch' in update_data:
-                    print(f"Found best_epoch: {update_data['best_epoch']}")
-                    return update_data['best_epoch']
+                    best_epoch = update_data['best_epoch']
+                    print(f"Found explicit best_epoch: {best_epoch}")
+                    try:
+                        return int(best_epoch)
+                    except (ValueError, TypeError):
+                        print(f"WARNING: best_epoch is not an integer: {best_epoch}")
                 
-                # Check for epoch field directly
                 if 'epoch' in update_data:
-                    print(f"Found epoch: {update_data['epoch']}")
-                    return update_data['epoch']
+                    epoch_val = update_data['epoch']
+                    print(f"Found explicit epoch: {epoch_val}")
+                    try:
+                        return int(epoch_val)
+                    except (ValueError, TypeError):
+                        print(f"WARNING: epoch is not an integer: {epoch_val}")
+                
+                # Method 3: If we have best_val_loss, try to find matching epoch
+                if 'best_val_loss' in update_data and 'val_loss' in update_data:
+                    best_loss = update_data['best_val_loss']
+                    val_losses = update_data['val_loss']
+                    if isinstance(val_losses, list):
+                        try:
+                            # Try exact match first
+                            best_epoch_index = val_losses.index(best_loss)
+                            print(f"Found exact match: best_val_loss at epoch {best_epoch_index}")
+                            return best_epoch_index
+                        except ValueError:
+                            # Find closest match
+                            closest_epoch = min(range(len(val_losses)), key=lambda i: abs(val_losses[i] - best_loss))
+                            print(f"Found closest epoch {closest_epoch} to best_val_loss")
+                            return closest_epoch
             
-            print("No epoch information found, defaulting to 0")
+            print("No epoch information found in data, defaulting to 0")
             return 0
 
         def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
-
             validated_data = {}
             missing_required = []
             
@@ -226,6 +270,31 @@ implementation:
             
             return validated_data
 
+        def make_request_with_circuit_breaker(http, method, url, headers, data=None, max_retries=3):
+            """Enhanced request function with circuit breaker pattern"""
+            for attempt in range(max_retries):
+                try:
+                    if method.upper() == 'POST':
+                        response = http.post(url, headers=headers, data=json.dumps(data), timeout=60)
+                    elif method.upper() == 'PATCH':
+                        response = http.patch(url, headers=headers, data=json.dumps(data), timeout=60)
+                    elif method.upper() == 'GET':
+                        response = http.get(url, headers=headers, timeout=60)
+                    else:
+                        raise ValueError(f"Unsupported method: {method}")
+                    
+                    response.raise_for_status()
+                    return response
+                    
+                except requests.exceptions.RequestException as e:
+                    if attempt == max_retries - 1:
+                        print(f"Final attempt failed after {max_retries} retries")
+                        raise e
+                    
+                    wait_time = (2 ** attempt) + (random.random() * 0.1)
+                    print(f"Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.2f}s... Error: {e}")
+                    time.sleep(wait_time)
+
         # Get schema information dynamically
         schema_info = get_schema_attributes(http, args.domain, args.schema_id, headers)
         all_attributes = schema_info['all_attributes']
@@ -262,8 +331,7 @@ implementation:
             print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
 
             try:
-                response = http.post(create_url, headers=headers, data=json.dumps(create_payload), timeout=60)
-                response.raise_for_status()
+                response = make_request_with_circuit_breaker(http, 'POST', create_url, headers, create_payload, max_retries=3)
                 print("Successfully created multiple model instances.")
                 print(f"Response: {response.json()}")
             except requests.exceptions.RequestException as e:
@@ -290,8 +358,7 @@ implementation:
             print(f"Request Payload: {json.dumps(check_payload, indent=2)}")
 
             try:
-                response = http.post(check_url, headers=headers, data=json.dumps(check_payload), timeout=60)
-                response.raise_for_status()
+                response = make_request_with_circuit_breaker(http, 'POST', check_url, headers, check_payload, max_retries=3)
                 response_data = response.json()
                 
                 if response_data.get("content"):
@@ -344,8 +411,7 @@ implementation:
                     print(f"Request Headers: {json.dumps(headers)}")
                     print(f"Request Payload: {json.dumps(update_payload, indent=2)}")
                     
-                    response = http.patch(update_url, headers=headers, data=json.dumps(update_payload), timeout=60)
-                    response.raise_for_status()
+                    response = make_request_with_circuit_breaker(http, 'PATCH', update_url, headers, update_payload, max_retries=3)
                     print("Successfully updated the model instance.")
                 else:
                     print(f" No Instance Found: Creating New Row ")
@@ -394,7 +460,7 @@ implementation:
                     print(f"Request Headers: {json.dumps(headers)}")
                     print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
                     
-                    response = http.post(create_url, headers=headers, data=json.dumps(create_payload), timeout=60)
+                    response = make_request_with_circuit_breaker(http, 'POST', create_url, headers, create_payload, max_retries=3)
                     if response.status_code >= 400:
                         print(f"Error: {response.status_code} {response.reason}")
                         print(f"Response Content: {response.text}")
