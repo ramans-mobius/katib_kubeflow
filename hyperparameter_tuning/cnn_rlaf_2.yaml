@@ -1,4 +1,4 @@
-name: SVT DQN RLAF Loop CNN
+name: 17 DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
@@ -535,21 +535,39 @@ implementation:
                 current_metrics = {'accuracy': 50.0, 'loss': 1.0}
             print(f"DEBUG: Processed metrics: {current_metrics}")
             
+            # FIXED DQN PARAMETERS - Use the same ones that work for LLM/VAE
+            fixed_dqn_params = [
+                {"key": "accuracy", "sign": "+", "mul": 1.0},
+                {"key": "loss", "sign": "-", "mul": 1.0},
+                {"key": "epochs", "sign": "-", "mul": 0.1}
+            ]
+            
             for i in range(2):
                 print(f"DEBUG: Starting RLAF iteration {i+1}")
                 
+                # Map CNN metrics to DQN expected parameters
                 cleaned_metrics = {}
-                dqn_params = []
-                print("DEBUG: Preparing metrics for DQN")
-                for key, value in current_metrics.items():
-                    cleaned_metrics[key] = float(value)
-                    if any(term in key.lower() for term in ["accuracy", "f1", "precision", "recall"]):
-                        sign = "+"
+                # Use fixed parameters but map our actual metrics to them
+                for param in fixed_dqn_params:
+                    key = param['key']
+                    if key in current_metrics:
+                        cleaned_metrics[key] = current_metrics[key]
                     else:
-                        sign = "-"
-                    dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
+                        # Provide default values for expected parameters
+                        if key == "accuracy":
+                            cleaned_metrics[key] = current_metrics.get('accuracy', 50.0)
+                        elif key == "loss":
+                            cleaned_metrics[key] = current_metrics.get('loss', 1.0)
+                        elif key == "epochs":
+                            # Use training epochs as a proxy
+                            config_data = json.loads(args.config)
+                            training_config = config_data.get('training', {})
+                            cleaned_metrics[key] = float(training_config.get('epochs', 5))
+                        else:
+                            cleaned_metrics[key] = 0.0
                 
-                print(f"DEBUG: DQN parameters prepared: {json.dumps(dqn_params, indent=2)}")
+                print(f"DEBUG: Using fixed DQN parameters: {json.dumps(fixed_dqn_params, indent=2)}")
+                print(f"DEBUG: Mapped metrics for DQN: {cleaned_metrics}")
                 
                 try:
                     print("DEBUG: Attempting to get instance from database")
@@ -591,7 +609,7 @@ implementation:
                         "experiment_id": args.dqn_experiment_id, 
                         "access_token": access_token
                     }
-                    dqn_success = trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, dqn_params)
+                    dqn_success = trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, fixed_dqn_params)
                     
                     if dqn_success:
                         print("DEBUG: DQN pipeline succeeded, fetching recommendations")
@@ -637,9 +655,10 @@ implementation:
                     args.tasks,
                     args.retrained_model, 
                     previous_state, 
-                    dqn_params
+                    fixed_dqn_params  # Use fixed params here too
                 )
                 
+                # Update current_metrics with the new training results
                 current_metrics = retraining_results["metrics"]
                 print(f"DEBUG: Retraining completed. New metrics: {current_metrics}")
             
