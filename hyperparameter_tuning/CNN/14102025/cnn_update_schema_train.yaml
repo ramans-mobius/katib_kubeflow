@@ -87,7 +87,6 @@ implementation:
         ]
 
         def validate_schema_attributes(data, schema_attributes):
-            """Remove any attributes that don't exist in the schema"""
             valid_data = {}
             for key, value in data.items():
                 if key in schema_attributes:
