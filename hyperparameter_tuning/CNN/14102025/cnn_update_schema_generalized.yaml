@@ -1,4 +1,4 @@
-name: 6 Generalized CNN Update Schema Row
+name: 7 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,8 +89,8 @@ implementation:
         http.mount("http://", adapter)
 
         def get_schema_attributes(http, domain, schema_id, headers):
-            # Updated endpoints based on your curl command
-            endpoints = [
+            # All possible schema endpoints
+            schema_endpoints = [
                 f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
                 f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
                 f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
@@ -98,54 +98,63 @@ implementation:
                 f"{domain}/pi-schemas-service/v3.0/schemas/{schema_id}"
             ]
             
-            for endpoint in endpoints:
+            working_endpoint = None
+            schema_info = None
+            
+            for endpoint in schema_endpoints:
                 try:
                     print(f"Trying schema endpoint: {endpoint}")
                     response = http.get(endpoint, headers=headers, timeout=30)
                     if response.status_code == 200:
                         schema_info = response.json()
+                        working_endpoint = endpoint
                         print(f"Successfully fetched schema from: {endpoint}")
-                        
-                        # Extract attributes from different possible response structures
-                        attributes_map = schema_info.get('attributesMap', {})
-                        if not attributes_map:
-                            attributes_map = schema_info.get('properties', {})
-                        if not attributes_map:
-                            attributes_map = schema_info.get('attributes', {})
-                        
-                        # Extract required attributes
-                        required_attributes = []
-                        all_attributes = []
-                        
-                        for attr_name, attr_info in attributes_map.items():
-                            all_attributes.append(attr_name)
-                            # Check if attribute is required
-                            if (attr_info.get('required', False) or 
-                                attr_info.get('isRequired', False) or
-                                attr_info.get('nullable', True) is False):
-                                required_attributes.append(attr_name)
-                        
-                        print(f"=== SCHEMA DISCOVERY ===")
-                        print(f"All attributes: {all_attributes}")
-                        print(f"Required attributes: {required_attributes}")
-                        print(f"========================")
-                        
-                        return {
-                            'all_attributes': all_attributes,
-                            'required_attributes': required_attributes,
-                            'attributes_map': attributes_map
-                        }
+                        break
                     else:
                         print(f"Endpoint {endpoint} returned status: {response.status_code}")
                 except Exception as e:
                     print(f"Error fetching from {endpoint}: {e}")
             
-            print("WARNING: Could not fetch schema information from any endpoint")
-            print("Using default required attributes")
+            if not schema_info:
+                print("WARNING: Could not fetch schema information from any endpoint")
+                print("Using default required attributes")
+                return {
+                    'all_attributes': [],
+                    'required_attributes': ['execution_id', 'tenant_id', 'project_id'],
+                    'attributes_map': {},
+                    'working_endpoint': None
+                }
+            
+            # Extract attributes from different possible response structures
+            attributes_map = schema_info.get('attributesMap', {})
+            if not attributes_map:
+                attributes_map = schema_info.get('properties', {})
+            if not attributes_map:
+                attributes_map = schema_info.get('attributes', {})
+            
+            # Extract required attributes
+            required_attributes = []
+            all_attributes = []
+            
+            for attr_name, attr_info in attributes_map.items():
+                all_attributes.append(attr_name)
+                # Check if attribute is required
+                if (attr_info.get('required', False) or 
+                    attr_info.get('isRequired', False) or
+                    attr_info.get('nullable', True) is False):
+                    required_attributes.append(attr_name)
+            
+            print(f"=== SCHEMA DISCOVERY ===")
+            print(f"All attributes: {all_attributes}")
+            print(f"Required attributes: {required_attributes}")
+            print(f"Working endpoint: {working_endpoint}")
+            print(f"========================")
+            
             return {
-                'all_attributes': [],
-                'required_attributes': ['execution_id', 'tenant_id', 'project_id', 'epoch'],
-                'attributes_map': {}
+                'all_attributes': all_attributes,
+                'required_attributes': required_attributes,
+                'attributes_map': attributes_map,
+                'working_endpoint': working_endpoint
             }
 
         def extract_epoch_from_data(update_data):
@@ -272,35 +281,112 @@ implementation:
             
             return validated_data
 
-        def make_request_with_circuit_breaker(http, method, url, headers, data=None, max_retries=3):
-            for attempt in range(max_retries):
-                try:
-                    if method.upper() == 'POST':
-                        response = http.post(url, headers=headers, data=json.dumps(data), timeout=60)
-                    elif method.upper() == 'PATCH':
-                        response = http.patch(url, headers=headers, data=json.dumps(data), timeout=60)
-                    elif method.upper() == 'GET':
-                        response = http.get(url, headers=headers, timeout=60)
-                    else:
-                        raise ValueError(f"Unsupported method: {method}")
-                    
-                    response.raise_for_status()
-                    return response
-                    
-                except requests.exceptions.RequestException as e:
-                    if attempt == max_retries - 1:
-                        print(f"Final attempt failed after {max_retries} retries")
-                        raise e
-                    
-                    wait_time = (2 ** attempt) + (random.random() * 0.1)
-                    print(f"Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.2f}s... Error: {e}")
-                    time.sleep(wait_time)
+        def get_instance_endpoints(working_endpoint):
+            """Generate instance operation endpoints based on the working schema endpoint"""
+            if not working_endpoint:
+                # Fallback to all possible endpoints if no working endpoint found
+                return [
+                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances",
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
+                ]
+            
+            # Replace /schemas/ with /instances in the working endpoint
+            instance_endpoint = working_endpoint.replace('/schemas/', '/instances')
+            
+            # Also try alternative endpoints for the same service
+            endpoints = [instance_endpoint]
+            
+            # Add fallback endpoints from other services
+            if 'pi-entity-service-dbaas' in working_endpoint:
+                endpoints.extend([
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
+                ])
+            else:
+                endpoints.extend([
+                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances",
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
+                ])
+            
+            return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
+
+        def get_list_endpoints(working_endpoint):
+            """Generate list operation endpoints based on the working schema endpoint"""
+            if not working_endpoint:
+                # Fallback to all possible endpoints if no working endpoint found
+                return [
+                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances/list",
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
+                ]
+            
+            # Replace /schemas/ with /instances/list in the working endpoint
+            list_endpoint = working_endpoint.replace('/schemas/', '/instances/list')
+            
+            # Also try alternative endpoints for the same service
+            endpoints = [list_endpoint]
+            
+            # Add fallback endpoints from other services
+            if 'pi-entity-service-dbaas' in working_endpoint:
+                endpoints.extend([
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
+                ])
+            else:
+                endpoints.extend([
+                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances/list",
+                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
+                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
+                ])
+            
+            return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
+
+        def make_request_with_fallback(http, method, urls, headers, data=None, max_retries=3):
+            """Enhanced request function with fallback to alternative endpoints"""
+            for url in urls:
+                print(f"Trying endpoint: {url}")
+                for attempt in range(max_retries):
+                    try:
+                        if method.upper() == 'POST':
+                            response = http.post(url, headers=headers, data=json.dumps(data), timeout=60)
+                        elif method.upper() == 'PATCH':
+                            response = http.patch(url, headers=headers, data=json.dumps(data), timeout=60)
+                        elif method.upper() == 'GET':
+                            response = http.get(url, headers=headers, timeout=60)
+                        else:
+                            raise ValueError(f"Unsupported method: {method}")
+                        
+                        response.raise_for_status()
+                        print(f"Success with endpoint: {url}")
+                        return response
+                        
+                    except requests.exceptions.RequestException as e:
+                        if attempt == max_retries - 1:
+                            print(f"Final attempt failed for {url} after {max_retries} retries: {e}")
+                        else:
+                            wait_time = (2 ** attempt) + (random.random() * 0.1)
+                            print(f"Request failed (attempt {attempt + 1}/{max_retries}) for {url}, retrying in {wait_time:.2f}s... Error: {e}")
+                            time.sleep(wait_time)
+                
+                print(f"All retries exhausted for {url}, trying next endpoint...")
+            
+            raise Exception(f"All endpoints failed after {max_retries} retries each")
 
         # Get schema information dynamically
         schema_info = get_schema_attributes(http, args.domain, args.schema_id, headers)
         all_attributes = schema_info['all_attributes']
         required_attributes = schema_info['required_attributes']
         attributes_map = schema_info['attributes_map']
+        working_endpoint = schema_info['working_endpoint']
+
+        # Get endpoints for different operations
+        instance_endpoints = get_instance_endpoints(working_endpoint)
+        list_endpoints = get_list_endpoints(working_endpoint)
+
+        print(f"Using instance endpoints: {instance_endpoints}")
+        print(f"Using list endpoints: {list_endpoints}")
 
         if args.multiple_rows_json != '-1':
             rows_to_create = json.loads(args.multiple_rows_json)
@@ -323,28 +409,23 @@ implementation:
                 validated_row = validate_and_prepare_data(row, all_attributes, required_attributes, attributes_map, update_data)
                 validated_rows.append(validated_row)
             
-            create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
             create_payload = {"data": validated_rows}
             
             print(f" Creating Multiple Rows ")
-            print(f"Request URL: POST {create_url}")
+            print(f"Trying endpoints: {instance_endpoints}")
             print(f"Request Headers: {json.dumps(headers)}")
             print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
 
             try:
-                response = make_request_with_circuit_breaker(http, 'POST', create_url, headers, create_payload, max_retries=3)
+                response = make_request_with_fallback(http, 'POST', instance_endpoints, headers, create_payload, max_retries=3)
                 print("Successfully created multiple model instances.")
                 print(f"Response: {response.json()}")
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 print(f"Error creating multiple model instances: {e}")
                 print(f"Failed Request Payload: {json.dumps(create_payload, indent=2)}")
-                if e.response:
-                    print(f"Response Status Code: {e.response.status_code}")
-                    print(f"Response Content: {e.response.text}")
                 exit(1)
         else:
             # Check if execution_id exists
-            check_url = f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
             check_payload = {
                 "dbType": "TIDB",
                 "ownedOnly": True,
@@ -354,12 +435,12 @@ implementation:
             }
             
             print(f" Checking for Existing Row with execution_id: {args.execution_id} ")
-            print(f"Request URL: POST {check_url}")
+            print(f"Trying endpoints: {list_endpoints}")
             print(f"Request Headers: {json.dumps(headers)}")
             print(f"Request Payload: {json.dumps(check_payload, indent=2)}")
 
             try:
-                response = make_request_with_circuit_breaker(http, 'POST', check_url, headers, check_payload, max_retries=3)
+                response = make_request_with_fallback(http, 'POST', list_endpoints, headers, check_payload, max_retries=3)
                 response_data = response.json()
                 
                 if response_data.get("content"):
@@ -389,7 +470,6 @@ implementation:
                         elif value_to_patch is not None:
                             print(f"WARNING: Column '{column}' not found in schema, skipping update")
 
-                    update_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
                     update_payload = {
                         "dbType": "TIDB",
                         "conditionalFilter": {
@@ -408,11 +488,11 @@ implementation:
                         ]
                     }
                     
-                    print(f"Request URL: PATCH {update_url}")
+                    print(f"Trying update endpoints: {instance_endpoints}")
                     print(f"Request Headers: {json.dumps(headers)}")
                     print(f"Request Payload: {json.dumps(update_payload, indent=2)}")
                     
-                    response = make_request_with_circuit_breaker(http, 'PATCH', update_url, headers, update_payload, max_retries=3)
+                    response = make_request_with_fallback(http, 'PATCH', instance_endpoints, headers, update_payload, max_retries=3)
                     print("Successfully updated the model instance.")
                 else:
                     print(f" No Instance Found: Creating New Row ")
@@ -449,19 +529,18 @@ implementation:
                     if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
                         creation_data['architecture_type'] = args.architecture_type
 
-                    # Validate and prepare data for schema - PASS update_data HERE
+                    # Validate and prepare data for schema
                     creation_data = validate_and_prepare_data(creation_data, all_attributes, required_attributes, attributes_map, update_data)
 
-                    create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
                     create_payload = {
                         "data": [creation_data]
                     }
 
-                    print(f"Request URL: POST {create_url}")
+                    print(f"Trying create endpoints: {instance_endpoints}")
                     print(f"Request Headers: {json.dumps(headers)}")
                     print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
                     
-                    response = make_request_with_circuit_breaker(http, 'POST', create_url, headers, create_payload, max_retries=3)
+                    response = make_request_with_fallback(http, 'POST', instance_endpoints, headers, create_payload, max_retries=3)
                     if response.status_code >= 400:
                         print(f"Error: {response.status_code} {response.reason}")
                         print(f"Response Content: {response.text}")
@@ -470,11 +549,8 @@ implementation:
                     
                 print(f"Response: {response.json()}")
 
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 print(f"Error: {e}")
-                if e.response is not None:
-                    print(f"Response Status Code: {e.response.status_code}")
-                    print(f"Response Content: {e.response.text}")
                 exit(1)
 
     args:
