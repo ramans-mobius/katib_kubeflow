@@ -1,4 +1,4 @@
-name: 4 Generalized CNN Update Schema Row
+name: 5 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -77,11 +77,11 @@ implementation:
 
         # Enhanced retry strategy for 500 errors
         retry_strategy = Retry(
-            total=5,  # Increased from 3 to 5
+            total=5,
             status_forcelist=[408, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "PUT", "POST", "DELETE", "OPTIONS", "TRACE"],
-            backoff_factor=2,  # Increased backoff
-            backoff_jitter=0.5  # Added jitter
+            backoff_factor=2,
+            backoff_jitter=0.5
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         http = requests.Session()
@@ -89,7 +89,9 @@ implementation:
         http.mount("http://", adapter)
 
         def get_schema_attributes(http, domain, schema_id, headers):
+            # Updated endpoints based on your curl command
             endpoints = [
+                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
                 f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
                 f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
                 f"{domain}/pi-schemas-service/v2.0/schemas/{schema_id}",
@@ -142,19 +144,19 @@ implementation:
             print("Using default required attributes")
             return {
                 'all_attributes': [],
-                'required_attributes': ['execution_id', 'tenant_id', 'project_id'],
+                'required_attributes': ['execution_id', 'tenant_id', 'project_id', 'epoch'],
                 'attributes_map': {}
             }
 
         def extract_epoch_from_data(update_data):
-            print("Extracting epoch from data...")
+            print("=== EXTRACTING EPOCH FROM DATA ===")
             print(f"Available keys in data: {list(update_data.keys())}")
             
             if isinstance(update_data, dict):
                 # DEBUG: Print what we're seeing
                 for key, value in update_data.items():
                     if isinstance(value, list):
-                        print(f"Found list '{key}' with {len(value)} elements: {value[:3]}...")  # First 3 elements
+                        print(f"Found list '{key}' with {len(value)} elements: {value[:3]}...")
                     else:
                         print(f"Found '{key}': {value}")
                 
@@ -213,7 +215,7 @@ implementation:
             print("No epoch information found in data, defaulting to 0")
             return 0
 
-        def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
+        def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map, update_data):
             validated_data = {}
             missing_required = []
             
@@ -271,6 +273,7 @@ implementation:
             return validated_data
 
         def make_request_with_circuit_breaker(http, method, url, headers, data=None, max_retries=3):
+            """Enhanced request function with circuit breaker pattern"""
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -318,7 +321,7 @@ implementation:
                     row['model_id'] = args.model_id
                 
                 # Validate and prepare data
-                validated_row = validate_and_prepare_data(row, all_attributes, required_attributes, attributes_map)
+                validated_row = validate_and_prepare_data(row, all_attributes, required_attributes, attributes_map, update_data)
                 validated_rows.append(validated_row)
             
             create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
@@ -447,8 +450,8 @@ implementation:
                     if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
                         creation_data['architecture_type'] = args.architecture_type
 
-                    # Validate and prepare data for schema
-                    creation_data = validate_and_prepare_data(creation_data, all_attributes, required_attributes, attributes_map)
+                    # Validate and prepare data for schema - PASS update_data HERE
+                    creation_data = validate_and_prepare_data(creation_data, all_attributes, required_attributes, attributes_map, update_data)
 
                     create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
                     create_payload = {
