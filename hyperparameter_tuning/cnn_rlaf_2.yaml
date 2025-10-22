@@ -1,4 +1,4 @@
-name: 17 DQN RLAF Loop CNN
+name: saay DQN RLAF Loop CNN
 description: Triggers the DQN RLAF pipeline in a loop to optimize CNN model hyperparameters, controlled by a pierce_or_not flag.
 inputs:
   - {name: trained_model, type: Model}
@@ -59,18 +59,25 @@ implementation:
             session.mount("http://", adapter)
             return session
 
-        def trigger_pipeline(config, pipeline_domain, dqn_params=None):
+        def trigger_pipeline(config, pipeline_domain, dqn_params=None, model_id=None):
             print(f"DEBUG: Triggering DQN pipeline with config: {config}")
             try:
                 http = get_retry_session()
                 url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/trigger/ml?pipelineId={config['pipeline_id']}"
-                pipeline_params = {"param_json": json.dumps(dqn_params)} if dqn_params else {}
+                
+                # Create pipeline parameters including model_id
+                pipeline_params = {}
+                if dqn_params:
+                    pipeline_params["param_json"] = json.dumps(dqn_params)
+                if model_id:
+                    pipeline_params["model_id"] = model_id
+                    
                 payload = json.dumps({
                     "pipelineType": "ML", 
                     "containerResources": {}, 
                     "experimentId": config['experiment_id'],
                     "enableCaching": True, 
-                    "parameters": pipeline_params, 
+                    "parameters": pipeline_params,
                     "version": 1
                 })
                 headers = {
@@ -465,10 +472,10 @@ implementation:
 
             return {"metrics": average_eval_metrics, "model_path": output_model_path}
 
-        def trigger_and_wait_for_dqn_pipeline(config, pipeline_domain, dqn_params):
+        def trigger_and_wait_for_dqn_pipeline(config, pipeline_domain, dqn_params, model_id):
             print("DEBUG: Starting DQN pipeline trigger and wait")
             try:
-                run_id = trigger_pipeline(config, pipeline_domain, dqn_params)
+                run_id = trigger_pipeline(config, pipeline_domain, dqn_params, model_id)
                 config["run_id"] = run_id
                 
                 max_wait_time = 1800
@@ -609,7 +616,12 @@ implementation:
                         "experiment_id": args.dqn_experiment_id, 
                         "access_token": access_token
                     }
-                    dqn_success = trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, fixed_dqn_params)
+                    dqn_success = trigger_and_wait_for_dqn_pipeline(
+                        dqn_config, 
+                        args.pipeline_domain, 
+                        fixed_dqn_params,
+                        args.model_id  # Pass model_id from CNN to DQN
+                    )
                     
                     if dqn_success:
                         print("DEBUG: DQN pipeline succeeded, fetching recommendations")
