@@ -1,15 +1,13 @@
-name: CNN Build Update Schema Row
-description: Updates a row in a schema based on a mapping between column names and a JSON object.
+name: CNN Evaluate Update Schema Row
+description: Updates training metrics in PerformanceMetrics schema
 
 inputs:
   - { name: schema_id, type: String, description: "The ID of the schema to update." }
   - { name: update_data_json, type: String, description: "JSON string containing the data to update." }
   - { name: mapping_json, type: String, description: "JSON string mapping column names to keys in update_data_json." }
-  - { name: model_id, type: String, description: "The ID of the model to filter by." }
-  - { name: execution_id, type: String, description: "The ID of the model to filter by." }
+  - { name: execution_id, type: String, description: "The execution ID to filter by." }
   - { name: tenant_id, type: string, description: "The ID of the tenant." }
   - { name: project_id, type: String, description: "The ID of the project." }
-  - { name: architecture_type, type: String, description: "The architecture type." }
   - { name: multiple_rows_json, type: String, description: "JSON string containing a list of rows to create." }
   - { name: bearer_auth_token, type: string, description: "Bearer token for authentication." }
   - { name: domain, type: String, description: "The domain for the API endpoint." }
@@ -38,11 +36,9 @@ implementation:
         parser.add_argument('--schema_id', type=str, required=True)
         parser.add_argument('--update_data_json', type=str, required=True)
         parser.add_argument('--mapping_json', type=str, required=True)
-        parser.add_argument('--model_id', type=str, required=True)
         parser.add_argument('--execution_id', type=str, required=True)
         parser.add_argument('--tenant_id', type=str, required=True)
         parser.add_argument('--project_id', type=str, required=True)
-        parser.add_argument('--architecture_type', type=str, required=True)
         parser.add_argument('--multiple_rows_json', type=str, required=True)
         parser.add_argument('--bearer_auth_token', type=str, required=True)
         parser.add_argument('--domain', type=str, required=True)
@@ -61,7 +57,12 @@ implementation:
         
         update_data = json.loads(args.update_data_json)
         mapping = json.loads(args.mapping_json)
-        float_keys = json.loads(args.float_keys_json)
+        
+        # Handle float_keys_json safely
+        if args.float_keys_json and args.float_keys_json != '-1':
+            float_keys = json.loads(args.float_keys_json)
+        else:
+            float_keys = []
 
         headers = {
             'Content-Type': 'application/json',
@@ -79,22 +80,41 @@ implementation:
         http.mount("https://", adapter)
         http.mount("http://", adapter)
 
+        # PerformanceMetrics Schema valid attributes
+        PERFORMANCE_METRICS_ATTRIBUTES = [
+            'tenant_id', 'execution_id', 'project_id', 'f1_score', 'roc_auc', 
+            'recall', 'precisions', 'confusion_matrix', 'accuracy', 'loss'
+        ]
+
+        def validate_schema_attributes(data, schema_attributes):
+            """Remove any attributes that don't exist in the schema"""
+            valid_data = {}
+            for key, value in data.items():
+                if key in schema_attributes:
+                    valid_data[key] = value
+                else:
+                    print(f"WARNING: Attribute '{key}' not found in schema, skipping")
+            return valid_data
+
         if args.multiple_rows_json != '-1':
             rows_to_create = json.loads(args.multiple_rows_json)
+            validated_rows = []
+            
             for row in rows_to_create:
+                # Add required fields
                 if args.tenant_id != '-1':
-                    with open(args.tenant_id, 'r') as f:
-                        row['tenant_id'] = f.read().strip()
+                    row['tenant_id'] = tenant_id
                 if args.project_id != '-1':
                     row['project_id'] = args.project_id
-                if args.architecture_type != '-1':
-                    row['architecture_type'] = args.architecture_type
                 if 'execution_id' not in row and args.execution_id != '-1':
-                    row['execution_id']=args.execution_id
-                    
+                    row['execution_id'] = args.execution_id
+                
+                # Validate against schema
+                validated_row = validate_schema_attributes(row, PERFORMANCE_METRICS_ATTRIBUTES)
+                validated_rows.append(validated_row)
             
             create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
-            create_payload = {"data": rows_to_create}
+            create_payload = {"data": validated_rows}
             
             print(f" Creating Multiple Rows ")
             print(f"Request URL: POST {create_url}")
@@ -206,15 +226,15 @@ implementation:
                         if value_to_add is not None:
                             creation_data[column] = value_to_add
                     
+                    # ONLY include attributes that exist in PerformanceMetrics schema
                     creation_data['execution_id'] = args.execution_id
-                    if args.model_id != '-1':
-                        creation_data['model_id'] = args.model_id
                     if args.tenant_id != '-1':
                         creation_data['tenant_id'] = tenant_id
                     if args.project_id != '-1':
                         creation_data['project_id'] = args.project_id
-                    if args.architecture_type != '-1':
-                        creation_data['architecture_type'] = args.architecture_type
+
+                    # Remove any invalid attributes
+                    creation_data = validate_schema_attributes(creation_data, PERFORMANCE_METRICS_ATTRIBUTES)
 
                     create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
                     create_payload = {
@@ -248,16 +268,12 @@ implementation:
       - {inputValue: update_data_json}
       - --mapping_json
       - {inputValue: mapping_json}
-      - --model_id
-      - {inputValue: model_id}
       - --execution_id
       - {inputValue: execution_id}
       - --tenant_id
       - {inputPath: tenant_id}
       - --project_id
       - {inputValue: project_id}
-      - --architecture_type
-      - {inputValue: architecture_type}
       - --multiple_rows_json
       - {inputValue: multiple_rows_json}
       - --bearer_auth_token
