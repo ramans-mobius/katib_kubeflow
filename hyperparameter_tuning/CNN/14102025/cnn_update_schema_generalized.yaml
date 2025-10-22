@@ -1,4 +1,4 @@
-name: Generalized CNN Update Schema Row
+name: 2 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -85,7 +85,6 @@ implementation:
         http.mount("http://", adapter)
 
         def get_schema_attributes(http, domain, schema_id, headers):
-            """Get schema attributes by trying different API endpoints"""
             endpoints = [
                 f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
                 f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
@@ -144,7 +143,6 @@ implementation:
             }
 
         def extract_epoch_from_data(update_data):
-            """Extract epoch information from the input data dynamically"""
             print("Extracting epoch from data...")
             
             # Check if we have training history arrays that can indicate epoch count
@@ -171,7 +169,7 @@ implementation:
             return 0
 
         def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
-            """Prepare data with required attributes and sensible defaults"""
+
             validated_data = {}
             missing_required = []
             
