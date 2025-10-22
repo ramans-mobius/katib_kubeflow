@@ -1,4 +1,4 @@
-name: P Generalized CNN Update Schema Row 
+name: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -84,52 +84,69 @@ implementation:
         http.mount("https://", adapter)
         http.mount("http://", adapter)
 
-        # Discover schema structure
-        def get_schema_info(http, domain, schema_id, headers):
-            try:
-                schema_url = f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}"
-                response = http.get(schema_url, headers=headers, timeout=30)
-                if response.status_code == 200:
-                    schema_info = response.json()
-                    attributes_map = schema_info.get('attributesMap', {})
-                    
-                    # Extract required attributes
-                    required_attributes = []
-                    all_attributes = []
-                    for attr_name, attr_info in attributes_map.items():
-                        all_attributes.append(attr_name)
-                        if attr_info.get('required', False):
-                            required_attributes.append(attr_name)
-                    
-                    print(f"=== SCHEMA DISCOVERY ===")
-                    print(f"All attributes: {all_attributes}")
-                    print(f"Required attributes: {required_attributes}")
-                    print(f"========================")
-                    
-                    return {
-                        'all_attributes': all_attributes,
-                        'required_attributes': required_attributes,
-                        'attributes_map': attributes_map
-                    }
-                else:
-                    print(f"Schema discovery failed with status: {response.status_code}")
-            except Exception as e:
-                print(f"Could not fetch schema info: {e}")
+        def get_schema_attributes(http, domain, schema_id, headers):
+            """Get schema attributes by trying different API endpoints"""
+            endpoints = [
+                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
+                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
+                f"{domain}/pi-schemas-service/v2.0/schemas/{schema_id}",
+                f"{domain}/pi-schemas-service/v3.0/schemas/{schema_id}"
+            ]
             
-            # Return default if schema discovery fails
+            for endpoint in endpoints:
+                try:
+                    print(f"Trying schema endpoint: {endpoint}")
+                    response = http.get(endpoint, headers=headers, timeout=30)
+                    if response.status_code == 200:
+                        schema_info = response.json()
+                        print(f"Successfully fetched schema from: {endpoint}")
+                        
+                        # Extract attributes from different possible response structures
+                        attributes_map = schema_info.get('attributesMap', {})
+                        if not attributes_map:
+                            attributes_map = schema_info.get('properties', {})
+                        if not attributes_map:
+                            attributes_map = schema_info.get('attributes', {})
+                        
+                        # Extract required attributes
+                        required_attributes = []
+                        all_attributes = []
+                        
+                        for attr_name, attr_info in attributes_map.items():
+                            all_attributes.append(attr_name)
+                            # Check if attribute is required
+                            if (attr_info.get('required', False) or 
+                                attr_info.get('isRequired', False) or
+                                attr_info.get('nullable', True) is False):
+                                required_attributes.append(attr_name)
+                        
+                        print(f"=== SCHEMA DISCOVERY ===")
+                        print(f"All attributes: {all_attributes}")
+                        print(f"Required attributes: {required_attributes}")
+                        print(f"========================")
+                        
+                        return {
+                            'all_attributes': all_attributes,
+                            'required_attributes': required_attributes,
+                            'attributes_map': attributes_map
+                        }
+                    else:
+                        print(f"Endpoint {endpoint} returned status: {response.status_code}")
+                except Exception as e:
+                    print(f"Error fetching from {endpoint}: {e}")
+            
+            print("WARNING: Could not fetch schema information from any endpoint")
+            print("Using default required attributes")
             return {
                 'all_attributes': [],
                 'required_attributes': ['execution_id', 'tenant_id', 'project_id'],
                 'attributes_map': {}
             }
 
-        # Get schema information
-        schema_info = get_schema_info(http, args.domain, args.schema_id, headers)
-        all_attributes = schema_info['all_attributes']
-        required_attributes = schema_info['required_attributes']
-        attributes_map = schema_info['attributes_map']
-
         def extract_epoch_from_data(update_data):
+            """Extract epoch information from the input data dynamically"""
+            print("Extracting epoch from data...")
+            
             # Check if we have training history arrays that can indicate epoch count
             if isinstance(update_data, dict):
                 # Look for array fields that might contain epoch data
@@ -138,20 +155,23 @@ implementation:
                     if field in update_data and isinstance(update_data[field], list):
                         epoch_count = len(update_data[field])
                         print(f"Found {epoch_count} epochs from {field} array")
-                        return epoch_count - 1  # Return last epoch index
+                        return epoch_count - 1  # Return last epoch index (0-indexed)
                 
                 # Check for best_epoch field
                 if 'best_epoch' in update_data:
+                    print(f"Found best_epoch: {update_data['best_epoch']}")
                     return update_data['best_epoch']
                 
                 # Check for epoch field directly
                 if 'epoch' in update_data:
+                    print(f"Found epoch: {update_data['epoch']}")
                     return update_data['epoch']
             
-            # Default to 0 if no epoch information found
+            print("No epoch information found, defaulting to 0")
             return 0
 
         def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
+            """Prepare data with required attributes and sensible defaults"""
             validated_data = {}
             missing_required = []
             
@@ -182,16 +202,19 @@ implementation:
                 if not all_attributes or key in all_attributes:  # Include if no schema info or if known
                     # Convert data types based on schema
                     attr_info = attributes_map.get(key, {})
-                    attr_type = attr_info.get('type', {}).get('type', 'string')
+                    attr_type = attr_info.get('type', 'string')
+                    if isinstance(attr_type, dict):
+                        attr_type = attr_type.get('type', 'string')
                     
-                    if attr_type in ['float', 'integer', 'long'] and value is not None:
+                    if attr_type in ['float', 'number'] and value is not None:
                         try:
-                            if attr_type == 'float':
-                                validated_data[key] = float(value)
-                            elif attr_type in ['integer', 'long']:
-                                validated_data[key] = int(float(value))  # Handle both int and float strings
-                            else:
-                                validated_data[key] = value
+                            validated_data[key] = float(value)
+                        except (ValueError, TypeError):
+                            validated_data[key] = str(value)
+                            print(f"WARNING: Could not convert {key} to {attr_type}, using string")
+                    elif attr_type in ['integer', 'long', 'int'] and value is not None:
+                        try:
+                            validated_data[key] = int(float(value))
                         except (ValueError, TypeError):
                             validated_data[key] = str(value)
                             print(f"WARNING: Could not convert {key} to {attr_type}, using string")
@@ -204,6 +227,12 @@ implementation:
                 print(f"Missing required attributes that were auto-populated: {missing_required}")
             
             return validated_data
+
+        # Get schema information dynamically
+        schema_info = get_schema_attributes(http, args.domain, args.schema_id, headers)
+        all_attributes = schema_info['all_attributes']
+        required_attributes = schema_info['required_attributes']
+        attributes_map = schema_info['attributes_map']
 
         if args.multiple_rows_json != '-1':
             rows_to_create = json.loads(args.multiple_rows_json)
