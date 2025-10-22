@@ -1,4 +1,4 @@
-name: Final Generalized CNN Update Schema Row
+name: T Generalized CNN Update Schema Row 
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -111,6 +111,8 @@ implementation:
                         'required_attributes': required_attributes,
                         'attributes_map': attributes_map
                     }
+                else:
+                    print(f"Schema discovery failed with status: {response.status_code}")
             except Exception as e:
                 print(f"Could not fetch schema info: {e}")
             
@@ -127,26 +129,58 @@ implementation:
         required_attributes = schema_info['required_attributes']
         attributes_map = schema_info['attributes_map']
 
+        def extract_epoch_from_data(update_data):
+            """Extract epoch information from the input data dynamically"""
+            # Check if we have training history arrays that can indicate epoch count
+            if isinstance(update_data, dict):
+                # Look for array fields that might contain epoch data
+                array_fields = ['train_loss', 'train_acc', 'val_loss', 'val_acc']
+                for field in array_fields:
+                    if field in update_data and isinstance(update_data[field], list):
+                        epoch_count = len(update_data[field])
+                        print(f"Found {epoch_count} epochs from {field} array")
+                        return epoch_count - 1  # Return last epoch index
+                
+                # Check for best_epoch field
+                if 'best_epoch' in update_data:
+                    return update_data['best_epoch']
+                
+                # Check for epoch field directly
+                if 'epoch' in update_data:
+                    return update_data['epoch']
+            
+            # Default to 0 if no epoch information found
+            return 0
+
         def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map):
             validated_data = {}
+            missing_required = []
             
-            # Check for required attributes
+            # Check for required attributes and provide sensible defaults
             for req_attr in required_attributes:
                 if req_attr not in data:
-                    print(f"WARNING: Required attribute '{req_attr}' not provided")
-                    # Provide default values for common required attributes
+                    missing_required.append(req_attr)
+                    # Provide intelligent defaults for common required attributes
                     if req_attr == 'epoch':
-                        data[req_attr] = 0  # Default epoch for summary rows
+                        # Extract epoch from the input data
+                        epoch_value = extract_epoch_from_data(update_data)
+                        data[req_attr] = epoch_value
+                        print(f"Auto-populated {req_attr} with value: {epoch_value}")
                     elif req_attr == 'execution_id' and args.execution_id != '-1':
                         data[req_attr] = args.execution_id
+                        print(f"Auto-populated {req_attr} with value: {args.execution_id}")
                     elif req_attr == 'tenant_id' and args.tenant_id != '-1':
                         data[req_attr] = tenant_id
+                        print(f"Auto-populated {req_attr} with value: {tenant_id}")
                     elif req_attr == 'project_id' and args.project_id != '-1':
                         data[req_attr] = args.project_id
+                        print(f"Auto-populated {req_attr} with value: {args.project_id}")
+                    else:
+                        print(f"WARNING: No default available for required attribute: {req_attr}")
             
-            # Filter and validate attributes
+            # Filter and validate attributes - only include attributes that exist in schema
             for key, value in data.items():
-                if key in all_attributes or not all_attributes:  # Include if known or if we don't have schema info
+                if not all_attributes or key in all_attributes:  # Include if no schema info or if known
                     # Convert data types based on schema
                     attr_info = attributes_map.get(key, {})
                     attr_type = attr_info.get('type', {}).get('type', 'string')
@@ -167,6 +201,9 @@ implementation:
                 else:
                     print(f"WARNING: Attribute '{key}' not found in schema, skipping")
             
+            if missing_required:
+                print(f"Missing required attributes that were auto-populated: {missing_required}")
+            
             return validated_data
 
         if args.multiple_rows_json != '-1':
@@ -174,16 +211,16 @@ implementation:
             validated_rows = []
             
             for row in rows_to_create:
-                # Add common fields
-                if args.tenant_id != '-1':
+                # Add common fields only if they exist in schema
+                if args.tenant_id != '-1' and 'tenant_id' in all_attributes:
                     row['tenant_id'] = tenant_id
-                if args.project_id != '-1':
+                if args.project_id != '-1' and 'project_id' in all_attributes:
                     row['project_id'] = args.project_id
-                if args.architecture_type != '-1':
+                if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
                     row['architecture_type'] = args.architecture_type
-                if 'execution_id' not in row and args.execution_id != '-1':
+                if 'execution_id' not in row and args.execution_id != '-1' and 'execution_id' in all_attributes:
                     row['execution_id'] = args.execution_id
-                if args.model_id != '-1':
+                if args.model_id != '-1' and 'model_id' in all_attributes:
                     row['model_id'] = args.model_id
                 
                 # Validate and prepare data
@@ -249,12 +286,14 @@ implementation:
                                 else:
                                     value_to_patch = str(value)
 
-                        if value_to_patch is not None:
+                        if value_to_patch is not None and column in all_attributes:
                             patch_requests.append({
                                 "operation": "REPLACE",
                                 "path": column,
                                 "value": value_to_patch
                             })
+                        elif value_to_patch is not None:
+                            print(f"WARNING: Column '{column}' not found in schema, skipping update")
 
                     update_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
                     update_payload = {
@@ -300,18 +339,21 @@ implementation:
                                 else:
                                     value_to_add = str(value)
 
-                        if value_to_add is not None:
+                        if value_to_add is not None and column in all_attributes:
                             creation_data[column] = value_to_add
+                        elif value_to_add is not None:
+                            print(f"WARNING: Column '{column}' not found in schema, skipping")
                     
-                    # Add common fields
-                    creation_data['execution_id'] = args.execution_id
-                    if args.model_id != '-1':
+                    # Add common fields only if they exist in schema
+                    if 'execution_id' in all_attributes:
+                        creation_data['execution_id'] = args.execution_id
+                    if args.model_id != '-1' and 'model_id' in all_attributes:
                         creation_data['model_id'] = args.model_id
-                    if args.tenant_id != '-1':
+                    if args.tenant_id != '-1' and 'tenant_id' in all_attributes:
                         creation_data['tenant_id'] = tenant_id
-                    if args.project_id != '-1':
+                    if args.project_id != '-1' and 'project_id' in all_attributes:
                         creation_data['project_id'] = args.project_id
-                    if args.architecture_type != '-1':
+                    if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
                         creation_data['architecture_type'] = args.architecture_type
 
                     # Validate and prepare data for schema
