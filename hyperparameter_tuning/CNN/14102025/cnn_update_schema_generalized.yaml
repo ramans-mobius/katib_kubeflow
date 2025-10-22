@@ -1,4 +1,4 @@
-name: 7 Generalized CNN Update Schema Row
+name: 8 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -282,7 +282,6 @@ implementation:
             return validated_data
 
         def get_instance_endpoints(working_endpoint):
-            """Generate instance operation endpoints based on the working schema endpoint"""
             if not working_endpoint:
                 # Fallback to all possible endpoints if no working endpoint found
                 return [
@@ -313,7 +312,6 @@ implementation:
             return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
 
         def get_list_endpoints(working_endpoint):
-            """Generate list operation endpoints based on the working schema endpoint"""
             if not working_endpoint:
                 # Fallback to all possible endpoints if no working endpoint found
                 return [
@@ -344,7 +342,6 @@ implementation:
             return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
 
         def make_request_with_fallback(http, method, urls, headers, data=None, max_retries=3):
-            """Enhanced request function with fallback to alternative endpoints"""
             for url in urls:
                 print(f"Trying endpoint: {url}")
                 for attempt in range(max_retries):
