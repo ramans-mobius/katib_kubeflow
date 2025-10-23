@@ -1,4 +1,4 @@
-name: 8 Generalized CNN Update Schema Row
+name: 9 Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -440,8 +440,30 @@ implementation:
                 response = make_request_with_fallback(http, 'POST', list_endpoints, headers, check_payload, max_retries=3)
                 response_data = response.json()
                 
-                if response_data.get("content"):
+                # FIX: Handle the actual response format from your schemas
+                print(f"DEBUG: Response type: {type(response_data)}")
+                print(f"DEBUG: Response keys: {response_data.keys() if isinstance(response_data, dict) else 'Not a dict'}")
+                
+                # Your schemas return {"relations": [], "content": [...]}
+                instances_found = []
+                if isinstance(response_data, dict):
+                    instances_found = response_data.get("content", [])
+                    print(f"DEBUG: Found {len(instances_found)} instances in 'content' array")
+                elif isinstance(response_data, list):
+                    instances_found = response_data
+                    print(f"DEBUG: Found {len(instances_found)} instances in direct list")
+                else:
+                    print(f"DEBUG: Unexpected response format: {type(response_data)}")
+                
+                # Filter for your specific execution_id
+                matching_instances = [inst for inst in instances_found if inst.get('execution_id') == args.execution_id]
+                print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
+                
+                if matching_instances:
                     print(f" Instance Found: Updating Row ")
+                    instance_to_update = matching_instances[0]  # Use first matching instance
+                    print(f"DEBUG: Updating instance: {instance_to_update}")
+                    
                     patch_requests = []
                     for column, keys in mapping.items():
                         value_to_patch = None
@@ -464,8 +486,18 @@ implementation:
                                 "path": column,
                                 "value": value_to_patch
                             })
+                            print(f"DEBUG: Will update {column} with {value_to_patch}")
                         elif value_to_patch is not None:
                             print(f"WARNING: Column '{column}' not found in schema, skipping update")
+
+                    if not patch_requests:
+                        print("WARNING: No valid fields to update based on mapping and schema")
+                        # Create minimal update to ensure the row exists
+                        patch_requests.append({
+                            "operation": "REPLACE", 
+                            "path": "execution_id", 
+                            "value": args.execution_id
+                        })
 
                     update_payload = {
                         "dbType": "TIDB",
@@ -511,6 +543,7 @@ implementation:
 
                         if value_to_add is not None and column in all_attributes:
                             creation_data[column] = value_to_add
+                            print(f"DEBUG: Adding {column} = {value_to_add}")
                         elif value_to_add is not None:
                             print(f"WARNING: Column '{column}' not found in schema, skipping")
                     
