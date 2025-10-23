@@ -1,4 +1,4 @@
-name: 2 Generalized CNN Update Schema Row
+name: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -75,7 +75,7 @@ implementation:
             'Authorization': f'Bearer {bearer_auth_token}'
         }
 
-        # Enhanced retry strategy for 500 errors
+        # Enhanced retry strategy
         retry_strategy = Retry(
             total=3,
             status_forcelist=[408, 500, 502, 503, 504],
@@ -88,60 +88,8 @@ implementation:
         http.mount("https://", adapter)
         http.mount("http://", adapter)
 
-        def get_working_endpoints(domain, schema_id, headers):
-            list_endpoints = [
-                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances/list",
-                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list",
-                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}/instances/list"
-            ]
-            
-            instance_endpoints = [
-                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances",
-                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances",
-                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}/instances"
-            ]
-            
-            working_list_endpoint = None
-            working_instance_endpoint = None
-            
-            # Test list endpoints
-            test_payload = {
-                "dbType": "TIDB",
-                "ownedOnly": True,
-                "filter": {}
-            }
-            
-            for endpoint in list_endpoints:
-                try:
-                    print(f"Testing list endpoint: {endpoint}")
-                    response = http.post(endpoint, headers=headers, json=test_payload, timeout=30)
-                    if response.status_code == 200:
-                        working_list_endpoint = endpoint
-                        print(f"✓ List endpoint works: {endpoint}")
-                        break
-                    else:
-                        print(f"✗ List endpoint failed with status {response.status_code}: {endpoint}")
-                except Exception as e:
-                    print(f"✗ List endpoint error: {endpoint} - {e}")
-            
-            # Test instance endpoints with GET first to avoid creating data
-            for endpoint in instance_endpoints:
-                try:
-                    print(f"Testing instance endpoint: {endpoint}")
-                    # Try a simple GET request to check if endpoint exists
-                    response = http.get(endpoint, headers=headers, timeout=30)
-                    if response.status_code in [200, 404]:  # 404 might mean endpoint exists but no data
-                        working_instance_endpoint = endpoint
-                        print(f"✓ Instance endpoint accessible: {endpoint}")
-                        break
-                    else:
-                        print(f"✗ Instance endpoint failed with status {response.status_code}: {endpoint}")
-                except Exception as e:
-                    print(f"✗ Instance endpoint error: {endpoint} - {e}")
-            
-            return working_list_endpoint, working_instance_endpoint
-
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
+         
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -169,6 +117,7 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
+           
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
@@ -184,41 +133,16 @@ implementation:
                     return None
             return current
 
-        # Discover working endpoints
-        print("=== ENDPOINT DISCOVERY ===")
-        working_list_endpoint, working_instance_endpoint = get_working_endpoints(args.domain, args.schema_id, headers)
+        # Use only the working v2.0 list endpoint
+        working_list_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list"
         
-        if not working_list_endpoint:
-            raise Exception("No working list endpoint found")
-        
-        if not working_instance_endpoint:
-            # If no instance endpoint found, try to derive from list endpoint
-            if 'v2.0' in working_list_endpoint:
-                working_instance_endpoint = working_list_endpoint.replace('/list', '')
-            elif 'v3.0' in working_list_endpoint:
-                working_instance_endpoint = working_list_endpoint.replace('/list', '')
-            else:
-                working_instance_endpoint = working_list_endpoint.replace('/list', '')
-            print(f"Derived instance endpoint: {working_instance_endpoint}")
-
         print(f"Using list endpoint: {working_list_endpoint}")
-        print(f"Using instance endpoint: {working_instance_endpoint}")
 
         if args.multiple_rows_json != '-1':
-            # Handle multiple rows creation
-            rows_to_create = json.loads(args.multiple_rows_json)
-            create_payload = {"data": rows_to_create}
-            
-            print(f" Creating Multiple Rows ")
-            print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
-
-            try:
-                response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
-                print("Successfully created multiple model instances.")
-                print(f"Response: {response.json()}")
-            except Exception as e:
-                print(f"Error creating multiple model instances: {e}")
-                exit(1)
+            # For multiple rows, we'll need to use the list endpoint with a different approach
+            print("WARNING: Multiple rows creation not supported with current API limitations")
+            print("Only single row updates are supported")
+            exit(1)
         else:
             # Check if execution_id exists
             check_payload = {
@@ -253,7 +177,7 @@ implementation:
                 print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
                 
                 if matching_instances:
-                    print(f" Instance Found: Updating Row ")
+                    print(f" Instance Found: Attempting Update ")
                     instance_to_update = matching_instances[0]
                     
                     # Build update data based on mapping
@@ -266,7 +190,18 @@ implementation:
                             # If source_key is a list, extract nested values and create a dictionary
                             nested_data = {}
                             for key in source_key:
-                                nested_value = extract_nested_value(update_data, key)
+                                # Try to find the key in nested structure
+                                nested_value = None
+                                # First try in the model object
+                                if 'model' in update_data and key in update_data['model']:
+                                    nested_value = update_data['model'][key]
+                                # Then try at root level
+                                elif key in update_data:
+                                    nested_value = update_data[key]
+                                # Finally try nested lookup
+                                else:
+                                    nested_value = extract_nested_value(update_data, key)
+                                
                                 if nested_value is not None:
                                     nested_data[key] = nested_value
                             if nested_data:  # Only add if we found any values
@@ -289,120 +224,140 @@ implementation:
                     
                     if not update_fields:
                         print("WARNING: No valid fields to update based on mapping")
-                        update_fields = {"execution_id": args.execution_id}  # Minimal update
+                        update_fields = {"execution_id": args.execution_id}
                     
-                    # Use POST for update (replace entire record)
+                    # Since instance endpoints don't work, we'll use the list endpoint with partial update
+                    # Try partial update through list endpoint
                     try:
-                        # Get the current instance data and merge with updates
-                        current_data = instance_to_update.copy()
-                        current_data.update(update_fields)
-                        
-                        # Add required fields if missing
-                        if 'tenant_id' not in current_data:
-                            current_data['tenant_id'] = tenant_id
-                        if 'project_id' not in current_data and args.project_id != '-1':
-                            current_data['project_id'] = args.project_id
-                        
-                        update_payload = {"data": [current_data]}
-                        
-                        print(f"Attempting POST update...")
-                        print(f"Update Payload: {json.dumps(update_payload, indent=2)}")
-                        
-                        response = make_retry_request(http, 'POST', working_instance_endpoint, headers, update_payload)
-                        print("Successfully updated the model instance using POST.")
-                        
-                    except Exception as post_error:
-                        print(f"POST update failed: {post_error}")
-                        print("Falling back to alternative update methods...")
-                        
-                        # Alternative: Try direct instance ID update if available
+                        # Check if instance has an ID for direct update
                         if 'id' in instance_to_update:
                             instance_id = instance_to_update['id']
-                            instance_specific_endpoint = f"{working_instance_endpoint}/{instance_id}"
-                            try:
-                                response = make_retry_request(http, 'PUT', instance_specific_endpoint, headers, update_fields)
-                                print("Successfully updated using instance-specific endpoint.")
-                            except Exception as specific_error:
-                                print(f"Instance-specific update also failed: {specific_error}")
-                                # Last resort: try creating new record
-                                print("Attempting to create new record instead...")
-                                create_payload = {"data": [current_data]}
-                                response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
-                                print("Successfully created new record.")
-                        else:
-                            # Try creating new record if update fails
-                            print("Attempting to create new record instead...")
-                            creation_data = update_fields.copy()
-                            creation_data['execution_id'] = args.execution_id
-                            creation_data['tenant_id'] = tenant_id
-                            if args.project_id != '-1':
-                                creation_data['project_id'] = args.project_id
+                            # Try v2.0 instance-specific endpoint
+                            instance_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/{instance_id}"
+                            print(f"Attempting direct instance update via: {instance_endpoint}")
                             
-                            create_payload = {"data": [creation_data]}
-                            response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
-                            print("Successfully created new record.")
+                            # Merge current data with updates
+                            current_data = instance_to_update.copy()
+                            current_data.update(update_fields)
+                            
+                            # Remove ID if present to avoid conflicts
+                            if 'id' in current_data:
+                                del current_data['id']
+                            
+                            update_payload = current_data
+                            print(f"Update Payload: {json.dumps(update_payload, indent=2)}")
+                            
+                            try:
+                                response = make_retry_request(http, 'PUT', instance_endpoint, headers, update_payload)
+                                print("Successfully updated using direct instance endpoint!")
+                                print(f"Response: {response.json()}")
+                            except Exception as direct_error:
+                                print(f"Direct instance update failed: {direct_error}")
+                                raise direct_error
+                        else:
+                            print("No instance ID found, cannot perform update")
+                            print("Current instance data:", instance_to_update)
+                            raise Exception("Cannot update: No instance ID available")
+                            
+                    except Exception as update_error:
+                        print(f"Update failed: {update_error}")
+                        print("Falling back to alternative approach...")
+                        
+                        # Alternative: Try to use the list endpoint with conditional update
+                        try:
+                            conditional_update_payload = {
+                                "dbType": "TIDB",
+                                "conditionalFilter": {
+                                    "conditions": [
+                                        {
+                                            "field": "execution_id",
+                                            "operator": "EQUAL", 
+                                            "value": args.execution_id
+                                        }
+                                    ]
+                                },
+                                "partialUpdateRequests": [
+                                    {
+                                        "patch": [
+                                            {
+                                                "operation": "REPLACE",
+                                                "path": key,
+                                                "value": value
+                                            } for key, value in update_fields.items()
+                                        ]
+                                    }
+                                ]
+                            }
+                            
+                            print("Attempting conditional update via list endpoint...")
+                            print(f"Conditional Update Payload: {json.dumps(conditional_update_payload, indent=2)}")
+                            
+                            # Try PATCH on list endpoint
+                            response = make_retry_request(http, 'PATCH', working_list_endpoint, headers, conditional_update_payload)
+                            print("Successfully updated using conditional update!")
+                            print(f"Response: {response.json()}")
+                            
+                        except Exception as conditional_error:
+                            print(f"Conditional update also failed: {conditional_error}")
+                            print("All update methods failed. Data can be queried but not updated.")
+                            print("Current data in schema:")
+                            print(json.dumps(instance_to_update, indent=2))
+                            print("Attempted updates:")
+                            print(json.dumps(update_fields, indent=2))
+                            exit(1)
                             
                 else:
-                    print(f" No Instance Found: Creating New Row ")
+                    print(f" No Instance Found: Cannot Create New Row ")
+                    print("WARNING: Create operations not supported with current API endpoints")
+                    print("Only updates to existing records are possible")
+                    print("To create a new record, you need to use a different API endpoint or service")
                     
-                    # Build creation data
+                    # Show what would have been created
                     creation_data = {}
                     for column, source_key in mapping.items():
                         value = None
                         
-                        # Handle different types of source_key mappings
                         if isinstance(source_key, list):
-                            # If source_key is a list, extract nested values and create a dictionary
                             nested_data = {}
                             for key in source_key:
-                                nested_value = extract_nested_value(update_data, key)
+                                nested_value = None
+                                if 'model' in update_data and key in update_data['model']:
+                                    nested_value = update_data['model'][key]
+                                elif key in update_data:
+                                    nested_value = update_data[key]
+                                else:
+                                    nested_value = extract_nested_value(update_data, key)
+                                
                                 if nested_value is not None:
                                     nested_data[key] = nested_value
-                            if nested_data:  # Only add if we found any values
+                            if nested_data:
                                 value = nested_data
-                                print(f"DEBUG: Adding {column} with nested data: {nested_data}")
+                                print(f"DEBUG: Would add {column} with nested data: {nested_data}")
                         elif isinstance(source_key, str):
-                            # If source_key is a string, extract the value directly
                             value = extract_nested_value(update_data, source_key)
                             if value is not None:
-                                # Handle float conversion if needed
                                 if source_key in float_keys:
                                     try:
                                         value = float(value)
                                     except (ValueError, TypeError):
                                         value = str(value)
-                                print(f"DEBUG: Adding {column} = {value}")
+                                print(f"DEBUG: Would add {column} = {value}")
                         
                         if value is not None:
                             creation_data[column] = value
                     
-                    # Add required identifiers
                     creation_data['execution_id'] = args.execution_id
                     creation_data['tenant_id'] = tenant_id
                     if args.project_id != '-1':
                         creation_data['project_id'] = args.project_id
-                    if args.model_id != '-1':
-                        creation_data['model_id'] = args.model_id
-                    if args.architecture_type != '-1':
-                        creation_data['architecture_type'] = args.architecture_type
-
-                    create_payload = {
-                        "data": [creation_data]
-                    }
-
-                    print(f"Creating new instance...")
-                    print(f"Create Payload: {json.dumps(create_payload, indent=2)}")
                     
-                    response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
-                    print("Successfully created a new model instance.")
-                    
-                print(f"Response: {response.json()}")
+                    print("Data that would be created (if create was supported):")
+                    print(json.dumps(creation_data, indent=2))
+                    exit(1)
 
             except Exception as e:
                 print(f"Error: {e}")
-                print(f"Last request details:")
-                print(f"  List Endpoint: {working_list_endpoint}")
-                print(f"  Instance Endpoint: {working_instance_endpoint}")
+                print(f"Working endpoint: {working_list_endpoint}")
                 exit(1)
 
     args:
