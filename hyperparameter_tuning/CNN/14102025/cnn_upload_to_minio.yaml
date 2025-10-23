@@ -1,0 +1,364 @@
+name: CNN to MinIO for KServe
+description: Packages CNN model with MLServer runtime and uploads to MinIO for KServe deployment
+inputs:
+  - name: trained_model
+    type: Model
+    description: Trained model weights from CNN train brick
+  - name: training_history
+    type: String
+    description: Training history JSON from CNN train brick
+  - name: config
+    type: String
+    description: Model configuration from Build Model
+  - name: data_path
+    type: Dataset
+    description: Dataset used for training (to extract class labels)
+  - name: bearer_token
+    type: string
+    description: Bearer token for authentication
+  - name: model_name
+    type: String
+    description: Name for the model (e.g., "resnet50")
+  - name: bucket
+    type: String
+    description: MinIO bucket name
+    default: "ml-models"
+  - name: app_name
+    type: String
+    description: Application namespace
+    default: "cnn-app"
+  - name: version
+    type: String
+    description: Model version
+    default: ""
+
+outputs:
+  - name: model_uri
+    type: String
+    description: s3:// URI for KServe deployment
+  - name: manifest_json
+    type: Data
+    description: JSON manifest of uploaded files
+
+implementation:
+  container:
+    image: ubuntu:22.04
+    command:
+    - sh
+    - -ex
+    - -c
+    - |
+      # Update and install dependencies
+      apt-get -o Acquire::ForceIPv4=true update
+      apt-get -o Acquire::ForceIPv4=true install -y wget python3 python3-pip curl
+      
+      # Install Python dependencies
+      pip3 install torch torchvision pillow requests
+      
+      # Download MinIO client
+      wget https://dl.min.io/client/mc/release/linux-amd64/mc
+      chmod +x mc
+      mv mc /usr/local/bin/
+      
+      # Set up MinIO alias (using your existing MinIO service)
+      mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 minio K7712XV0U4HRX0U4HRXJOCL8JJFPBVUNFNZL
+      
+      # Read inputs
+      WEIGHTS="$0"
+      TRAINING_HISTORY="$1"
+      CONFIG_JSON="$2"
+      DATA_PATH="$3"
+      BEARER_TOKEN="$4"
+      MODEL_NAME="$5"
+      BUCKET="$6"
+      APP="$7"
+      VERSION="$8"
+      OUT_URI="$9"
+      OUT_MANIFEST="${10}"
+      
+      # Read bearer token from file
+      TOKEN=$(cat "$BEARER_TOKEN")
+      
+      # Validate inputs
+      if [ -z "$BUCKET" ]; then echo "bucket is required" >&2; exit 1; fi
+      if [ -z "$APP" ]; then echo "app_name is required" >&2; exit 1; fi
+      if [ -z "$MODEL_NAME" ]; then echo "model_name is required" >&2; exit 1; fi
+      if [ ! -f "$WEIGHTS" ] || [ ! -s "$WEIGHTS" ]; then echo "trained_model missing/empty" >&2; exit 1; fi
+      if [ ! -f "$CONFIG_JSON" ] || [ ! -s "$CONFIG_JSON" ]; then echo "config missing/empty" >&2; exit 1; fi
+      
+      # Auto-version if empty
+      if [ -z "$VERSION" ]; then 
+        VERSION="$(date -u +'%Y%m%dT%H%M%SZ')"
+      fi
+      
+      # Prepare staging area
+      STAGE="/tmp/cnn_mlserver_pkg"
+      mkdir -p "$STAGE"
+      
+      # Stage artifacts
+      cp "$WEIGHTS" "$STAGE/model_weights.pth"
+      cp "$CONFIG_JSON" "$STAGE/model_config.json"
+      
+      # Extract class labels from data_path if available
+      python3 << 'PYTHON_EOF'
+      import json
+      import pickle
+      import os
+      
+      data_path = "$DATA_PATH"
+      output_file = "$STAGE/class_labels.json"
+      
+      class_labels = {"0": "class_0", "1": "class_1"}  # default
+      
+      try:
+          if os.path.exists(data_path):
+              with open(data_path, 'rb') as f:
+                  data = pickle.load(f)
+              
+              # Try to extract class labels from dataset
+              if hasattr(data, 'classes') and data.classes:
+                  class_labels = {str(i): cls for i, cls in enumerate(data.classes)}
+              elif hasattr(data, 'class_to_idx'):
+                  class_labels = {str(idx): cls for cls, idx in data.class_to_idx.items()}
+              elif hasattr(data, 'num_classes'):
+                  class_labels = {str(i): f"class_{i}" for i in range(data.num_classes)}
+                  
+      except Exception as e:
+          print(f"Warning: Could not extract class labels: {e}")
+      
+      with open(output_file, 'w') as f:
+          json.dump(class_labels, f, indent=2)
+      PYTHON_EOF
+      
+      # Create MLServer runtime for CNN
+      cat > "$STAGE/runtime.py" <<'PYEOF'
+from mlserver import MLModel
+from mlserver.types import InferenceRequest, InferenceResponse, ResponseOutput, Parameters, TensorDatatype
+import importlib.util, json, os, torch
+import torchvision.transforms as transforms
+from PIL import Image
+import numpy as np
+import io
+import base64
+
+def _load_module(path, mod_name="model"):
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot import module from {path}")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+class CNNRuntime(MLModel):
+    async def load(self) -> bool:
+        base = os.getenv("MLSERVER_MODEL_PARAMETERS_URI", ".")
+        
+        # Load model config
+        with open(os.path.join(base, "model_config.json"), "r", encoding="utf-8") as f:
+            self.cfg = json.load(f)
+        
+        # Load class labels
+        with open(os.path.join(base, "class_labels.json"), "r", encoding="utf-8") as f:
+            self.class_labels = json.load(f)
+        
+        # Import model architecture
+        model_config = self.cfg.get('model', {})
+        ModelCls = getattr(_load_module("/opt/model.py"), "CNNModel")  # Will be copied to container
+        
+        # Create model instance
+        self.model = ModelCls(model_config)
+        
+        # Load weights
+        weights_path = os.path.join(base, "model_weights.pth")
+        state_dict = torch.load(weights_path, map_location="cpu")
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model.eval()
+        
+        # Setup device
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model.to(self.device)
+        
+        # Setup image preprocessing
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
+        ])
+        
+        self.num_classes = len(self.class_labels)
+        return True
+
+    def _preprocess_image(self, image_data):
+        """Preprocess image from base64 or numpy array"""
+        if isinstance(image_data, str):
+            # Base64 encoded image
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        elif isinstance(image_data, bytes):
+            # Raw bytes
+            image = Image.open(io.BytesIO(image_data)).convert('RGB')
+        else:
+            # Assume numpy array or tensor
+            if isinstance(image_data, np.ndarray):
+                image = Image.fromarray(image_data.astype('uint8'))
+            else:
+                raise ValueError(f"Unsupported image data type: {type(image_data)}")
+        
+        return self.transform(image).unsqueeze(0)  # Add batch dimension
+
+    async def predict(self, request: InferenceRequest) -> InferenceResponse:
+        images = []
+        
+        # Extract image data from request
+        if request and request.inputs:
+            for inp in request.inputs:
+                if inp.name in ("image", "images", "input"):
+                    if inp.datatype == TensorDatatype.BYTES:
+                        # Base64 encoded images
+                        images = [self._preprocess_image(img) for img in inp.data]
+                    elif inp.datatype == TensorDatatype.FP32:
+                        # Already preprocessed tensors
+                        images = [torch.tensor(img, dtype=torch.float32) for img in inp.data]
+                    break
+        
+        if not images:
+            raise ValueError("No image data found in request. Provide 'image' or 'images' input.")
+        
+        # Batch images
+        batch = torch.cat(images, dim=0).to(self.device)
+        
+        # Run inference
+        with torch.no_grad():
+            outputs = self.model(batch)
+            probabilities = torch.softmax(outputs, dim=1)
+            top_probs, top_indices = torch.topk(probabilities, min(3, self.num_classes), dim=1)
+        
+        # Convert to lists
+        batch_size = len(images)
+        predictions = []
+        
+        for i in range(batch_size):
+            pred = {
+                "class_indices": top_indices[i].cpu().tolist(),
+                "probabilities": top_probs[i].cpu().tolist(),
+                "class_names": [self.class_labels.get(str(idx), f"class_{idx}") 
+                               for idx in top_indices[i].cpu().tolist()]
+            }
+            predictions.append(pred)
+        
+        # Flatten for MLServer response
+        flat_probs = [p for pred in predictions for p in pred['probabilities']]
+        flat_indices = [idx for pred in predictions for idx in pred['class_indices']]
+        flat_names = [name for pred in predictions for name in pred['class_names']]
+        
+        return InferenceResponse(
+            model_name=self.name,
+            outputs=[
+                ResponseOutput(
+                    name="predictions", 
+                    shape=[batch_size], 
+                    datatype=TensorDatatype.BYTES, 
+                    data=[json.dumps(pred) for pred in predictions]
+                ),
+                ResponseOutput(
+                    name="top_probabilities",
+                    shape=[len(flat_probs)],
+                    datatype=TensorDatatype.FP32,
+                    data=flat_probs
+                ),
+                ResponseOutput(
+                    name="top_class_indices", 
+                    shape=[len(flat_indices)], 
+                    datatype=TensorDatatype.INT64, 
+                    data=flat_indices
+                )
+            ]
+        )
+PYEOF
+
+      # Create MLServer settings
+      cat > "$STAGE/model-settings.json" <<JSONEOF
+{
+  "name": "$MODEL_NAME",
+  "implementation": "runtime.CNNRuntime",
+  "parameters": { "uri": "." }
+}
+JSONEOF
+
+      # Create model architecture file (simplified - would come from Build Model in real scenario)
+      cat > "$STAGE/model.py" <<'PYEOF'
+import torch
+import torch.nn as nn
+import torchvision.models as models
+
+class CNNModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        architecture = config.get('architecture', 'resnet50')
+        num_classes = config.get('output_dim', 10)
+        pretrained = config.get('pretrained', True)
+        
+        if architecture == 'resnet50':
+            self.backbone = models.resnet50(pretrained=pretrained)
+            self.backbone.fc = nn.Linear(self.backbone.fc.in_features, num_classes)
+        elif architecture == 'resnet18':
+            self.backbone = models.resnet18(pretrained=pretrained)
+            self.backbone.fc = nn.Linear(self.backbone.fc.in_features, num_classes)
+        elif architecture == 'efficientnet':
+            self.backbone = models.efficientnet_b0(pretrained=pretrained)
+            self.backbone.classifier[1] = nn.Linear(self.backbone.classifier[1].in_features, num_classes)
+        else:
+            raise ValueError(f"Unsupported architecture: {architecture}")
+    
+    def forward(self, x):
+        return self.backbone(x)
+PYEOF
+
+      mkdir -p "$(dirname "$OUT_URI")"
+      mkdir -p "$(dirname "$OUT_MANIFEST")"
+      
+      # Create manifest
+      {
+        echo '{ "files": ['
+        first=1
+        for f in model.py runtime.py model-settings.json model_config.json model_weights.pth class_labels.json; do
+          if [ -f "$STAGE/$f" ]; then
+            sz=$(wc -c < "$STAGE/$f" | tr -d ' ')
+            if [ $first -eq 0 ]; then echo ","; fi
+            printf '  { "name":"%s", "size":%s }' "$f" "$sz"
+            first=0
+          fi
+        done
+        echo ' ] }'
+      } > "$OUT_MANIFEST"
+      
+      # Check if bucket exists, create if not
+      if ! mc ls myminio/"$BUCKET" &>/dev/null; then
+        mc mb myminio/"$BUCKET"
+      fi
+      
+      # Upload to MinIO
+      DEST="myminio/$BUCKET/$APP/$MODEL_NAME/$VERSION/"
+      mc cp --recursive "$STAGE/" "$DEST"
+      
+      # Output s3:// URI
+      URI="s3://$BUCKET/$APP/$MODEL_NAME/$VERSION/"
+      echo "$URI" > "$OUT_URI"
+      
+      echo "=== CNN to MinIO Complete ==="
+      echo "Model URI: $URI"
+      echo "Manifest: $OUT_MANIFEST"
+    - inputPath: trained_model
+    - inputPath: training_history
+    - inputPath: config
+    - inputPath: data_path
+    - inputPath: bearer_token
+    - inputValue: model_name
+    - inputValue: bucket
+    - inputValue: app_name
+    - inputValue: version
+    - outputPath: model_uri
+    - outputPath: manifest_json
