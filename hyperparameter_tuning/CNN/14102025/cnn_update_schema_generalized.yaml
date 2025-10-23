@@ -1,4 +1,4 @@
-brick: Pls Generalized CNN Update Schema Row
+name: P Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,7 +89,7 @@ implementation:
         http.mount("http://", adapter)
 
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
-            """Make request with retry logic"""
+      
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -117,7 +117,7 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-            """Extract value from nested dictionary using dot notation or list of keys"""
+           
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
