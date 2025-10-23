@@ -1,4 +1,4 @@
-brick: Generalized CNN Update Schema Row
+name: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,7 +89,6 @@ implementation:
         http.mount("http://", adapter)
 
         def get_working_endpoints(domain, schema_id, headers):
-            """Discover which endpoints actually work for this schema"""
             list_endpoints = [
                 f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances/list",
                 f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list",
@@ -143,7 +142,6 @@ implementation:
             return working_list_endpoint, working_instance_endpoint
 
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
-            """Make request with retry logic"""
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -171,7 +169,6 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-            """Extract value from nested dictionary using dot notation or list of keys"""
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
