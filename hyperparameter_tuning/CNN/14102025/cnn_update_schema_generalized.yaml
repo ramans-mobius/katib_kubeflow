@@ -1,4 +1,4 @@
-name: Generalized CNN Update Schema Row
+brick: Pls Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,7 +89,7 @@ implementation:
         http.mount("http://", adapter)
 
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
-         
+            """Make request with retry logic"""
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -117,7 +117,7 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-           
+            """Extract value from nested dictionary using dot notation or list of keys"""
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
@@ -133,16 +133,38 @@ implementation:
                     return None
             return current
 
-        # Use only the working v2.0 list endpoint
+        # Use the working v2.0 list endpoint for queries
         working_list_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list"
         
         print(f"Using list endpoint: {working_list_endpoint}")
 
         if args.multiple_rows_json != '-1':
-            # For multiple rows, we'll need to use the list endpoint with a different approach
-            print("WARNING: Multiple rows creation not supported with current API limitations")
-            print("Only single row updates are supported")
-            exit(1)
+            # For multiple rows, use the list endpoint with bulk insert
+            rows_to_create = json.loads(args.multiple_rows_json)
+            
+            # Add common fields to each row
+            for row in rows_to_create:
+                row['tenant_id'] = tenant_id
+                if args.project_id != '-1':
+                    row['project_id'] = args.project_id
+                if args.execution_id != '-1':
+                    row['execution_id'] = args.execution_id
+            
+            create_payload = {
+                "dbType": "TIDB",
+                "data": rows_to_create
+            }
+            
+            print(f" Creating Multiple Rows ")
+            print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
+
+            try:
+                response = make_retry_request(http, 'POST', working_list_endpoint, headers, create_payload)
+                print("Successfully created multiple model instances.")
+                print(f"Response: {response.json()}")
+            except Exception as e:
+                print(f"Error creating multiple model instances: {e}")
+                exit(1)
         else:
             # Check if execution_id exists
             check_payload = {
@@ -176,184 +198,89 @@ implementation:
                 matching_instances = [inst for inst in instances_found if inst.get('execution_id') == args.execution_id]
                 print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
                 
+                # Build data based on mapping
+                data_to_save = {}
+                for column, source_key in mapping.items():
+                    value = None
+                    
+                    # Handle different types of source_key mappings
+                    if isinstance(source_key, list):
+                        # If source_key is a list, extract nested values and create a dictionary
+                        nested_data = {}
+                        for key in source_key:
+                            # Try to find the key in nested structure
+                            nested_value = None
+                            # First try in the model object
+                            if 'model' in update_data and key in update_data['model']:
+                                nested_value = update_data['model'][key]
+                            # Then try at root level
+                            elif key in update_data:
+                                nested_value = update_data[key]
+                            # Finally try nested lookup
+                            else:
+                                nested_value = extract_nested_value(update_data, key)
+                            
+                            if nested_value is not None:
+                                nested_data[key] = nested_value
+                        if nested_data:  # Only add if we found any values
+                            value = nested_data
+                            print(f"DEBUG: Will save {column} with nested data: {nested_data}")
+                    elif isinstance(source_key, str):
+                        # If source_key is a string, extract the value directly
+                        value = extract_nested_value(update_data, source_key)
+                        if value is not None:
+                            # Handle float conversion if needed
+                            if source_key in float_keys:
+                                try:
+                                    value = float(value)
+                                except (ValueError, TypeError):
+                                    value = str(value)
+                            print(f"DEBUG: Will save {column} with {value}")
+                    
+                    if value is not None:
+                        data_to_save[column] = value
+                
+                # Add required identifiers
+                data_to_save['tenant_id'] = tenant_id
+                data_to_save['execution_id'] = args.execution_id
+                if args.project_id != '-1':
+                    data_to_save['project_id'] = args.project_id
+                if args.model_id != '-1':
+                    data_to_save['model_id'] = args.model_id
+                if args.architecture_type != '-1':
+                    data_to_save['architecture_type'] = args.architecture_type
+                
                 if matching_instances:
-                    print(f" Instance Found: Attempting Update ")
-                    instance_to_update = matching_instances[0]
+                    print(f" Instance Found: Upserting Row ")
+                    # For updates, we'll use upsert (insert or update)
+                    # The API should handle this automatically based on primary key
                     
-                    # Build update data based on mapping
-                    update_fields = {}
-                    for column, source_key in mapping.items():
-                        value = None
-                        
-                        # Handle different types of source_key mappings
-                        if isinstance(source_key, list):
-                            # If source_key is a list, extract nested values and create a dictionary
-                            nested_data = {}
-                            for key in source_key:
-                                # Try to find the key in nested structure
-                                nested_value = None
-                                # First try in the model object
-                                if 'model' in update_data and key in update_data['model']:
-                                    nested_value = update_data['model'][key]
-                                # Then try at root level
-                                elif key in update_data:
-                                    nested_value = update_data[key]
-                                # Finally try nested lookup
-                                else:
-                                    nested_value = extract_nested_value(update_data, key)
-                                
-                                if nested_value is not None:
-                                    nested_data[key] = nested_value
-                            if nested_data:  # Only add if we found any values
-                                value = nested_data
-                                print(f"DEBUG: Will update {column} with nested data: {nested_data}")
-                        elif isinstance(source_key, str):
-                            # If source_key is a string, extract the value directly
-                            value = extract_nested_value(update_data, source_key)
-                            if value is not None:
-                                # Handle float conversion if needed
-                                if source_key in float_keys:
-                                    try:
-                                        value = float(value)
-                                    except (ValueError, TypeError):
-                                        value = str(value)
-                                print(f"DEBUG: Will update {column} with {value}")
-                        
-                        if value is not None:
-                            update_fields[column] = value
+                    upsert_payload = {
+                        "dbType": "TIDB",
+                        "data": [data_to_save]
+                    }
                     
-                    if not update_fields:
-                        print("WARNING: No valid fields to update based on mapping")
-                        update_fields = {"execution_id": args.execution_id}
+                    print(f"Upserting data (insert or update)...")
+                    print(f"Upsert Payload: {json.dumps(upsert_payload, indent=2)}")
                     
-                    # Since instance endpoints don't work, we'll use the list endpoint with partial update
-                    # Try partial update through list endpoint
-                    try:
-                        # Check if instance has an ID for direct update
-                        if 'id' in instance_to_update:
-                            instance_id = instance_to_update['id']
-                            # Try v2.0 instance-specific endpoint
-                            instance_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/{instance_id}"
-                            print(f"Attempting direct instance update via: {instance_endpoint}")
-                            
-                            # Merge current data with updates
-                            current_data = instance_to_update.copy()
-                            current_data.update(update_fields)
-                            
-                            # Remove ID if present to avoid conflicts
-                            if 'id' in current_data:
-                                del current_data['id']
-                            
-                            update_payload = current_data
-                            print(f"Update Payload: {json.dumps(update_payload, indent=2)}")
-                            
-                            try:
-                                response = make_retry_request(http, 'PUT', instance_endpoint, headers, update_payload)
-                                print("Successfully updated using direct instance endpoint!")
-                                print(f"Response: {response.json()}")
-                            except Exception as direct_error:
-                                print(f"Direct instance update failed: {direct_error}")
-                                raise direct_error
-                        else:
-                            print("No instance ID found, cannot perform update")
-                            print("Current instance data:", instance_to_update)
-                            raise Exception("Cannot update: No instance ID available")
-                            
-                    except Exception as update_error:
-                        print(f"Update failed: {update_error}")
-                        print("Falling back to alternative approach...")
-                        
-                        # Alternative: Try to use the list endpoint with conditional update
-                        try:
-                            conditional_update_payload = {
-                                "dbType": "TIDB",
-                                "conditionalFilter": {
-                                    "conditions": [
-                                        {
-                                            "field": "execution_id",
-                                            "operator": "EQUAL", 
-                                            "value": args.execution_id
-                                        }
-                                    ]
-                                },
-                                "partialUpdateRequests": [
-                                    {
-                                        "patch": [
-                                            {
-                                                "operation": "REPLACE",
-                                                "path": key,
-                                                "value": value
-                                            } for key, value in update_fields.items()
-                                        ]
-                                    }
-                                ]
-                            }
-                            
-                            print("Attempting conditional update via list endpoint...")
-                            print(f"Conditional Update Payload: {json.dumps(conditional_update_payload, indent=2)}")
-                            
-                            # Try PATCH on list endpoint
-                            response = make_retry_request(http, 'PATCH', working_list_endpoint, headers, conditional_update_payload)
-                            print("Successfully updated using conditional update!")
-                            print(f"Response: {response.json()}")
-                            
-                        except Exception as conditional_error:
-                            print(f"Conditional update also failed: {conditional_error}")
-                            print("All update methods failed. Data can be queried but not updated.")
-                            print("Current data in schema:")
-                            print(json.dumps(instance_to_update, indent=2))
-                            print("Attempted updates:")
-                            print(json.dumps(update_fields, indent=2))
-                            exit(1)
-                            
+                    response = make_retry_request(http, 'POST', working_list_endpoint, headers, upsert_payload)
+                    print("Successfully upserted the model instance.")
+                    
                 else:
-                    print(f" No Instance Found: Cannot Create New Row ")
-                    print("WARNING: Create operations not supported with current API endpoints")
-                    print("Only updates to existing records are possible")
-                    print("To create a new record, you need to use a different API endpoint or service")
+                    print(f" No Instance Found: Creating New Row ")
                     
-                    # Show what would have been created
-                    creation_data = {}
-                    for column, source_key in mapping.items():
-                        value = None
-                        
-                        if isinstance(source_key, list):
-                            nested_data = {}
-                            for key in source_key:
-                                nested_value = None
-                                if 'model' in update_data and key in update_data['model']:
-                                    nested_value = update_data['model'][key]
-                                elif key in update_data:
-                                    nested_value = update_data[key]
-                                else:
-                                    nested_value = extract_nested_value(update_data, key)
-                                
-                                if nested_value is not None:
-                                    nested_data[key] = nested_value
-                            if nested_data:
-                                value = nested_data
-                                print(f"DEBUG: Would add {column} with nested data: {nested_data}")
-                        elif isinstance(source_key, str):
-                            value = extract_nested_value(update_data, source_key)
-                            if value is not None:
-                                if source_key in float_keys:
-                                    try:
-                                        value = float(value)
-                                    except (ValueError, TypeError):
-                                        value = str(value)
-                                print(f"DEBUG: Would add {column} = {value}")
-                        
-                        if value is not None:
-                            creation_data[column] = value
+                    create_payload = {
+                        "dbType": "TIDB",
+                        "data": [data_to_save]
+                    }
+
+                    print(f"Creating new instance...")
+                    print(f"Create Payload: {json.dumps(create_payload, indent=2)}")
                     
-                    creation_data['execution_id'] = args.execution_id
-                    creation_data['tenant_id'] = tenant_id
-                    if args.project_id != '-1':
-                        creation_data['project_id'] = args.project_id
+                    response = make_retry_request(http, 'POST', working_list_endpoint, headers, create_payload)
+                    print("Successfully created a new model instance.")
                     
-                    print("Data that would be created (if create was supported):")
-                    print(json.dumps(creation_data, indent=2))
-                    exit(1)
+                print(f"Response: {response.json()}")
 
             except Exception as e:
                 print(f"Error: {e}")
