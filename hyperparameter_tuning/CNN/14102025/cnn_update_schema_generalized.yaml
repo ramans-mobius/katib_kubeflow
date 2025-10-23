@@ -1,4 +1,4 @@
-name: 9 Generalized CNN Update Schema Row
+brick: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -77,10 +77,10 @@ implementation:
 
         # Enhanced retry strategy for 500 errors
         retry_strategy = Retry(
-            total=5,
+            total=3,
             status_forcelist=[408, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "PUT", "POST", "DELETE", "OPTIONS", "TRACE"],
-            backoff_factor=2,
+            backoff_factor=1,
             backoff_jitter=0.5
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -88,338 +88,120 @@ implementation:
         http.mount("https://", adapter)
         http.mount("http://", adapter)
 
-        def get_schema_attributes(http, domain, schema_id, headers):
-            # All possible schema endpoints
-            schema_endpoints = [
-                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
-                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
-                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
-                f"{domain}/pi-schemas-service/v2.0/schemas/{schema_id}",
-                f"{domain}/pi-schemas-service/v3.0/schemas/{schema_id}"
+        def get_working_endpoints(domain, schema_id, headers):
+            """Discover which endpoints actually work for this schema"""
+            list_endpoints = [
+                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances/list",
+                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list",
+                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}/instances/list"
             ]
             
-            working_endpoint = None
-            schema_info = None
+            instance_endpoints = [
+                f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances",
+                f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances",
+                f"{domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}/instances"
+            ]
             
-            for endpoint in schema_endpoints:
+            working_list_endpoint = None
+            working_instance_endpoint = None
+            
+            # Test list endpoints
+            test_payload = {
+                "dbType": "TIDB",
+                "ownedOnly": True,
+                "filter": {}
+            }
+            
+            for endpoint in list_endpoints:
                 try:
-                    print(f"Trying schema endpoint: {endpoint}")
-                    response = http.get(endpoint, headers=headers, timeout=30)
+                    print(f"Testing list endpoint: {endpoint}")
+                    response = http.post(endpoint, headers=headers, json=test_payload, timeout=30)
                     if response.status_code == 200:
-                        schema_info = response.json()
-                        working_endpoint = endpoint
-                        print(f"Successfully fetched schema from: {endpoint}")
+                        working_list_endpoint = endpoint
+                        print(f"✓ List endpoint works: {endpoint}")
                         break
                     else:
-                        print(f"Endpoint {endpoint} returned status: {response.status_code}")
+                        print(f"✗ List endpoint failed with status {response.status_code}: {endpoint}")
                 except Exception as e:
-                    print(f"Error fetching from {endpoint}: {e}")
+                    print(f"✗ List endpoint error: {endpoint} - {e}")
             
-            if not schema_info:
-                print("WARNING: Could not fetch schema information from any endpoint")
-                print("Using default required attributes")
-                return {
-                    'all_attributes': [],
-                    'required_attributes': ['execution_id', 'tenant_id', 'project_id'],
-                    'attributes_map': {},
-                    'working_endpoint': None
-                }
-            
-            # Extract attributes from different possible response structures
-            attributes_map = schema_info.get('attributesMap', {})
-            if not attributes_map:
-                attributes_map = schema_info.get('properties', {})
-            if not attributes_map:
-                attributes_map = schema_info.get('attributes', {})
-            
-            # Extract required attributes
-            required_attributes = []
-            all_attributes = []
-            
-            for attr_name, attr_info in attributes_map.items():
-                all_attributes.append(attr_name)
-                # Check if attribute is required
-                if (attr_info.get('required', False) or 
-                    attr_info.get('isRequired', False) or
-                    attr_info.get('nullable', True) is False):
-                    required_attributes.append(attr_name)
-            
-            print(f"=== SCHEMA DISCOVERY ===")
-            print(f"All attributes: {all_attributes}")
-            print(f"Required attributes: {required_attributes}")
-            print(f"Working endpoint: {working_endpoint}")
-            print(f"========================")
-            
-            return {
-                'all_attributes': all_attributes,
-                'required_attributes': required_attributes,
-                'attributes_map': attributes_map,
-                'working_endpoint': working_endpoint
-            }
-
-        def extract_epoch_from_data(update_data):
-            print("=== EXTRACTING EPOCH FROM DATA ===")
-            print(f"Available keys in data: {list(update_data.keys())}")
-            
-            if isinstance(update_data, dict):
-                # DEBUG: Print what we're seeing
-                for key, value in update_data.items():
-                    if isinstance(value, list):
-                        print(f"Found list '{key}' with {len(value)} elements: {value[:3]}...")
+            # Test instance endpoints with GET first to avoid creating data
+            for endpoint in instance_endpoints:
+                try:
+                    print(f"Testing instance endpoint: {endpoint}")
+                    # Try a simple GET request to check if endpoint exists
+                    response = http.get(endpoint, headers=headers, timeout=30)
+                    if response.status_code in [200, 404]:  # 404 might mean endpoint exists but no data
+                        working_instance_endpoint = endpoint
+                        print(f"✓ Instance endpoint accessible: {endpoint}")
+                        break
                     else:
-                        print(f"Found '{key}': {value}")
-                
-                # Method 1: Check for training history arrays (most reliable)
-                training_arrays = ['train_loss', 'train_acc', 'val_loss', 'val_acc']
-                epoch_count = None
-                
-                for field in training_arrays:
-                    if field in update_data and isinstance(update_data[field], list):
-                        current_count = len(update_data[field])
-                        print(f"Found {current_count} epochs from {field} array")
-                        if epoch_count is None:
-                            epoch_count = current_count
-                        elif current_count != epoch_count:
-                            print(f"WARNING: Inconsistent array lengths: {field} has {current_count}, expected {epoch_count}")
-                
-                if epoch_count and epoch_count > 0:
-                    # For training history, use the final epoch (0-indexed)
-                    final_epoch = epoch_count - 1
-                    print(f"Using final epoch from training history: {final_epoch} (0-indexed, {epoch_count} total epochs)")
-                    return final_epoch
-                
-                # Method 2: Check for explicit epoch fields
-                if 'best_epoch' in update_data:
-                    best_epoch = update_data['best_epoch']
-                    print(f"Found explicit best_epoch: {best_epoch}")
-                    try:
-                        return int(best_epoch)
-                    except (ValueError, TypeError):
-                        print(f"WARNING: best_epoch is not an integer: {best_epoch}")
-                
-                if 'epoch' in update_data:
-                    epoch_val = update_data['epoch']
-                    print(f"Found explicit epoch: {epoch_val}")
-                    try:
-                        return int(epoch_val)
-                    except (ValueError, TypeError):
-                        print(f"WARNING: epoch is not an integer: {epoch_val}")
-                
-                # Method 3: If we have best_val_loss, try to find matching epoch
-                if 'best_val_loss' in update_data and 'val_loss' in update_data:
-                    best_loss = update_data['best_val_loss']
-                    val_losses = update_data['val_loss']
-                    if isinstance(val_losses, list):
-                        try:
-                            # Try exact match first
-                            best_epoch_index = val_losses.index(best_loss)
-                            print(f"Found exact match: best_val_loss at epoch {best_epoch_index}")
-                            return best_epoch_index
-                        except ValueError:
-                            # Find closest match
-                            closest_epoch = min(range(len(val_losses)), key=lambda i: abs(val_losses[i] - best_loss))
-                            print(f"Found closest epoch {closest_epoch} to best_val_loss")
-                            return closest_epoch
+                        print(f"✗ Instance endpoint failed with status {response.status_code}: {endpoint}")
+                except Exception as e:
+                    print(f"✗ Instance endpoint error: {endpoint} - {e}")
             
-            print("No epoch information found in data, defaulting to 0")
-            return 0
+            return working_list_endpoint, working_instance_endpoint
 
-        def validate_and_prepare_data(data, all_attributes, required_attributes, attributes_map, update_data):
-            validated_data = {}
-            missing_required = []
-            
-            # Check for required attributes and provide sensible defaults
-            for req_attr in required_attributes:
-                if req_attr not in data:
-                    missing_required.append(req_attr)
-                    # Provide intelligent defaults for common required attributes
-                    if req_attr == 'epoch':
-                        # Extract epoch from the input data
-                        epoch_value = extract_epoch_from_data(update_data)
-                        data[req_attr] = epoch_value
-                        print(f"Auto-populated {req_attr} with value: {epoch_value}")
-                    elif req_attr == 'execution_id' and args.execution_id != '-1':
-                        data[req_attr] = args.execution_id
-                        print(f"Auto-populated {req_attr} with value: {args.execution_id}")
-                    elif req_attr == 'tenant_id' and args.tenant_id != '-1':
-                        data[req_attr] = tenant_id
-                        print(f"Auto-populated {req_attr} with value: {tenant_id}")
-                    elif req_attr == 'project_id' and args.project_id != '-1':
-                        data[req_attr] = args.project_id
-                        print(f"Auto-populated {req_attr} with value: {args.project_id}")
+        def make_retry_request(http, method, url, headers, data=None, max_retries=3):
+            """Make request with retry logic"""
+            for attempt in range(max_retries):
+                try:
+                    if method.upper() == 'POST':
+                        response = http.post(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'PATCH':
+                        response = http.patch(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'GET':
+                        response = http.get(url, headers=headers, timeout=60)
                     else:
-                        print(f"WARNING: No default available for required attribute: {req_attr}")
-            
-            # Filter and validate attributes - only include attributes that exist in schema
-            for key, value in data.items():
-                if not all_attributes or key in all_attributes:  # Include if no schema info or if known
-                    # Convert data types based on schema
-                    attr_info = attributes_map.get(key, {})
-                    attr_type = attr_info.get('type', 'string')
-                    if isinstance(attr_type, dict):
-                        attr_type = attr_type.get('type', 'string')
+                        raise ValueError(f"Unsupported method: {method}")
                     
-                    if attr_type in ['float', 'number'] and value is not None:
-                        try:
-                            validated_data[key] = float(value)
-                        except (ValueError, TypeError):
-                            validated_data[key] = str(value)
-                            print(f"WARNING: Could not convert {key} to {attr_type}, using string")
-                    elif attr_type in ['integer', 'long', 'int'] and value is not None:
-                        try:
-                            validated_data[key] = int(float(value))
-                        except (ValueError, TypeError):
-                            validated_data[key] = str(value)
-                            print(f"WARNING: Could not convert {key} to {attr_type}, using string")
-                    else:
-                        validated_data[key] = value
-                else:
-                    print(f"WARNING: Attribute '{key}' not found in schema, skipping")
-            
-            if missing_required:
-                print(f"Missing required attributes that were auto-populated: {missing_required}")
-            
-            return validated_data
-
-        def get_instance_endpoints(working_endpoint):
-            if not working_endpoint:
-                # Fallback to all possible endpoints if no working endpoint found
-                return [
-                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances",
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
-                ]
-            
-            # Replace /schemas/ with /instances in the working endpoint
-            instance_endpoint = working_endpoint.replace('/schemas/', '/instances')
-            
-            # Also try alternative endpoints for the same service
-            endpoints = [instance_endpoint]
-            
-            # Add fallback endpoints from other services
-            if 'pi-entity-service-dbaas' in working_endpoint:
-                endpoints.extend([
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
-                ])
-            else:
-                endpoints.extend([
-                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances",
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances"
-                ])
-            
-            return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
-
-        def get_list_endpoints(working_endpoint):
-            if not working_endpoint:
-                # Fallback to all possible endpoints if no working endpoint found
-                return [
-                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances/list",
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
-                ]
-            
-            # Replace /schemas/ with /instances/list in the working endpoint
-            list_endpoint = working_endpoint.replace('/schemas/', '/instances/list')
-            
-            # Also try alternative endpoints for the same service
-            endpoints = [list_endpoint]
-            
-            # Add fallback endpoints from other services
-            if 'pi-entity-service-dbaas' in working_endpoint:
-                endpoints.extend([
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
-                ])
-            else:
-                endpoints.extend([
-                    f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{args.schema_id}/instances/list",
-                    f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list",
-                    f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{args.schema_id}/instances/list"
-                ])
-            
-            return list(dict.fromkeys(endpoints))  # Remove duplicates while preserving order
-
-        def make_request_with_fallback(http, method, urls, headers, data=None, max_retries=3):
-            for url in urls:
-                print(f"Trying endpoint: {url}")
-                for attempt in range(max_retries):
-                    try:
-                        if method.upper() == 'POST':
-                            response = http.post(url, headers=headers, data=json.dumps(data), timeout=60)
-                        elif method.upper() == 'PATCH':
-                            response = http.patch(url, headers=headers, data=json.dumps(data), timeout=60)
-                        elif method.upper() == 'GET':
-                            response = http.get(url, headers=headers, timeout=60)
-                        else:
-                            raise ValueError(f"Unsupported method: {method}")
-                        
-                        response.raise_for_status()
-                        print(f"Success with endpoint: {url}")
+                    if response.status_code < 400:
                         return response
+                    else:
+                        raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.text}")
                         
-                    except requests.exceptions.RequestException as e:
-                        if attempt == max_retries - 1:
-                            print(f"Final attempt failed for {url} after {max_retries} retries: {e}")
-                        else:
-                            wait_time = (2 ** attempt) + (random.random() * 0.1)
-                            print(f"Request failed (attempt {attempt + 1}/{max_retries}) for {url}, retrying in {wait_time:.2f}s... Error: {e}")
-                            time.sleep(wait_time)
-                
-                print(f"All retries exhausted for {url}, trying next endpoint...")
-            
-            raise Exception(f"All endpoints failed after {max_retries} retries each")
+                except requests.exceptions.RequestException as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    else:
+                        wait_time = (2 ** attempt) + (random.random() * 0.1)
+                        print(f"Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.2f}s... Error: {e}")
+                        time.sleep(wait_time)
 
-        # Get schema information dynamically
-        schema_info = get_schema_attributes(http, args.domain, args.schema_id, headers)
-        all_attributes = schema_info['all_attributes']
-        required_attributes = schema_info['required_attributes']
-        attributes_map = schema_info['attributes_map']
-        working_endpoint = schema_info['working_endpoint']
+        # Discover working endpoints
+        print("=== ENDPOINT DISCOVERY ===")
+        working_list_endpoint, working_instance_endpoint = get_working_endpoints(args.domain, args.schema_id, headers)
+        
+        if not working_list_endpoint:
+            raise Exception("No working list endpoint found")
+        
+        if not working_instance_endpoint:
+            # If no instance endpoint found, try to derive from list endpoint
+            if 'v2.0' in working_list_endpoint:
+                working_instance_endpoint = working_list_endpoint.replace('/list', '')
+            elif 'v3.0' in working_list_endpoint:
+                working_instance_endpoint = working_list_endpoint.replace('/list', '')
+            else:
+                working_instance_endpoint = working_list_endpoint.replace('/list', '')
+            print(f"Derived instance endpoint: {working_instance_endpoint}")
 
-        # Get endpoints for different operations
-        instance_endpoints = get_instance_endpoints(working_endpoint)
-        list_endpoints = get_list_endpoints(working_endpoint)
-
-        print(f"Using instance endpoints: {instance_endpoints}")
-        print(f"Using list endpoints: {list_endpoints}")
+        print(f"Using list endpoint: {working_list_endpoint}")
+        print(f"Using instance endpoint: {working_instance_endpoint}")
 
         if args.multiple_rows_json != '-1':
+            # Handle multiple rows creation
             rows_to_create = json.loads(args.multiple_rows_json)
-            validated_rows = []
-            
-            for row in rows_to_create:
-                # Add common fields only if they exist in schema
-                if args.tenant_id != '-1' and 'tenant_id' in all_attributes:
-                    row['tenant_id'] = tenant_id
-                if args.project_id != '-1' and 'project_id' in all_attributes:
-                    row['project_id'] = args.project_id
-                if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
-                    row['architecture_type'] = args.architecture_type
-                if 'execution_id' not in row and args.execution_id != '-1' and 'execution_id' in all_attributes:
-                    row['execution_id'] = args.execution_id
-                if args.model_id != '-1' and 'model_id' in all_attributes:
-                    row['model_id'] = args.model_id
-                
-                # Validate and prepare data
-                validated_row = validate_and_prepare_data(row, all_attributes, required_attributes, attributes_map, update_data)
-                validated_rows.append(validated_row)
-            
-            create_payload = {"data": validated_rows}
+            create_payload = {"data": rows_to_create}
             
             print(f" Creating Multiple Rows ")
-            print(f"Trying endpoints: {instance_endpoints}")
-            print(f"Request Headers: {json.dumps(headers)}")
             print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
 
             try:
-                response = make_request_with_fallback(http, 'POST', instance_endpoints, headers, create_payload, max_retries=3)
+                response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
                 print("Successfully created multiple model instances.")
                 print(f"Response: {response.json()}")
             except Exception as e:
                 print(f"Error creating multiple model instances: {e}")
-                print(f"Failed Request Payload: {json.dumps(create_payload, indent=2)}")
                 exit(1)
         else:
             # Check if execution_id exists
@@ -432,19 +214,13 @@ implementation:
             }
             
             print(f" Checking for Existing Row with execution_id: {args.execution_id} ")
-            print(f"Trying endpoints: {list_endpoints}")
-            print(f"Request Headers: {json.dumps(headers)}")
             print(f"Request Payload: {json.dumps(check_payload, indent=2)}")
 
             try:
-                response = make_request_with_fallback(http, 'POST', list_endpoints, headers, check_payload, max_retries=3)
+                response = make_retry_request(http, 'POST', working_list_endpoint, headers, check_payload)
                 response_data = response.json()
                 
-                # FIX: Handle the actual response format from your schemas
-                print(f"DEBUG: Response type: {type(response_data)}")
-                print(f"DEBUG: Response keys: {response_data.keys() if isinstance(response_data, dict) else 'Not a dict'}")
-                
-                # Your schemas return {"relations": [], "content": [...]}
+                # Handle response format
                 instances_found = []
                 if isinstance(response_data, dict):
                     instances_found = response_data.get("content", [])
@@ -454,133 +230,114 @@ implementation:
                     print(f"DEBUG: Found {len(instances_found)} instances in direct list")
                 else:
                     print(f"DEBUG: Unexpected response format: {type(response_data)}")
+                    instances_found = []
                 
-                # Filter for your specific execution_id
+                # Filter for specific execution_id
                 matching_instances = [inst for inst in instances_found if inst.get('execution_id') == args.execution_id]
                 print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
                 
                 if matching_instances:
                     print(f" Instance Found: Updating Row ")
-                    instance_to_update = matching_instances[0]  # Use first matching instance
-                    print(f"DEBUG: Updating instance: {instance_to_update}")
+                    instance_to_update = matching_instances[0]
                     
-                    patch_requests = []
-                    for column, keys in mapping.items():
-                        value_to_patch = None
-                        if isinstance(keys, list):
-                            value_to_patch = {key: update_data.get(key) for key in keys if key in update_data}
+                    # Build update data based on mapping
+                    update_fields = {}
+                    for column, source_key in mapping.items():
+                        if source_key in update_data:
+                            value = update_data[source_key]
+                            if source_key in float_keys:
+                                try:
+                                    value = float(value)
+                                except (ValueError, TypeError):
+                                    value = str(value)
+                            update_fields[column] = value
+                            print(f"DEBUG: Will update {column} with {value}")
+                    
+                    if not update_fields:
+                        print("WARNING: No valid fields to update based on mapping")
+                        update_fields = {"execution_id": args.execution_id}  # Minimal update
+                    
+                    # Use PUT for full update or PATCH for partial update
+                    # Try PUT first (replace entire record)
+                    try:
+                        # Get the current instance data and merge with updates
+                        current_data = instance_to_update.copy()
+                        current_data.update(update_fields)
+                        
+                        # Add required fields if missing
+                        if 'tenant_id' not in current_data:
+                            current_data['tenant_id'] = tenant_id
+                        if 'project_id' not in current_data and args.project_id != '-1':
+                            current_data['project_id'] = args.project_id
+                        
+                        update_payload = {"data": [current_data]}
+                        
+                        print(f"Attempting PUT update...")
+                        print(f"Update Payload: {json.dumps(update_payload, indent=2)}")
+                        
+                        response = make_retry_request(http, 'POST', working_instance_endpoint, headers, update_payload)
+                        print("Successfully updated the model instance using PUT.")
+                        
+                    except Exception as put_error:
+                        print(f"PUT update failed: {put_error}")
+                        print("Falling back to alternative update methods...")
+                        
+                        # Alternative: Try direct instance ID update if available
+                        if 'id' in instance_to_update:
+                            instance_id = instance_to_update['id']
+                            instance_specific_endpoint = f"{working_instance_endpoint}/{instance_id}"
+                            try:
+                                response = make_retry_request(http, 'PUT', instance_specific_endpoint, headers, update_fields)
+                                print("Successfully updated using instance-specific endpoint.")
+                            except Exception as specific_error:
+                                print(f"Instance-specific update also failed: {specific_error}")
+                                raise specific_error
                         else:
-                            if keys in update_data:
-                                value = update_data.get(keys)
-                                if keys in float_keys:
-                                    try:
-                                        value_to_patch = float(value)
-                                    except (ValueError, TypeError):
-                                        value_to_patch = str(value)
-                                else:
-                                    value_to_patch = str(value)
-
-                        if value_to_patch is not None and column in all_attributes:
-                            patch_requests.append({
-                                "operation": "REPLACE",
-                                "path": column,
-                                "value": value_to_patch
-                            })
-                            print(f"DEBUG: Will update {column} with {value_to_patch}")
-                        elif value_to_patch is not None:
-                            print(f"WARNING: Column '{column}' not found in schema, skipping update")
-
-                    if not patch_requests:
-                        print("WARNING: No valid fields to update based on mapping and schema")
-                        # Create minimal update to ensure the row exists
-                        patch_requests.append({
-                            "operation": "REPLACE", 
-                            "path": "execution_id", 
-                            "value": args.execution_id
-                        })
-
-                    update_payload = {
-                        "dbType": "TIDB",
-                        "conditionalFilter": {
-                            "conditions": [
-                                {
-                                    "field": "execution_id",
-                                    "operator": "EQUAL",
-                                    "value": args.execution_id
-                                }
-                            ]
-                        },
-                        "partialUpdateRequests": [
-                            {
-                                "patch": patch_requests
-                            }
-                        ]
-                    }
-                    
-                    print(f"Trying update endpoints: {instance_endpoints}")
-                    print(f"Request Headers: {json.dumps(headers)}")
-                    print(f"Request Payload: {json.dumps(update_payload, indent=2)}")
-                    
-                    response = make_request_with_fallback(http, 'PATCH', instance_endpoints, headers, update_payload, max_retries=3)
-                    print("Successfully updated the model instance.")
+                            raise put_error
+                            
                 else:
                     print(f" No Instance Found: Creating New Row ")
-                    creation_data = {}
-                    for column, keys in mapping.items():
-                        value_to_add = None
-                        if isinstance(keys, list):
-                            value_to_add = {key: update_data.get(key) for key in keys if key in update_data}
-                        else:
-                            if keys in update_data:
-                                value = update_data.get(keys)
-                                if keys in float_keys:
-                                    try:
-                                        value_to_add = float(value)
-                                    except (ValueError, TypeError):
-                                        value_to_add = str(value)
-                                else:
-                                    value_to_add = str(value)
-
-                        if value_to_add is not None and column in all_attributes:
-                            creation_data[column] = value_to_add
-                            print(f"DEBUG: Adding {column} = {value_to_add}")
-                        elif value_to_add is not None:
-                            print(f"WARNING: Column '{column}' not found in schema, skipping")
                     
-                    # Add common fields only if they exist in schema
-                    if 'execution_id' in all_attributes:
-                        creation_data['execution_id'] = args.execution_id
-                    if args.model_id != '-1' and 'model_id' in all_attributes:
-                        creation_data['model_id'] = args.model_id
-                    if args.tenant_id != '-1' and 'tenant_id' in all_attributes:
-                        creation_data['tenant_id'] = tenant_id
-                    if args.project_id != '-1' and 'project_id' in all_attributes:
+                    # Build creation data
+                    creation_data = {}
+                    for column, source_key in mapping.items():
+                        if source_key in update_data:
+                            value = update_data[source_key]
+                            if source_key in float_keys:
+                                try:
+                                    value = float(value)
+                                except (ValueError, TypeError):
+                                    value = str(value)
+                            creation_data[column] = value
+                            print(f"DEBUG: Adding {column} = {value}")
+                    
+                    # Add required identifiers
+                    creation_data['execution_id'] = args.execution_id
+                    creation_data['tenant_id'] = tenant_id
+                    if args.project_id != '-1':
                         creation_data['project_id'] = args.project_id
-                    if args.architecture_type != '-1' and 'architecture_type' in all_attributes:
+                    if args.model_id != '-1':
+                        creation_data['model_id'] = args.model_id
+                    if args.architecture_type != '-1':
                         creation_data['architecture_type'] = args.architecture_type
-
-                    # Validate and prepare data for schema
-                    creation_data = validate_and_prepare_data(creation_data, all_attributes, required_attributes, attributes_map, update_data)
 
                     create_payload = {
                         "data": [creation_data]
                     }
 
-                    print(f"Trying create endpoints: {instance_endpoints}")
-                    print(f"Request Headers: {json.dumps(headers)}")
-                    print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
+                    print(f"Creating new instance...")
+                    print(f"Create Payload: {json.dumps(create_payload, indent=2)}")
                     
-                    response = make_request_with_fallback(http, 'POST', instance_endpoints, headers, create_payload, max_retries=3)
-                    if response.status_code >= 400:
-                        print(f"Error: {response.status_code} {response.reason}")
-                        print(f"Response Content: {response.text}")
-                    response.raise_for_status()
+                    response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
                     print("Successfully created a new model instance.")
                     
                 print(f"Response: {response.json()}")
 
             except Exception as e:
                 print(f"Error: {e}")
+                print(f"Last request details:")
+                print(f"  List Endpoint: {working_list_endpoint}")
+                print(f"  Instance Endpoint: {working_instance_endpoint}")
                 exit(1)
 
     args:
