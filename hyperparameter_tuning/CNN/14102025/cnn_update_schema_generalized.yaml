@@ -1,4 +1,4 @@
-name: 2 Generalized CNN Update Schema Row
+brick: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,6 +89,7 @@ implementation:
         http.mount("http://", adapter)
 
         def get_working_endpoints(domain, schema_id, headers):
+            """Discover which endpoints actually work for this schema"""
             list_endpoints = [
                 f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances/list",
                 f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list",
@@ -142,12 +143,15 @@ implementation:
             return working_list_endpoint, working_instance_endpoint
 
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
+            """Make request with retry logic"""
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
                         response = http.post(url, headers=headers, json=data, timeout=60)
                     elif method.upper() == 'PATCH':
                         response = http.patch(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'PUT':
+                        response = http.put(url, headers=headers, json=data, timeout=60)
                     elif method.upper() == 'GET':
                         response = http.get(url, headers=headers, timeout=60)
                     else:
@@ -165,6 +169,23 @@ implementation:
                         wait_time = (2 ** attempt) + (random.random() * 0.1)
                         print(f"Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.2f}s... Error: {e}")
                         time.sleep(wait_time)
+
+        def extract_nested_value(data, key_path):
+            """Extract value from nested dictionary using dot notation or list of keys"""
+            if isinstance(key_path, str):
+                keys = key_path.split('.')
+            elif isinstance(key_path, list):
+                keys = key_path
+            else:
+                return None
+                
+            current = data
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    return None
+            return current
 
         # Discover working endpoints
         print("=== ENDPOINT DISCOVERY ===")
@@ -241,22 +262,39 @@ implementation:
                     # Build update data based on mapping
                     update_fields = {}
                     for column, source_key in mapping.items():
-                        if source_key in update_data:
-                            value = update_data[source_key]
-                            if source_key in float_keys:
-                                try:
-                                    value = float(value)
-                                except (ValueError, TypeError):
-                                    value = str(value)
+                        value = None
+                        
+                        # Handle different types of source_key mappings
+                        if isinstance(source_key, list):
+                            # If source_key is a list, extract nested values and create a dictionary
+                            nested_data = {}
+                            for key in source_key:
+                                nested_value = extract_nested_value(update_data, key)
+                                if nested_value is not None:
+                                    nested_data[key] = nested_value
+                            if nested_data:  # Only add if we found any values
+                                value = nested_data
+                                print(f"DEBUG: Will update {column} with nested data: {nested_data}")
+                        elif isinstance(source_key, str):
+                            # If source_key is a string, extract the value directly
+                            value = extract_nested_value(update_data, source_key)
+                            if value is not None:
+                                # Handle float conversion if needed
+                                if source_key in float_keys:
+                                    try:
+                                        value = float(value)
+                                    except (ValueError, TypeError):
+                                        value = str(value)
+                                print(f"DEBUG: Will update {column} with {value}")
+                        
+                        if value is not None:
                             update_fields[column] = value
-                            print(f"DEBUG: Will update {column} with {value}")
                     
                     if not update_fields:
                         print("WARNING: No valid fields to update based on mapping")
                         update_fields = {"execution_id": args.execution_id}  # Minimal update
                     
-                    # Use PUT for full update or PATCH for partial update
-                    # Try PUT first (replace entire record)
+                    # Use POST for update (replace entire record)
                     try:
                         # Get the current instance data and merge with updates
                         current_data = instance_to_update.copy()
@@ -270,14 +308,14 @@ implementation:
                         
                         update_payload = {"data": [current_data]}
                         
-                        print(f"Attempting PUT update...")
+                        print(f"Attempting POST update...")
                         print(f"Update Payload: {json.dumps(update_payload, indent=2)}")
                         
                         response = make_retry_request(http, 'POST', working_instance_endpoint, headers, update_payload)
-                        print("Successfully updated the model instance using PUT.")
+                        print("Successfully updated the model instance using POST.")
                         
-                    except Exception as put_error:
-                        print(f"PUT update failed: {put_error}")
+                    except Exception as post_error:
+                        print(f"POST update failed: {post_error}")
                         print("Falling back to alternative update methods...")
                         
                         # Alternative: Try direct instance ID update if available
@@ -289,9 +327,23 @@ implementation:
                                 print("Successfully updated using instance-specific endpoint.")
                             except Exception as specific_error:
                                 print(f"Instance-specific update also failed: {specific_error}")
-                                raise specific_error
+                                # Last resort: try creating new record
+                                print("Attempting to create new record instead...")
+                                create_payload = {"data": [current_data]}
+                                response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
+                                print("Successfully created new record.")
                         else:
-                            raise put_error
+                            # Try creating new record if update fails
+                            print("Attempting to create new record instead...")
+                            creation_data = update_fields.copy()
+                            creation_data['execution_id'] = args.execution_id
+                            creation_data['tenant_id'] = tenant_id
+                            if args.project_id != '-1':
+                                creation_data['project_id'] = args.project_id
+                            
+                            create_payload = {"data": [creation_data]}
+                            response = make_retry_request(http, 'POST', working_instance_endpoint, headers, create_payload)
+                            print("Successfully created new record.")
                             
                 else:
                     print(f" No Instance Found: Creating New Row ")
@@ -299,15 +351,33 @@ implementation:
                     # Build creation data
                     creation_data = {}
                     for column, source_key in mapping.items():
-                        if source_key in update_data:
-                            value = update_data[source_key]
-                            if source_key in float_keys:
-                                try:
-                                    value = float(value)
-                                except (ValueError, TypeError):
-                                    value = str(value)
+                        value = None
+                        
+                        # Handle different types of source_key mappings
+                        if isinstance(source_key, list):
+                            # If source_key is a list, extract nested values and create a dictionary
+                            nested_data = {}
+                            for key in source_key:
+                                nested_value = extract_nested_value(update_data, key)
+                                if nested_value is not None:
+                                    nested_data[key] = nested_value
+                            if nested_data:  # Only add if we found any values
+                                value = nested_data
+                                print(f"DEBUG: Adding {column} with nested data: {nested_data}")
+                        elif isinstance(source_key, str):
+                            # If source_key is a string, extract the value directly
+                            value = extract_nested_value(update_data, source_key)
+                            if value is not None:
+                                # Handle float conversion if needed
+                                if source_key in float_keys:
+                                    try:
+                                        value = float(value)
+                                    except (ValueError, TypeError):
+                                        value = str(value)
+                                print(f"DEBUG: Adding {column} = {value}")
+                        
+                        if value is not None:
                             creation_data[column] = value
-                            print(f"DEBUG: Adding {column} = {value}")
                     
                     # Add required identifiers
                     creation_data['execution_id'] = args.execution_id
