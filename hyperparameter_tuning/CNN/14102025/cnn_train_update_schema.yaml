@@ -1,4 +1,4 @@
-name: Train Update Schema Row
+name: 2 Train Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -69,9 +69,7 @@ implementation:
         }
 
         def calculate_best_epoch(training_data):
-            """
-            Calculate the best epoch from validation loss history
-            """
+         
             if 'val_loss' in training_data and isinstance(training_data['val_loss'], list):
                 val_losses = training_data['val_loss']
                 try:
@@ -84,9 +82,7 @@ implementation:
             return None
 
         def convert_value_for_schema(column, value, schema_id):
-            """
-            Convert value to appropriate type based on schema constraints
-            """
+        
             # Special handling for TrainingLogs schema float fields
             if schema_id == "68c7af1af34309622134ee53":  # TrainingLogs schema
                 # Force convert these fields to string to avoid FLOAT rejection
