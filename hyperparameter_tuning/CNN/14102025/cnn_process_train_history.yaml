@@ -1,4 +1,4 @@
-name: 2 Process Training History
+name: Process Training History
 description: Processes training history data and converts all numeric values to strings for schema compatibility.
 
 inputs:
@@ -23,10 +23,11 @@ implementation:
       - |
         import json
         import argparse
+        import os
         from typing import Any, Dict, List, Union
 
         def convert_numeric_to_string(obj: Any) -> Any:
-           
+          
             if isinstance(obj, dict):
                 return {key: convert_numeric_to_string(value) for key, value in obj.items()}
             elif isinstance(obj, list):
@@ -37,7 +38,7 @@ implementation:
                 return obj
 
         def process_training_history(history_data: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
-         
+            
             processed_data = {}
             
             for column, keys in mapping.items():
@@ -77,11 +78,16 @@ implementation:
         print("Processed Data:")
         print(json.dumps(processed_data, indent=2))
 
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(args.processed_history_json)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
         # Write processed data to output file
         with open(args.processed_history_json, 'w') as f:
             json.dump(processed_data, f, indent=2)
 
-        print("Successfully processed training history and converted numeric values to strings")
+        print(f"Successfully processed training history and saved to {args.processed_history_json}")
 
     args:
       - --training_history_json
