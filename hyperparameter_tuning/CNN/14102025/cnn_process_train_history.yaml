@@ -1,0 +1,96 @@
+name: Process Training History
+description: Processes training history data and converts all numeric values to strings for schema compatibility.
+
+inputs:
+  - { name: training_history_json, type: String, description: "JSON string containing training history data." }
+  - { name: mapping_json, type: String, description: "JSON string mapping column names to keys in training history." }
+
+outputs:
+  - { name: processed_history_json, type: String, description: "JSON string with all numeric values converted to strings." }
+
+implementation:
+  container:
+    image: python:3.9-slim
+    command:
+      - sh
+      - -c
+      - |
+        pip install requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        from typing import Any, Dict, List, Union
+
+        def convert_numeric_to_string(obj: Any) -> Any:
+            """
+            Recursively convert all numeric values (int, float) to strings in a nested structure.
+            """
+            if isinstance(obj, dict):
+                return {key: convert_numeric_to_string(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_numeric_to_string(item) for item in obj]
+            elif isinstance(obj, (int, float)):
+                return str(obj)
+            else:
+                return obj
+
+        def process_training_history(history_data: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Process training history according to mapping and convert all numeric values to strings.
+            """
+            processed_data = {}
+            
+            for column, keys in mapping.items():
+                if isinstance(keys, list):
+                    # Handle custom_metrics type mapping
+                    value_to_add = {}
+                    for key in keys:
+                        if key in history_data:
+                            value_to_add[key] = history_data[key]
+                    if value_to_add:
+                        processed_data[column] = convert_numeric_to_string(value_to_add)
+                else:
+                    # Handle single value mapping
+                    if keys in history_data:
+                        value = history_data[keys]
+                        processed_data[column] = convert_numeric_to_string(value)
+            
+            return processed_data
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--training_history_json', type=str, required=True)
+        parser.add_argument('--mapping_json', type=str, required=True)
+        parser.add_argument('--processed_history_json', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Processing Training History")
+        print(f"Input training_history_json: {args.training_history_json}")
+        print(f"Input mapping_json: {args.mapping_json}")
+
+        # Parse input data
+        history_data = json.loads(args.training_history_json)
+        mapping = json.loads(args.mapping_json)
+
+        # Process the training history
+        processed_data = process_training_history(history_data, mapping)
+
+        print("Processed Data:")
+        print(json.dumps(processed_data, indent=2))
+
+        # Write processed data to output file
+        with open(args.processed_history_json, 'w') as f:
+            json.dump(processed_data, f, indent=2)
+
+        print("Successfully processed training history and converted numeric values to strings")
+
+    args:
+      - --training_history_json
+      - {inputValue: training_history_json}
+      - --mapping_json
+      - {inputValue: mapping_json}
+      - --processed_history_json
+      - {outputPath: processed_history_json}
