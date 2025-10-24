@@ -1,12 +1,12 @@
-name: Process Training History
-description: Processes training history data and converts all numeric values to strings for schema compatibility.
+name: 2 Process Training History
+description: Processes training history data, calculates epochs, and converts all numeric values to strings for schema compatibility.
 
 inputs:
   - { name: training_history_json, type: String, description: "JSON string containing training history data." }
   - { name: mapping_json, type: String, description: "JSON string mapping column names to keys in training history." }
 
 outputs:
-  - { name: processed_history_json, type: String, description: "JSON string with all numeric values converted to strings." }
+  - { name: processed_history_json, type: String, description: "JSON string with epochs calculated and all numeric values converted to strings." }
 
 implementation:
   container:
@@ -37,11 +37,40 @@ implementation:
             else:
                 return obj
 
-        def process_training_history(history_data: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
+        def calculate_epochs(history_data: Dict[str, Any]) -> int:
+           
+            train_loss = history_data.get('train_loss', [])
+            if train_loss:
+                return len(train_loss)
             
+            # Fallback to other arrays if train_loss is not available
+            train_acc = history_data.get('train_acc', [])
+            if train_acc:
+                return len(train_acc)
+                
+            val_loss = history_data.get('val_loss', [])
+            if val_loss:
+                return len(val_loss)
+                
+            val_acc = history_data.get('val_acc', [])
+            if val_acc:
+                return len(val_acc)
+                
+            return 0  # Default if no arrays found
+
+        def process_training_history(history_data: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
+           
             processed_data = {}
             
+            # Calculate epochs from training history
+            epochs = calculate_epochs(history_data)
+            processed_data['epoch'] = str(epochs)
+            
             for column, keys in mapping.items():
+                if column == 'epoch':
+                    # Skip epoch as we already calculated it
+                    continue
+                    
                 if isinstance(keys, list):
                     # Handle custom_metrics type mapping
                     value_to_add = {}
@@ -88,6 +117,7 @@ implementation:
             json.dump(processed_data, f, indent=2)
 
         print(f"Successfully processed training history and saved to {args.processed_history_json}")
+        print(f"Calculated epochs: {processed_data.get('epoch', 'Unknown')}")
 
     args:
       - --training_history_json
