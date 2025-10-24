@@ -1,4 +1,4 @@
-name: Generalized CNN Update Schema Row
+name: The Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -116,7 +116,10 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-            
+          
+            if key_path is None:
+                return None
+                
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
@@ -133,7 +136,7 @@ implementation:
             return current
 
         def get_schema_definition(schema_id, headers):
-    
+          
             schema_endpoints = [
                 f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
                 f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
@@ -157,7 +160,7 @@ implementation:
             return None
 
         def convert_value_based_on_schema(schema_definition, column, value):
-           
+          
             if value is None or schema_definition is None:
                 return value
             
@@ -309,23 +312,24 @@ implementation:
                         # If source_key is a list, extract nested values and create a dictionary
                         nested_data = {}
                         for key in source_key:
-                            # Try to find the key in nested structure
-                            nested_value = None
-                            # First try in the model object
-                            if 'model' in update_data and key in update_data['model']:
-                                nested_value = update_data['model'][key]
-                            # Then try at root level
-                            elif key in update_data:
-                                nested_value = update_data[key]
-                            # Finally try nested lookup
-                            else:
-                                nested_value = extract_nested_value(update_data, key)
+                            # Use extract_nested_value to handle dot notation (e.g., "model.architecture")
+                            nested_value = extract_nested_value(update_data, key)
                             
                             if nested_value is not None:
-                                nested_data[key] = nested_value
+                                # Extract the final key name for the nested data
+                                if '.' in key:
+                                    final_key = key.split('.')[-1]
+                                else:
+                                    final_key = key
+                                nested_data[final_key] = nested_value
+                                print(f"DEBUG: Found nested value for {key} -> {final_key}: {nested_value}")
+                        
                         if nested_data:  # Only add if we found any values
                             value = nested_data
                             print(f"DEBUG: Will save {column} with nested data: {nested_data}")
+                        else:
+                            print(f"DEBUG: No values found for {column} with keys: {source_key}")
+                            
                     elif isinstance(source_key, str):
                         # If source_key is a string, extract the value directly
                         value = extract_nested_value(update_data, source_key)
@@ -333,6 +337,8 @@ implementation:
                             # Apply dynamic schema-aware type conversion
                             value = convert_value_based_on_schema(schema_definition, column, value)
                             print(f"DEBUG: Will save {column} with {value} (type: {type(value).__name__})")
+                        else:
+                            print(f"DEBUG: No value found for {column} with key: {source_key}")
                     
                     if value is not None:
                         data_to_save[column] = value
@@ -349,17 +355,18 @@ implementation:
                 
                 if matching_instances:
                     print(f" Instance Found: Upserting Row ")
-                    # For updates, merge with existing data and apply type conversion
                     instance_to_update = matching_instances[0]
-                    current_data = instance_to_update.copy()
                     
-                    # Apply type conversion to updated fields
+                    # Create merged data - preserve existing fields, update with new ones
+                    merged_data = instance_to_update.copy()
+                    
+                    # Apply type conversion and merge new data
                     for key, value in data_to_save.items():
-                        current_data[key] = convert_value_based_on_schema(schema_definition, key, value)
+                        merged_data[key] = convert_value_based_on_schema(schema_definition, key, value)
                     
                     upsert_payload = {
                         "dbType": "TIDB",
-                        "data": [current_data]
+                        "data": [merged_data]
                     }
                     
                     print(f"Upserting data (insert or update)...")
