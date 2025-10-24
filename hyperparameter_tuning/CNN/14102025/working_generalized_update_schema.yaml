@@ -1,0 +1,314 @@
+name: P Generalized CNN Update Schema Row
+description: Updates a row in a schema based on a mapping between column names and a JSON object.
+
+inputs:
+  - { name: schema_id, type: String, description: "The ID of the schema to update." }
+  - { name: update_data_json, type: String, description: "JSON string containing the data to update." }
+  - { name: mapping_json, type: String, description: "JSON string mapping column names to keys in update_data_json." }
+  - { name: model_id, type: String, description: "The ID of the model to filter by." }
+  - { name: execution_id, type: String, description: "The ID of the model to filter by." }
+  - { name: tenant_id, type: string, description: "The ID of the tenant." }
+  - { name: project_id, type: String, description: "The ID of the project." }
+  - { name: architecture_type, type: String, description: "The architecture type." }
+  - { name: multiple_rows_json, type: String, description: "JSON string containing a list of rows to create." }
+  - { name: bearer_auth_token, type: string, description: "Bearer token for authentication." }
+  - { name: domain, type: String, description: "The domain for the API endpoint." }
+  - { name: float_keys_json, type: String, description: "JSON string of a list of keys to be converted to float."}
+
+implementation:
+  container:
+    image: python:3.9-slim
+    command:
+      - sh
+      - -c
+      - |
+        pip install requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        import requests
+        import random
+        import time
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--schema_id', type=str, required=True)
+        parser.add_argument('--update_data_json', type=str, required=True)
+        parser.add_argument('--mapping_json', type=str, required=True)
+        parser.add_argument('--model_id', type=str, required=True)
+        parser.add_argument('--execution_id', type=str, required=True)
+        parser.add_argument('--tenant_id', type=str, required=True)
+        parser.add_argument('--project_id', type=str, required=True)
+        parser.add_argument('--architecture_type', type=str, required=True)
+        parser.add_argument('--multiple_rows_json', type=str, required=True)
+        parser.add_argument('--bearer_auth_token', type=str, required=True)
+        parser.add_argument('--domain', type=str, required=True)
+        parser.add_argument('--float_keys_json', type=str, required=False)
+        args = parser.parse_args()
+
+        with open(args.bearer_auth_token, 'r') as f:
+            bearer_auth_token = f.read().strip()
+
+        with open(args.tenant_id, 'r') as f:
+            tenant_id = f.read().strip()
+
+        print(f" Input Data ")
+        print(f"update_data_json: {args.update_data_json}")
+        print(f"mapping_json: {args.mapping_json}")
+        
+        update_data = json.loads(args.update_data_json)
+        mapping = json.loads(args.mapping_json)
+        
+        # Handle float_keys_json safely
+        if args.float_keys_json and args.float_keys_json != '-1':
+            float_keys = json.loads(args.float_keys_json)
+        else:
+            float_keys = []
+
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {bearer_auth_token}'
+        }
+
+        # Enhanced retry strategy
+        retry_strategy = Retry(
+            total=3,
+            status_forcelist=[408, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "PUT", "POST", "DELETE", "OPTIONS", "TRACE"],
+            backoff_factor=1,
+            backoff_jitter=0.5
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        http = requests.Session()
+        http.mount("https://", adapter)
+        http.mount("http://", adapter)
+
+        def make_retry_request(http, method, url, headers, data=None, max_retries=3):
+      
+            for attempt in range(max_retries):
+                try:
+                    if method.upper() == 'POST':
+                        response = http.post(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'PATCH':
+                        response = http.patch(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'PUT':
+                        response = http.put(url, headers=headers, json=data, timeout=60)
+                    elif method.upper() == 'GET':
+                        response = http.get(url, headers=headers, timeout=60)
+                    else:
+                        raise ValueError(f"Unsupported method: {method}")
+                    
+                    if response.status_code < 400:
+                        return response
+                    else:
+                        raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.text}")
+                        
+                except requests.exceptions.RequestException as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    else:
+                        wait_time = (2 ** attempt) + (random.random() * 0.1)
+                        print(f"Request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time:.2f}s... Error: {e}")
+                        time.sleep(wait_time)
+
+        def extract_nested_value(data, key_path):
+           
+            if isinstance(key_path, str):
+                keys = key_path.split('.')
+            elif isinstance(key_path, list):
+                keys = key_path
+            else:
+                return None
+                
+            current = data
+            for key in keys:
+                if isinstance(current, dict) and key in current:
+                    current = current[key]
+                else:
+                    return None
+            return current
+
+        # Use the working v2.0 list endpoint for queries
+        working_list_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list"
+        
+        print(f"Using list endpoint: {working_list_endpoint}")
+
+        if args.multiple_rows_json != '-1':
+            # For multiple rows, use the list endpoint with bulk insert
+            rows_to_create = json.loads(args.multiple_rows_json)
+            
+            # Add common fields to each row
+            for row in rows_to_create:
+                row['tenant_id'] = tenant_id
+                if args.project_id != '-1':
+                    row['project_id'] = args.project_id
+                if args.execution_id != '-1':
+                    row['execution_id'] = args.execution_id
+            
+            create_payload = {
+                "dbType": "TIDB",
+                "data": rows_to_create
+            }
+            
+            print(f" Creating Multiple Rows ")
+            print(f"Request Payload: {json.dumps(create_payload, indent=2)}")
+
+            try:
+                response = make_retry_request(http, 'POST', working_list_endpoint, headers, create_payload)
+                print("Successfully created multiple model instances.")
+                print(f"Response: {response.json()}")
+            except Exception as e:
+                print(f"Error creating multiple model instances: {e}")
+                exit(1)
+        else:
+            # Check if execution_id exists
+            check_payload = {
+                "dbType": "TIDB",
+                "ownedOnly": True,
+                "filter": {
+                    "execution_id": args.execution_id
+                }
+            }
+            
+            print(f" Checking for Existing Row with execution_id: {args.execution_id} ")
+            print(f"Request Payload: {json.dumps(check_payload, indent=2)}")
+
+            try:
+                response = make_retry_request(http, 'POST', working_list_endpoint, headers, check_payload)
+                response_data = response.json()
+                
+                # Handle response format
+                instances_found = []
+                if isinstance(response_data, dict):
+                    instances_found = response_data.get("content", [])
+                    print(f"DEBUG: Found {len(instances_found)} instances in 'content' array")
+                elif isinstance(response_data, list):
+                    instances_found = response_data
+                    print(f"DEBUG: Found {len(instances_found)} instances in direct list")
+                else:
+                    print(f"DEBUG: Unexpected response format: {type(response_data)}")
+                    instances_found = []
+                
+                # Filter for specific execution_id
+                matching_instances = [inst for inst in instances_found if inst.get('execution_id') == args.execution_id]
+                print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
+                
+                # Build data based on mapping
+                data_to_save = {}
+                for column, source_key in mapping.items():
+                    value = None
+                    
+                    # Handle different types of source_key mappings
+                    if isinstance(source_key, list):
+                        # If source_key is a list, extract nested values and create a dictionary
+                        nested_data = {}
+                        for key in source_key:
+                            # Try to find the key in nested structure
+                            nested_value = None
+                            # First try in the model object
+                            if 'model' in update_data and key in update_data['model']:
+                                nested_value = update_data['model'][key]
+                            # Then try at root level
+                            elif key in update_data:
+                                nested_value = update_data[key]
+                            # Finally try nested lookup
+                            else:
+                                nested_value = extract_nested_value(update_data, key)
+                            
+                            if nested_value is not None:
+                                nested_data[key] = nested_value
+                        if nested_data:  # Only add if we found any values
+                            value = nested_data
+                            print(f"DEBUG: Will save {column} with nested data: {nested_data}")
+                    elif isinstance(source_key, str):
+                        # If source_key is a string, extract the value directly
+                        value = extract_nested_value(update_data, source_key)
+                        if value is not None:
+                            # Handle float conversion if needed
+                            if source_key in float_keys:
+                                try:
+                                    value = float(value)
+                                except (ValueError, TypeError):
+                                    value = str(value)
+                            print(f"DEBUG: Will save {column} with {value}")
+                    
+                    if value is not None:
+                        data_to_save[column] = value
+                
+                # Add required identifiers
+                data_to_save['tenant_id'] = tenant_id
+                data_to_save['execution_id'] = args.execution_id
+                if args.project_id != '-1':
+                    data_to_save['project_id'] = args.project_id
+                if args.model_id != '-1':
+                    data_to_save['model_id'] = args.model_id
+                if args.architecture_type != '-1':
+                    data_to_save['architecture_type'] = args.architecture_type
+                
+                if matching_instances:
+                    print(f" Instance Found: Upserting Row ")
+                    # For updates, we'll use upsert (insert or update)
+                    # The API should handle this automatically based on primary key
+                    
+                    upsert_payload = {
+                        "dbType": "TIDB",
+                        "data": [data_to_save]
+                    }
+                    
+                    print(f"Upserting data (insert or update)...")
+                    print(f"Upsert Payload: {json.dumps(upsert_payload, indent=2)}")
+                    
+                    response = make_retry_request(http, 'POST', working_list_endpoint, headers, upsert_payload)
+                    print("Successfully upserted the model instance.")
+                    
+                else:
+                    print(f" No Instance Found: Creating New Row ")
+                    
+                    create_payload = {
+                        "dbType": "TIDB",
+                        "data": [data_to_save]
+                    }
+
+                    print(f"Creating new instance...")
+                    print(f"Create Payload: {json.dumps(create_payload, indent=2)}")
+                    
+                    response = make_retry_request(http, 'POST', working_list_endpoint, headers, create_payload)
+                    print("Successfully created a new model instance.")
+                    
+                print(f"Response: {response.json()}")
+
+            except Exception as e:
+                print(f"Error: {e}")
+                print(f"Working endpoint: {working_list_endpoint}")
+                exit(1)
+
+    args:
+      - --schema_id
+      - {inputValue: schema_id}
+      - --update_data_json
+      - {inputValue: update_data_json}
+      - --mapping_json
+      - {inputValue: mapping_json}
+      - --model_id
+      - {inputValue: model_id}
+      - --execution_id
+      - {inputValue: execution_id}
+      - --tenant_id
+      - {inputPath: tenant_id}
+      - --project_id
+      - {inputValue: project_id}
+      - --architecture_type
+      - {inputValue: architecture_type}
+      - --multiple_rows_json
+      - {inputValue: multiple_rows_json}
+      - --bearer_auth_token
+      - {inputPath: bearer_auth_token}
+      - --domain
+      - {inputValue: domain}
+      - --float_keys_json
+      - {inputValue: float_keys_json}
