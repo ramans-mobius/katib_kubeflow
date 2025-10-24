@@ -1,4 +1,4 @@
-name: The Generalized CNN Update Schema Row
+name: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -116,7 +116,7 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-          
+           
             if key_path is None:
                 return None
                 
@@ -135,8 +135,38 @@ implementation:
                     return None
             return current
 
+        def calculate_best_epoch(update_data):
+            
+            if 'val_loss' in update_data and 'best_val_loss' in update_data:
+                val_losses = update_data['val_loss']
+                best_val_loss = update_data['best_val_loss']
+                
+                # Find the epoch with the minimum validation loss
+                try:
+                    # Convert to list if needed and find index of best loss
+                    if isinstance(val_losses, list):
+                        # Find the epoch index (0-based) of the best validation loss
+                        best_epoch_index = val_losses.index(best_val_loss)
+                        # Convert to 1-based epoch number
+                        return best_epoch_index + 1
+                except (ValueError, AttributeError):
+                    # If exact match not found, find the closest value
+                    try:
+                        if isinstance(val_losses, list):
+                            # Find index of minimum value
+                            min_index = min(range(len(val_losses)), key=val_losses.__getitem__)
+                            return min_index + 1
+                    except:
+                        pass
+            
+            # Fallback: if we can't calculate, use the last epoch
+            if 'val_loss' in update_data and isinstance(update_data['val_loss'], list):
+                return len(update_data['val_loss'])
+            
+            return None
+
         def get_schema_definition(schema_id, headers):
-          
+            
             schema_endpoints = [
                 f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
                 f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
@@ -160,7 +190,7 @@ implementation:
             return None
 
         def convert_value_based_on_schema(schema_definition, column, value):
-          
+            
             if value is None or schema_definition is None:
                 return value
             
@@ -332,7 +362,13 @@ implementation:
                             
                     elif isinstance(source_key, str):
                         # If source_key is a string, extract the value directly
-                        value = extract_nested_value(update_data, source_key)
+                        if source_key == "calculate_best_epoch":
+                            # Special case: calculate best epoch from validation loss
+                            value = calculate_best_epoch(update_data)
+                            print(f"DEBUG: Calculated best epoch: {value}")
+                        else:
+                            value = extract_nested_value(update_data, source_key)
+                        
                         if value is not None:
                             # Apply dynamic schema-aware type conversion
                             value = convert_value_based_on_schema(schema_definition, column, value)
