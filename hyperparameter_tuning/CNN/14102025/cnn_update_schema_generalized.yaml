@@ -1,4 +1,4 @@
-name: P Generalized CNN Update Schema Row
+brick: Generalized CNN Update Schema Row
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -89,7 +89,7 @@ implementation:
         http.mount("http://", adapter)
 
         def make_retry_request(http, method, url, headers, data=None, max_retries=3):
-      
+            """Make request with retry logic"""
             for attempt in range(max_retries):
                 try:
                     if method.upper() == 'POST':
@@ -117,7 +117,7 @@ implementation:
                         time.sleep(wait_time)
 
         def extract_nested_value(data, key_path):
-           
+            """Extract value from nested dictionary using dot notation or list of keys"""
             if isinstance(key_path, str):
                 keys = key_path.split('.')
             elif isinstance(key_path, list):
@@ -133,22 +133,124 @@ implementation:
                     return None
             return current
 
-        # Use the working v2.0 list endpoint for queries
+        def get_schema_definition(schema_id, headers):
+            """Dynamically fetch schema definition"""
+            schema_endpoints = [
+                f"{args.domain}/pi-entity-service-dbaas/v1.0/schemas/{schema_id}",
+                f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}",
+                f"{args.domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}",
+                f"{args.domain}/pi-schemas-service/v2.0/schemas/{schema_id}",
+                f"{args.domain}/pi-schemas-service/v3.0/schemas/{schema_id}"
+            ]
+            
+            for endpoint in schema_endpoints:
+                try:
+                    print(f"Fetching schema from: {endpoint}")
+                    response = http.get(endpoint, headers=headers, timeout=30)
+                    if response.status_code == 200:
+                        schema_data = response.json()
+                        print(f"Successfully fetched schema: {schema_data.get('name', 'Unknown')}")
+                        return schema_data
+                except Exception as e:
+                    print(f"Failed to fetch from {endpoint}: {e}")
+            
+            print("WARNING: Could not fetch schema definition, using fallback type handling")
+            return None
+
+        def convert_value_based_on_schema(schema_definition, column, value):
+            """Convert value based on dynamically fetched schema definition"""
+            if value is None or schema_definition is None:
+                return value
+            
+            # Extract attributes map from schema
+            attributes_map = schema_definition.get('attributesMap', {})
+            if not attributes_map:
+                attributes_map = schema_definition.get('properties', {})
+            
+            if column not in attributes_map:
+                # Column not in schema, apply default conversion
+                if column in float_keys:
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        return str(value)
+                return value
+            
+            attr_info = attributes_map[column]
+            attr_type = attr_info.get('type', {})
+            
+            # Handle nested type definitions
+            if isinstance(attr_type, dict):
+                actual_type = attr_type.get('type', 'string')
+                item_type = attr_type.get('itemType')
+            else:
+                actual_type = attr_type
+                item_type = None
+            
+            print(f"Converting {column}: {value} -> {actual_type} (itemType: {item_type})")
+            
+            try:
+                if actual_type in ['float', 'number']:
+                    return float(value)
+                elif actual_type in ['integer', 'int', 'long']:
+                    return int(float(value))  # Handle float strings like "100.0"
+                elif actual_type == 'string':
+                    if isinstance(value, (list, tuple)):
+                        return str(value)
+                    return str(value)
+                elif actual_type == 'array' and item_type == 'float':
+                    # For arrays of floats, ensure all elements are floats
+                    if isinstance(value, list):
+                        return [float(x) for x in value]
+                    return value
+                elif actual_type == 'json':
+                    # Keep as is for JSON types
+                    return value
+                elif actual_type == 'ENUM':
+                    # For ENUM types, validate against allowed values
+                    enum_values = attr_info.get('enumValues', [])
+                    if enum_values and value not in enum_values:
+                        print(f"WARNING: {column} value '{value}' not in allowed enum values: {enum_values}")
+                    return value
+                else:
+                    # Default fallback
+                    return value
+                    
+            except (ValueError, TypeError) as e:
+                print(f"WARNING: Could not convert {column} value '{value}' to {actual_type}: {e}")
+                # Fallback to string conversion
+                return str(value)
+
+        # Fetch schema definition dynamically
+        print("=== FETCHING SCHEMA DEFINITION ===")
+        schema_definition = get_schema_definition(args.schema_id, headers)
+        
+        if schema_definition:
+            print(f"Schema Name: {schema_definition.get('name', 'Unknown')}")
+            print(f"Schema Attributes: {list(schema_definition.get('attributesMap', {}).keys())}")
+        else:
+            print("WARNING: Using fallback type conversion without schema definition")
+
+        # Use the working v2.0 list endpoint for everything
         working_list_endpoint = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances/list"
         
         print(f"Using list endpoint: {working_list_endpoint}")
 
         if args.multiple_rows_json != '-1':
-            # For multiple rows, use the list endpoint with bulk insert
+            # Handle multiple rows creation
             rows_to_create = json.loads(args.multiple_rows_json)
             
-            # Add common fields to each row
+            # Add common fields and convert types for each row
             for row in rows_to_create:
                 row['tenant_id'] = tenant_id
                 if args.project_id != '-1':
                     row['project_id'] = args.project_id
                 if args.execution_id != '-1':
                     row['execution_id'] = args.execution_id
+                
+                # Apply schema-aware type conversion to all fields
+                for key, value in row.items():
+                    row[key] = convert_value_based_on_schema(schema_definition, key, value)
             
             create_payload = {
                 "dbType": "TIDB",
@@ -198,7 +300,7 @@ implementation:
                 matching_instances = [inst for inst in instances_found if inst.get('execution_id') == args.execution_id]
                 print(f"DEBUG: Found {len(matching_instances)} instances with execution_id: {args.execution_id}")
                 
-                # Build data based on mapping
+                # Build data based on mapping with dynamic schema-aware type conversion
                 data_to_save = {}
                 for column, source_key in mapping.items():
                     value = None
@@ -229,35 +331,36 @@ implementation:
                         # If source_key is a string, extract the value directly
                         value = extract_nested_value(update_data, source_key)
                         if value is not None:
-                            # Handle float conversion if needed
-                            if source_key in float_keys:
-                                try:
-                                    value = float(value)
-                                except (ValueError, TypeError):
-                                    value = str(value)
-                            print(f"DEBUG: Will save {column} with {value}")
+                            # Apply dynamic schema-aware type conversion
+                            value = convert_value_based_on_schema(schema_definition, column, value)
+                            print(f"DEBUG: Will save {column} with {value} (type: {type(value).__name__})")
                     
                     if value is not None:
                         data_to_save[column] = value
                 
-                # Add required identifiers
+                # Add required identifiers with proper type conversion
                 data_to_save['tenant_id'] = tenant_id
                 data_to_save['execution_id'] = args.execution_id
                 if args.project_id != '-1':
-                    data_to_save['project_id'] = args.project_id
+                    data_to_save['project_id'] = convert_value_based_on_schema(schema_definition, 'project_id', args.project_id)
                 if args.model_id != '-1':
-                    data_to_save['model_id'] = args.model_id
+                    data_to_save['model_id'] = convert_value_based_on_schema(schema_definition, 'model_id', args.model_id)
                 if args.architecture_type != '-1':
-                    data_to_save['architecture_type'] = args.architecture_type
+                    data_to_save['architecture_type'] = convert_value_based_on_schema(schema_definition, 'architecture_type', args.architecture_type)
                 
                 if matching_instances:
                     print(f" Instance Found: Upserting Row ")
-                    # For updates, we'll use upsert (insert or update)
-                    # The API should handle this automatically based on primary key
+                    # For updates, merge with existing data and apply type conversion
+                    instance_to_update = matching_instances[0]
+                    current_data = instance_to_update.copy()
+                    
+                    # Apply type conversion to updated fields
+                    for key, value in data_to_save.items():
+                        current_data[key] = convert_value_based_on_schema(schema_definition, key, value)
                     
                     upsert_payload = {
                         "dbType": "TIDB",
-                        "data": [data_to_save]
+                        "data": [current_data]
                     }
                     
                     print(f"Upserting data (insert or update)...")
@@ -268,6 +371,10 @@ implementation:
                     
                 else:
                     print(f" No Instance Found: Creating New Row ")
+                    
+                    # Apply final type conversion to all fields
+                    for key, value in data_to_save.items():
+                        data_to_save[key] = convert_value_based_on_schema(schema_definition, key, value)
                     
                     create_payload = {
                         "dbType": "TIDB",
