@@ -1,4 +1,4 @@
-name: Process Training History
+name: 2 Process Training History
 description: Processes training history data and converts all numeric values to strings for schema compatibility.
 
 inputs:
@@ -26,9 +26,7 @@ implementation:
         from typing import Any, Dict, List, Union
 
         def convert_numeric_to_string(obj: Any) -> Any:
-            """
-            Recursively convert all numeric values (int, float) to strings in a nested structure.
-            """
+           
             if isinstance(obj, dict):
                 return {key: convert_numeric_to_string(value) for key, value in obj.items()}
             elif isinstance(obj, list):
@@ -39,9 +37,7 @@ implementation:
                 return obj
 
         def process_training_history(history_data: Dict[str, Any], mapping: Dict[str, Any]) -> Dict[str, Any]:
-            """
-            Process training history according to mapping and convert all numeric values to strings.
-            """
+         
             processed_data = {}
             
             for column, keys in mapping.items():
