@@ -1,4 +1,4 @@
-name: CNN KServe Deployment
+name: Inference CNN KServe Deployment
 description: Deploys CNN model with KServe for image classification
 inputs:
   - name: model_uri
