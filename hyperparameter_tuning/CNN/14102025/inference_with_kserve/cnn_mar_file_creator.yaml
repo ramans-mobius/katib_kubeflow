@@ -9,7 +9,6 @@ inputs:
     type: String
   - name: model_name
     type: String
-    default: "cnn-model"
 outputs:
   - name: mar_file_out
     type: String
