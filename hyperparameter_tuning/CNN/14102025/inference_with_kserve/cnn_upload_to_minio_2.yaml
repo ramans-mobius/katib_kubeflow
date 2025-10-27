@@ -1,0 +1,99 @@
+name: 2 Upload to MinIO
+description: Uploads MAR and config files to MinIO with detailed logging
+inputs:
+  - name: mar_file
+    type: Dataset
+    description: "MAR file to upload"
+  - name: config_properties
+    type: Dataset
+    description: "Config properties file to upload"
+  - name: bucket_name
+    type: String
+    description: "MinIO bucket name"
+  - name: app_name
+    type: String
+    description: "Application name for path"
+  - name: minio_username
+    type: String
+    description: "MinIO username"
+  - name: minio_password
+    type: String
+    description: "MinIO password"
+outputs:
+  - name: minio_path
+    type: String
+    description: "MinIO path where files are stored"
+implementation:
+  container:
+    image: ubuntu:22.04
+    command:
+    - sh
+    - -ex
+    - -c
+    - |
+        echo "MINIO_UPLOAD: Starting MinIO upload process"
+        echo "MINIO_UPLOAD: Installing dependencies"
+        apt-get -o Acquire::ForceIPv4=true update
+        apt-get -o Acquire::ForceIPv4=true install -y wget
+        wget https://dl.min.io/client/mc/release/linux-amd64/mc
+        chmod +x mc
+        mv mc /usr/local/bin/
+        
+        echo "MINIO_UPLOAD: Setting up MinIO alias"
+        echo "MINIO_UPLOAD: Bucket: $3"
+        echo "MINIO_UPLOAD: App name: $4"
+        echo "MINIO_UPLOAD: Username: $5"
+        
+        mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$5" "$6"
+        
+        echo "MINIO_UPLOAD: Checking bucket exists"
+        if ! mc ls myminio/"$3"; then
+          echo "MINIO_UPLOAD: Creating bucket $3"
+          mc mb myminio/"$3"
+        else
+          echo "MINIO_UPLOAD: Bucket $3 already exists"
+        fi
+        
+        echo "MINIO_UPLOAD: Checking input files"
+        echo "MINIO_UPLOAD: MAR file path: $0"
+        echo "MINIO_UPLOAD: Config file path: $1"
+        
+        if [ -f "$0" ]; then
+          echo "MINIO_UPLOAD: MAR file exists, size: $(wc -c < "$0") bytes"
+        else
+          echo "MINIO_UPLOAD: ERROR: MAR file not found at $0"
+          ls -la "$(dirname "$0")" || echo "Directory listing failed"
+          exit 1
+        fi
+        
+        if [ -f "$1" ]; then
+          echo "MINIO_UPLOAD: Config file exists, size: $(wc -c < "$1") bytes"
+        else
+          echo "MINIO_UPLOAD: ERROR: Config file not found at $1"
+          ls -la "$(dirname "$1")" || echo "Directory listing failed"
+          exit 1
+        fi
+        
+        echo "MINIO_UPLOAD: Uploading MAR file"
+        mc cp "$0" "myminio/$3/$4/model-store/model.mar"
+        echo "MINIO_UPLOAD: MAR file uploaded"
+        
+        echo "MINIO_UPLOAD: Uploading config file"
+        mc cp "$1" "myminio/$3/$4/config/config.properties"
+        echo "MINIO_UPLOAD: Config file uploaded"
+        
+        MINIO_PATH="s3://$3/$4/"
+        echo "MINIO_UPLOAD: MinIO path: $MINIO_PATH"
+        
+        mkdir -p "$(dirname "$7")"
+        echo "$MINIO_PATH" > "$7"
+        echo "MINIO_UPLOAD: Path saved to output: $7"
+        
+        echo "MINIO_UPLOAD: Upload completed successfully"
+    - {inputPath: mar_file}
+    - {inputPath: config_properties}
+    - {inputValue: bucket_name}
+    - {inputValue: app_name}
+    - {inputValue: minio_username}
+    - {inputValue: minio_password}
+    - {outputPath: minio_path}
