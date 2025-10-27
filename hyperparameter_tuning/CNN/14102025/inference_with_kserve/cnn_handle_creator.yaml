@@ -1,4 +1,4 @@
-name: CNN Handler Creator
+name: Inference CNN Handler Creator
 description: Creates a TorchServe handler for CNN model inference
 inputs:
   - name: model_config
