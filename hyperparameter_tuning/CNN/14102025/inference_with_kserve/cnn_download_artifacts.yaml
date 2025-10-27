@@ -1,0 +1,73 @@
+name: CNN Download Artifacts
+description: Downloads CNN model artifacts from CDN URLs
+inputs:
+  - name: model_weights_url
+    type: String
+  - name: model_config_url
+    type: String
+  - name: class_labels_url
+    type: String
+  - name: inference_config_url
+    type: String
+outputs:
+  - name: model_weights
+    type: Model
+  - name: model_config
+    type: String
+  - name: class_labels
+    type: String
+  - name: inference_config
+    type: String
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        python3 -m pip install --quiet requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse, os, requests, json
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--model_weights_url', type=str, required=True)
+        parser.add_argument('--model_config_url', type=str, required=True)
+        parser.add_argument('--class_labels_url', type=str, required=True)
+        parser.add_argument('--inference_config_url', type=str, required=True)
+        parser.add_argument('--model_weights', type=str, required=True)
+        parser.add_argument('--model_config', type=str, required=True)
+        parser.add_argument('--class_labels', type=str, required=True)
+        parser.add_argument('--inference_config', type=str, required=True)
+        args = parser.parse_args()
+        def download_file(url, output_path, description):
+            r = requests.get(url)
+            r.raise_for_status()
+            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+            return output_path
+        download_file(args.model_weights_url, args.model_weights, "model weights")
+        download_file(args.model_config_url, args.model_config, "model config")
+        download_file(args.class_labels_url, args.class_labels, "class labels")
+        download_file(args.inference_config_url, args.inference_config, "inference config")
+        print("All CNN artifacts downloaded successfully")
+    args:
+      - --model_weights_url
+      - { inputValue: model_weights_url }
+      - --model_config_url
+      - { inputValue: model_config_url }
+      - --class_labels_url
+      - { inputValue: class_labels_url }
+      - --inference_config_url
+      - { inputValue: inference_config_url }
+      - --model_weights
+      - { outputPath: model_weights }
+      - --model_config
+      - { outputPath: model_config }
+      - --class_labels
+      - { outputPath: class_labels }
+      - --inference_config
+      - { outputPath: inference_config }
