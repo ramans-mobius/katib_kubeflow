@@ -1,0 +1,146 @@
+name: Create CNN Model Archive Files
+description: Creates .mar file and config.properties for CNN model deployment using handler from CDN
+inputs:
+  - {name: model_weights, type: Dataset, description: "Trained model weights file (.pth)"}
+  - {name: model_config, type: Dataset, description: "Model configuration YAML file"}
+  - {name: class_labels, type: Dataset, description: "Class labels JSON file"}
+  - {name: handler_cdn_url, type: String, description: "CDN URL to the handler.py file"}
+  - {name: model_name, type: String, description: "Name for the model archive"}
+  - {name: model_version, type: String, description: "Model version", default: "1.0"}
+outputs:
+  - {name: mar_file, type: Dataset, description: "Generated .mar model archive"}
+  - {name: config_properties, type: Dataset, description: "Generated config.properties file"}
+implementation:
+  container:
+    image: python:3.8-slim
+    command:
+      - sh
+      - -ec
+      - |
+        apt-get update > /dev/null && apt-get install -y curl wget > /dev/null
+        pip install torch torchvision Pillow pyyaml requests > /dev/null
+        pip install torchserve torch-model-archiver > /dev/null 2>&1 || \
+        (echo "Installing torch-model-archiver from GitHub..." && \
+         pip install https://github.com/pytorch/serve/archive/refs/heads/master.zip#subdirectory=model-archiver > /dev/null)
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import subprocess
+        import os
+        import shutil
+        import yaml
+        import requests
+        from pathlib import Path
+
+        parser = argparse.ArgumentParser(description="Create CNN model archive files.")
+        parser.add_argument('--model_weights', type=str, required=True)
+        parser.add_argument('--model_config', type=str, required=True)
+        parser.add_argument('--class_labels', type=str, required=True)
+        parser.add_argument('--handler_cdn_url', type=str, required=True)
+        parser.add_argument('--model_name', type=str, required=True)
+        parser.add_argument('--model_version', type=str, default='1.0')
+        parser.add_argument('--mar_file', type=str, required=True)
+        parser.add_argument('--config_properties', type=str, required=True)
+        args = parser.parse_args()
+
+        # Create working directory
+        work_dir = Path("/tmp/model_build")
+        work_dir.mkdir(exist_ok=True)
+        
+        print("=== Creating CNN Model Archive Files ===")
+        
+        # Copy input files
+        shutil.copy2(args.model_weights, work_dir / "model_weights.pth")
+        shutil.copy2(args.model_config, work_dir / "model_config.yaml")
+        shutil.copy2(args.class_labels, work_dir / "class_labels.json")
+        
+        # Download handler file from CDN
+        print("Downloading handler from CDN...")
+        try:
+            response = requests.get(args.handler_cdn_url)
+            response.raise_for_status()
+            
+            handler_path = work_dir / "cnn_handler.py"
+            with open(handler_path, 'w') as f:
+                f.write(response.text)
+            print("Handler file downloaded successfully")
+        except Exception as e:
+            print("Failed to download handler: " + str(e))
+            raise
+        
+        # Create preprocess config
+        import pickle
+        preprocess_config = {
+            'input_size': [224, 224],
+            'normalize_mean': [0.485, 0.456, 0.406],
+            'normalize_std': [0.229, 0.224, 0.225],
+            'task_type': 'classification'
+        }
+        with open(work_dir / "preprocess_config.pkl", 'wb') as f:
+            pickle.dump(preprocess_config, f)
+        
+        # Create .mar file
+        print("Creating .mar file...")
+        mar_command = [
+            "torch-model-archiver",
+            "--model-name", args.model_name,
+            "--version", args.model_version,
+            "--serialized-file", str(work_dir / "model_weights.pth"),
+            "--handler", str(work_dir / "cnn_handler.py"),
+            "--extra-files", f"{work_dir / 'model_config.yaml'},{work_dir / 'class_labels.json'},{work_dir / 'preprocess_config.pkl'}",
+            "--export-path", str(work_dir),
+            "--force"
+        ]
+        
+        subprocess.run(mar_command, check=True)
+        
+        # Create config.properties - using proper string formatting
+        config_lines = [
+            "inference_address=http://0.0.0.0:8085",
+            "management_address=http://0.0.0.0:8083", 
+            "metrics_address=http://0.0.0.0:8082",
+            "grpc_inference_port=7070",
+            "grpc_management_port=7071",
+            "max_request_size=1073741824",
+            "max_response_size=1073741824",
+            "install_py_dep_per_model=true",
+            "NUM_WORKERS=1",
+            "number_of_gpu=1",
+            "number_of_netty_threads=32",
+            "job_queue_size=1000",
+            "model_store=/mnt/models/model-store",
+            f'model_snapshot={{"name": "startup.cfg", "modelCount": 1, "models": {{"{args.model_name}": {{"{args.model_version}": {{"defaultVersion": true, "marName": "{args.model_name}.mar", "minWorkers": 1, "maxWorkers": 4, "batchSize": 8, "maxBatchDelay": 100, "responseTimeout": 120}}}}}}}}'
+        ]
+        
+        config_content = "\n".join(config_lines)
+        
+        with open(work_dir / "config.properties", 'w') as f:
+            f.write(config_content)
+        
+        # Copy outputs
+        shutil.copy2(work_dir / f"{args.model_name}.mar", args.mar_file)
+        shutil.copy2(work_dir / "config.properties", args.config_properties)
+        
+        print("All files created successfully!")
+        print("MAR file: " + str(work_dir / f"{args.model_name}.mar"))
+        print("Config file: " + str(work_dir / "config.properties"))
+    args:
+      - --model_weights
+      - {inputPath: model_weights}
+      - --model_config
+      - {inputPath: model_config}
+      - --class_labels
+      - {inputPath: class_labels}
+      - --handler_cdn_url
+      - {inputValue: handler_cdn_url}
+      - --model_name
+      - {inputValue: model_name}
+      - --model_version
+      - {inputValue: model_version}
+      - --mar_file
+      - {outputPath: mar_file}
+      - --config_properties
+      - {outputPath: config_properties}
