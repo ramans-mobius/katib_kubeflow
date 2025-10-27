@@ -1,4 +1,4 @@
-name: CNN MAR File Creator with nesy-factory
+name: Inference CNN MAR File Creator with nesy-factory
 description: Creates MAR file using nesy-factory CNN registry
 inputs:
   - name: model_weights
