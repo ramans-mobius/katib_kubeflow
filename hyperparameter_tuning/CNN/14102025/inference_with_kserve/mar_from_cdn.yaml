@@ -1,15 +1,32 @@
 name: Create CNN Model Archive Files
-description: Creates .mar file and config.properties for CNN model deployment using handler from CDN
+description: Creates .mar file and config.properties using handler from CDN URL
 inputs:
-  - {name: model_weights, type: Dataset, description: "Trained model weights file (.pth)"}
-  - {name: model_config, type: Dataset, description: "Model configuration YAML file"}
-  - {name: class_labels, type: Dataset, description: "Class labels JSON file"}
-  - {name: handler_cdn_url, type: String, description: "CDN URL to the handler.py file"}
-  - {name: model_name, type: String, description: "Name for the model archive"}
-  - {name: model_version, type: String, description: "Model version", default: "1.0"}
+  - name: model_weights
+    type: Model
+    description: "Downloaded model weights file"
+  - name: model_config
+    type: String  
+    description: "Downloaded model configuration JSON"
+  - name: class_labels
+    type: String
+    description: "Downloaded class labels JSON"
+  - name: handler_cdn_url
+    type: String
+    description: "CDN URL to the handler.py file"
+  - name: model_name
+    type: String
+    description: "Name for the model archive"
+  - name: model_version
+    type: String
+    description: "Model version"
+    default: "1.0"
 outputs:
-  - {name: mar_file, type: Dataset, description: "Generated .mar model archive"}
-  - {name: config_properties, type: Dataset, description: "Generated config.properties file"}
+  - name: mar_file
+    type: Dataset
+    description: "Generated .mar model archive"
+  - name: config_properties
+    type: Dataset
+    description: "Generated config.properties file"
 implementation:
   container:
     image: python:3.8-slim
@@ -31,6 +48,7 @@ implementation:
         import subprocess
         import os
         import shutil
+        import json
         import yaml
         import requests
         from pathlib import Path
@@ -54,11 +72,11 @@ implementation:
         
         # Copy input files
         shutil.copy2(args.model_weights, work_dir / "model_weights.pth")
-        shutil.copy2(args.model_config, work_dir / "model_config.yaml")
+        shutil.copy2(args.model_config, work_dir / "model_config.json")
         shutil.copy2(args.class_labels, work_dir / "class_labels.json")
         
-        # Download handler file from CDN
-        print("Downloading handler from CDN...")
+        # Download handler from CDN
+        print(f"Downloading handler from: {args.handler_cdn_url}")
         try:
             response = requests.get(args.handler_cdn_url)
             response.raise_for_status()
@@ -68,8 +86,27 @@ implementation:
                 f.write(response.text)
             print("Handler file downloaded successfully")
         except Exception as e:
-            print("Failed to download handler: " + str(e))
+            print(f"Failed to download handler: {e}")
             raise
+        
+        # Convert JSON config to YAML for nesy_factory
+        with open(work_dir / "model_config.json", 'r') as f:
+            model_config_json = json.load(f)
+        
+        # Extract model info and create YAML config
+        model_info = model_config_json.get('model_info', {})
+        yaml_config = {
+            'architecture': model_info.get('architecture', 'resnet'),
+            'variant': model_info.get('variant', 'resnet50'),
+            'input_channels': model_info.get('input_channels', 3),
+            'input_size': model_info.get('input_size', [224, 224]),
+            'output_dim': model_info.get('output_dim') or model_info.get('num_classes', 1000),
+            'pretrained': model_info.get('pretrained', False),
+            'task_type': 'classification'
+        }
+        
+        with open(work_dir / "model_config.yaml", 'w') as f:
+            yaml.dump(yaml_config, f)
         
         # Create preprocess config
         import pickle
@@ -97,7 +134,7 @@ implementation:
         
         subprocess.run(mar_command, check=True)
         
-        # Create config.properties - using proper string formatting
+        # Create config.properties
         config_lines = [
             "inference_address=http://0.0.0.0:8085",
             "management_address=http://0.0.0.0:8083", 
@@ -124,7 +161,7 @@ implementation:
         shutil.copy2(work_dir / f"{args.model_name}.mar", args.mar_file)
         shutil.copy2(work_dir / "config.properties", args.config_properties)
         
-        print("All files created successfully!")
+        print("All files created successfully")
         print("MAR file: " + str(work_dir / f"{args.model_name}.mar"))
         print("Config file: " + str(work_dir / "config.properties"))
     args:
