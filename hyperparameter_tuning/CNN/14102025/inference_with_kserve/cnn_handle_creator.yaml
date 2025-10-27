@@ -1,0 +1,157 @@
+name: CNN Handler Creator
+description: Creates a TorchServe handler for CNN model inference
+inputs:
+  - name: model_config
+    type: String
+  - name: class_labels
+    type: String
+  - name: inference_config
+    type: String
+outputs:
+  - name: cnn_handler
+    type: String
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        import os
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--model_config', type=str, required=True)
+        parser.add_argument('--class_labels', type=str, required=True)
+        parser.add_argument('--inference_config', type=str, required=True)
+        parser.add_argument('--cnn_handler', type=str, required=True)
+        args = parser.parse_args()
+        with open(args.model_config, 'r') as f:
+            model_config = json.load(f)
+        with open(args.class_labels, 'r') as f:
+            class_labels = json.load(f)
+        with open(args.inference_config, 'r') as f:
+            inference_config = json.load(f)
+        handler_content = '''
+import torch
+import torch.nn.functional as F
+from torchvision import transforms
+from PIL import Image
+import json
+import io
+import logging
+logger = logging.getLogger(__name__)
+class CNNImageHandler:
+    def __init__(self):
+        self.model = None
+        self.class_names = ''' + str(class_labels) + '''
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.initialized = False
+        self.transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                               std=[0.229, 0.224, 0.225])
+        ])
+        self.model_config = ''' + str(model_config) + '''
+        self.inference_config = ''' + str(inference_config) + '''
+    def initialize(self, context):
+        try:
+            properties = context.system_properties
+            model_dir = properties.get("model_dir")
+            model_pt_path = os.path.join(model_dir, "model.pth")
+            if not os.path.isfile(model_pt_path):
+                raise RuntimeError("Model file not found: " + model_pt_path)
+            self.model = context.model
+            self.model.to(self.device)
+            self.model.eval()
+            self.initialized = True
+        except Exception as e:
+            logger.error(f"Model initialization failed: {str(e)}")
+            raise
+    def preprocess(self, data):
+        try:
+            images = []
+            for row in data:
+                image = row.get("data") or row.get("body")
+                if isinstance(image, (bytearray, bytes)):
+                    image = Image.open(io.BytesIO(image)).convert('RGB')
+                elif isinstance(image, str):
+                    import base64
+                    image_data = base64.b64decode(image)
+                    image = Image.open(io.BytesIO(image_data)).convert('RGB')
+                else:
+                    raise ValueError("Unsupported image format")
+                image = self.transform(image)
+                images.append(image)
+            batch = torch.stack(images).to(self.device)
+            return batch
+        except Exception as e:
+            logger.error(f"Preprocessing failed: {str(e)}")
+            raise
+    def inference(self, model_input):
+        try:
+            with torch.no_grad():
+                outputs = self.model(model_input)
+                probabilities = F.softmax(outputs, dim=1)
+                return probabilities
+        except Exception as e:
+            logger.error(f"Inference failed: {str(e)}")
+            raise
+    def postprocess(self, inference_output):
+        try:
+            confidences, predicted_indices = torch.max(inference_output, 1)
+            results = []
+            for i, (conf, pred_idx) in enumerate(zip(confidences, predicted_indices)):
+                pred_idx = pred_idx.item()
+                confidence = conf.item()
+                class_name = self.class_names.get(str(pred_idx), f"class_{pred_idx}")
+                result = {
+                    "predicted_class": class_name,
+                    "class_id": pred_idx,
+                    "confidence": float(confidence),
+                    "all_probabilities": {
+                        self.class_names.get(str(j), f"class_{j}"): float(prob)
+                        for j, prob in enumerate(inference_output[i])
+                    }
+                }
+                results.append(result)
+            return results
+        except Exception as e:
+            logger.error(f"Postprocessing failed: {str(e)}")
+            raise
+    def handle(self, data, context):
+        try:
+            if not self.initialized:
+                self.initialize(context)
+            model_input = self.preprocess(data)
+            model_output = self.inference(model_input)
+            result = self.postprocess(model_output)
+            return result
+        except Exception as e:
+            logger.error(f"Handler failed: {str(e)}")
+            return [{"error": str(e)}]
+_service = CNNImageHandler()
+def handle(data, context):
+    return _service.handle(data, context)
+'''
+        os.makedirs(args.cnn_handler, exist_ok=True)
+        handler_path = os.path.join(args.cnn_handler, 'handler.py')
+        with open(handler_path, 'w') as f:
+            f.write(handler_content)
+        print(f"CNN handler created at: {handler_path}")
+    args:
+      - --model_config
+      - {inputPath: model_config}
+      - --class_labels
+      - {inputPath: class_labels}
+      - --inference_config
+      - {inputPath: inference_config}
+      - --cnn_handler
+      - {outputPath: cnn_handler}
