@@ -1,4 +1,4 @@
-name: Inference CNN Handler Creator
+name: Inference 2 CNN Handler Creator
 description: Creates a TorchServe handler for CNN model inference
 inputs:
   - name: model_config
@@ -40,108 +40,120 @@ implementation:
         with open(args.inference_config, 'r') as f:
             inference_config = json.load(f)
         
-        handler_content = "import torch\n"
-        handler_content += "import torch.nn.functional as F\n"
-        handler_content += "from torchvision import transforms\n"
-        handler_content += "from PIL import Image\n"
-        handler_content += "import json\n"
-        handler_content += "import io\n"
-        handler_content += "import logging\n"
-        handler_content += "import os\n\n"
-        handler_content += "logger = logging.getLogger(__name__)\n\n"
-        handler_content += "class CNNImageHandler:\n"
-        handler_content += "    def __init__(self):\n"
-        handler_content += "        self.model = None\n"
-        handler_content += f"        self.class_names = {class_labels}\n"
-        handler_content += "        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n"
-        handler_content += "        self.initialized = False\n"
-        handler_content += "        self.transform = transforms.Compose([\n"
-        handler_content += "            transforms.Resize(256),\n"
-        handler_content += "            transforms.CenterCrop(224),\n"
-        handler_content += "            transforms.ToTensor(),\n"
-        handler_content += "            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])\n"
-        handler_content += "        ])\n"
-        handler_content += f"        self.model_config = {model_config}\n"
-        handler_content += f"        self.inference_config = {inference_config}\n\n"
-        handler_content += "    def initialize(self, context):\n"
-        handler_content += "        try:\n"
-        handler_content += "            properties = context.system_properties\n"
-        handler_content += "            model_dir = properties.get('model_dir')\n"
-        handler_content += "            model_pt_path = os.path.join(model_dir, 'model.pth')\n"
-        handler_content += "            if not os.path.isfile(model_pt_path):\n"
-        handler_content += "                raise RuntimeError('Model file not found: ' + model_pt_path)\n"
-        handler_content += "            self.model = context.model\n"
-        handler_content += "            self.model.to(self.device)\n"
-        handler_content += "            self.model.eval()\n"
-        handler_content += "            self.initialized = True\n"
-        handler_content += "        except Exception as e:\n"
-        handler_content += "            logger.error(f'Model initialization failed: {str(e)}')\n"
-        handler_content += "            raise\n\n"
-        handler_content += "    def preprocess(self, data):\n"
-        handler_content += "        try:\n"
-        handler_content += "            images = []\n"
-        handler_content += "            for row in data:\n"
-        handler_content += "                image = row.get('data') or row.get('body')\n"
-        handler_content += "                if isinstance(image, (bytearray, bytes)):\n"
-        handler_content += "                    image = Image.open(io.BytesIO(image)).convert('RGB')\n"
-        handler_content += "                elif isinstance(image, str):\n"
-        handler_content += "                    import base64\n"
-        handler_content += "                    image_data = base64.b64decode(image)\n"
-        handler_content += "                    image = Image.open(io.BytesIO(image_data)).convert('RGB')\n"
-        handler_content += "                else:\n"
-        handler_content += "                    raise ValueError('Unsupported image format')\n"
-        handler_content += "                image = self.transform(image)\n"
-        handler_content += "                images.append(image)\n"
-        handler_content += "            batch = torch.stack(images).to(self.device)\n"
-        handler_content += "            return batch\n"
-        handler_content += "        except Exception as e:\n"
-        handler_content += "            logger.error(f'Preprocessing failed: {str(e)}')\n"
-        handler_content += "            raise\n\n"
-        handler_content += "    def inference(self, model_input):\n"
-        handler_content += "        try:\n"
-        handler_content += "            with torch.no_grad():\n"
-        handler_content += "                outputs = self.model(model_input)\n"
-        handler_content += "                probabilities = F.softmax(outputs, dim=1)\n"
-        handler_content += "                return probabilities\n"
-        handler_content += "        except Exception as e:\n"
-        handler_content += "            logger.error(f'Inference failed: {str(e)}')\n"
-        handler_content += "            raise\n\n"
-        handler_content += "    def postprocess(self, inference_output):\n"
-        handler_content += "        try:\n"
-        handler_content += "            confidences, predicted_indices = torch.max(inference_output, 1)\n"
-        handler_content += "            results = []\n"
-        handler_content += "            for i, (conf, pred_idx) in enumerate(zip(confidences, predicted_indices)):\n"
-        handler_content += "                pred_idx = pred_idx.item()\n"
-        handler_content += "                confidence = conf.item()\n"
-        handler_content += "                class_name = self.class_names.get(str(pred_idx), f'class_{pred_idx}')\n"
-        handler_content += "                result = {\n"
-        handler_content += "                    'predicted_class': class_name,\n"
-        handler_content += "                    'class_id': pred_idx,\n"
-        handler_content += "                    'confidence': float(confidence),\n"
-        handler_content += "                    'all_probabilities': {\n"
-        handler_content += "                        self.class_names.get(str(j), f'class_{j}'): float(prob)\n"
-        handler_content += "                        for j, prob in enumerate(inference_output[i])\n"
-        handler_content += "                    }\n"
-        handler_content += "                }\n"
-        handler_content += "                results.append(result)\n"
-        handler_content += "            return results\n"
-        handler_content += "        except Exception as e:\n"
-        handler_content += "            logger.error(f'Postprocessing failed: {str(e)}')\n"
-        handler_content += "            raise\n\n"
-        handler_content += "    def handle(self, data, context):\n"
-        handler_content += "        try:\n"
-        handler_content += "            if not self.initialized:\n"
-        handler_content += "                self.initialize(context)\n"
-        handler_content += "            model_input = self.preprocess(data)\n"
-        handler_content += "            model_output = self.inference(model_input)\n"
-        handler_content += "            result = self.postprocess(model_output)\n"
-        handler_content += "            return result\n"
-        handler_content += "        except Exception as e:\n"
-        handler_content += "            logger.error(f'Handler failed: {str(e)}')\n"
-        handler_content += "            return [{'error': str(e)}]\n\n"
-        handler_content += "_service = CNNImageHandler()\n\n"
-        handler_content += "def handle(data, context):\n"
-        handler_content += "    return _service.handle(data, context)\n"
+        lines = []
+        lines.append("import torch")
+        lines.append("import torch.nn.functional as F")
+        lines.append("from torchvision import transforms")
+        lines.append("from PIL import Image")
+        lines.append("import json")
+        lines.append("import io")
+        lines.append("import logging")
+        lines.append("import os")
+        lines.append("")
+        lines.append("logger = logging.getLogger(__name__)")
+        lines.append("")
+        lines.append("class CNNImageHandler:")
+        lines.append("    def __init__(self):")
+        lines.append("        self.model = None")
+        lines.append(f"        self.class_names = {class_labels}")
+        lines.append("        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
+        lines.append("        self.initialized = False")
+        lines.append("        self.transform = transforms.Compose([")
+        lines.append("            transforms.Resize(256),")
+        lines.append("            transforms.CenterCrop(224),")
+        lines.append("            transforms.ToTensor(),")
+        lines.append("            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])")
+        lines.append("        ])")
+        lines.append(f"        self.model_config = {model_config}")
+        lines.append(f"        self.inference_config = {inference_config}")
+        lines.append("")
+        lines.append("    def initialize(self, context):")
+        lines.append("        try:")
+        lines.append("            properties = context.system_properties")
+        lines.append("            model_dir = properties.get('model_dir')")
+        lines.append("            model_pt_path = os.path.join(model_dir, 'model.pth')")
+        lines.append("            if not os.path.isfile(model_pt_path):")
+        lines.append("                raise RuntimeError('Model file not found: ' + model_pt_path)")
+        lines.append("            self.model = context.model")
+        lines.append("            self.model.to(self.device)")
+        lines.append("            self.model.eval()")
+        lines.append("            self.initialized = True")
+        lines.append("        except Exception as e:")
+        lines.append("            logger.error(f'Model initialization failed: {str(e)}')")
+        lines.append("            raise")
+        lines.append("")
+        lines.append("    def preprocess(self, data):")
+        lines.append("        try:")
+        lines.append("            images = []")
+        lines.append("            for row in data:")
+        lines.append("                image = row.get('data') or row.get('body')")
+        lines.append("                if isinstance(image, (bytearray, bytes)):")
+        lines.append("                    image = Image.open(io.BytesIO(image)).convert('RGB')")
+        lines.append("                elif isinstance(image, str):")
+        lines.append("                    import base64")
+        lines.append("                    image_data = base64.b64decode(image)")
+        lines.append("                    image = Image.open(io.BytesIO(image_data)).convert('RGB')")
+        lines.append("                else:")
+        lines.append("                    raise ValueError('Unsupported image format')")
+        lines.append("                image = self.transform(image)")
+        lines.append("                images.append(image)")
+        lines.append("            batch = torch.stack(images).to(self.device)")
+        lines.append("            return batch")
+        lines.append("        except Exception as e:")
+        lines.append("            logger.error(f'Preprocessing failed: {str(e)}')")
+        lines.append("            raise")
+        lines.append("")
+        lines.append("    def inference(self, model_input):")
+        lines.append("        try:")
+        lines.append("            with torch.no_grad():")
+        lines.append("                outputs = self.model(model_input)")
+        lines.append("                probabilities = F.softmax(outputs, dim=1)")
+        lines.append("                return probabilities")
+        lines.append("        except Exception as e:")
+        lines.append("            logger.error(f'Inference failed: {str(e)}')")
+        lines.append("            raise")
+        lines.append("")
+        lines.append("    def postprocess(self, inference_output):")
+        lines.append("        try:")
+        lines.append("            confidences, predicted_indices = torch.max(inference_output, 1)")
+        lines.append("            results = []")
+        lines.append("            for i, (conf, pred_idx) in enumerate(zip(confidences, predicted_indices)):")
+        lines.append("                pred_idx = pred_idx.item()")
+        lines.append("                confidence = conf.item()")
+        lines.append("                class_name = self.class_names.get(str(pred_idx), f'class_{pred_idx}')")
+        lines.append("                result = {")
+        lines.append("                    'predicted_class': class_name,")
+        lines.append("                    'class_id': pred_idx,")
+        lines.append("                    'confidence': float(confidence),")
+        lines.append("                    'all_probabilities': {")
+        lines.append("                        self.class_names.get(str(j), f'class_{j}'): float(prob)")
+        lines.append("                        for j, prob in enumerate(inference_output[i])")
+        lines.append("                    }")
+        lines.append("                }")
+        lines.append("                results.append(result)")
+        lines.append("            return results")
+        lines.append("        except Exception as e:")
+        lines.append("            logger.error(f'Postprocessing failed: {str(e)}')")
+        lines.append("            raise")
+        lines.append("")
+        lines.append("    def handle(self, data, context):")
+        lines.append("        try:")
+        lines.append("            if not self.initialized:")
+        lines.append("                self.initialize(context)")
+        lines.append("            model_input = self.preprocess(data)")
+        lines.append("            model_output = self.inference(model_input)")
+        lines.append("            result = self.postprocess(model_output)")
+        lines.append("            return result")
+        lines.append("        except Exception as e:")
+        lines.append("            logger.error(f'Handler failed: {str(e)}')")
+        lines.append("            return [{'error': str(e)}]")
+        lines.append("")
+        lines.append("_service = CNNImageHandler()")
+        lines.append("")
+        lines.append("def handle(data, context):")
+        lines.append("    return _service.handle(data, context)")
+        
+        handler_content = "\n".join(lines)
         
         os.makedirs(args.cnn_handler, exist_ok=True)
         handler_path = os.path.join(args.cnn_handler, 'handler.py')
