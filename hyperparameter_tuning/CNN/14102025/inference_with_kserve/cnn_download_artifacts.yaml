@@ -1,4 +1,4 @@
-name: CNN Download Artifacts
+name: Inference CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs
 inputs:
   - name: model_weights_url
