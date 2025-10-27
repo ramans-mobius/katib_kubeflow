@@ -9,6 +9,7 @@ inputs:
     type: String
   - name: model_name
     type: String
+    default: "cnn-model"
 outputs:
   - name: mar_file_out
     type: String
@@ -22,73 +23,6 @@ implementation:
       - -c
       - |
         pip install torch-model-archiver torchvision
-        python3 -c "
-        import base64
-        encoded_script = b'''
-        import torch
-        import torch.nn as nn
-        import json
-        import os
-        import sys
-
-        sys.path.insert(0, '/usr/local/lib/python3.10/site-packages')
-
-        try:
-            from nesy_factory.CNNs.registry import create_model as create_cnn_model
-        except ImportError as e:
-            try:
-                from nesy_factory.CNNs import BaseCNN, ResNet, EfficientNet, MobileNet, DenseNet, SimpleCNN
-                def create_cnn_model(arch_name, config):
-                    arch_name = arch_name.lower()
-                    if arch_name == 'resnet':
-                        return ResNet(config)
-                    elif arch_name == 'efficientnet':
-                        return EfficientNet(config)
-                    elif arch_name == 'mobilenet':
-                        return MobileNet(config)
-                    elif arch_name == 'densenet':
-                        return DenseNet(config)
-                    elif arch_name == 'simple_cnn':
-                        return SimpleCNN(config)
-                    else:
-                        return BaseCNN(config)
-            except ImportError as e2:
-                raise ImportError(\\\"Cannot load nesy-factory CNN models\\\")
-
-        class CNNModel(nn.Module):
-            def __init__(self):
-                super(CNNModel, self).__init__()
-                with open(os.path.join(os.path.dirname(__file__), 'model_config.json'), 'r') as f:
-                    config_data = json.load(f)
-                model_config = config_data.get('model_info', {})
-                architecture = model_config.get('architecture', 'BaseCNN')
-                self.model = create_cnn_model(architecture, model_config)
-            def forward(self, x):
-                return self.model(x)
-
-        def model_fn(model_dir):
-            config_path = os.path.join(model_dir, 'model_config.json')
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-            model_config = config_data.get('model_info', {})
-            architecture = model_config.get('architecture', 'BaseCNN')
-            model = create_cnn_model(architecture, model_config)
-            model_files = [f for f in os.listdir(model_dir) if f.endswith(('.pth', '.pt'))]
-            if not model_files:
-                raise FileNotFoundError(f\\\"No model weights found in {model_dir}\\\")
-            weights_path = os.path.join(model_dir, model_files[0])
-            checkpoint = torch.load(weights_path, map_location='cpu')
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-            elif isinstance(checkpoint, dict):
-                model.load_state_dict(checkpoint)
-            else:
-                model.load_state_dict(checkpoint)
-            model.eval()
-            return model
-        '''
-        print(base64.b64encode(encoded_script).decode())
-        " > /tmp/encoded_model.txt
         exec "$0" "$@"
       - python3
       - -u
@@ -99,8 +33,7 @@ implementation:
         import json
         import argparse
         import shutil
-        import base64
-
+        
         parser = argparse.ArgumentParser()
         parser.add_argument('--model_weights', type=str, required=True)
         parser.add_argument('--cnn_handler', type=str, required=True)
@@ -109,17 +42,71 @@ implementation:
         parser.add_argument('--mar_file_out', type=str, required=True)
         parser.add_argument('--mar_creation_log', type=str, required=True)
         args = parser.parse_args()
-
+        
         with open(args.model_config, 'r') as f:
             model_config_data = json.load(f)
+        
         model_config = model_config_data.get('model_info', {})
         architecture = model_config.get('architecture', 'BaseCNN')
-
-        with open('/tmp/encoded_model.txt', 'r') as f:
-            encoded_script = f.read().strip()
-
-        model_content = base64.b64decode(encoded_script).decode()
-
+        
+        model_content = "import torch\n"
+        model_content += "import torch.nn as nn\n"
+        model_content += "import json\n"
+        model_content += "import os\n"
+        model_content += "import sys\n\n"
+        model_content += "sys.path.insert(0, '/usr/local/lib/python3.10/site-packages')\n\n"
+        model_content += "try:\n"
+        model_content += "    from nesy_factory.CNNs.registry import create_model as create_cnn_model\n"
+        model_content += "except ImportError as e:\n"
+        model_content += "    try:\n"
+        model_content += "        from nesy_factory.CNNs import BaseCNN, ResNet, EfficientNet, MobileNet, DenseNet, SimpleCNN\n"
+        model_content += "        def create_cnn_model(arch_name, config):\n"
+        model_content += "            arch_name = arch_name.lower()\n"
+        model_content += "            if arch_name == 'resnet':\n"
+        model_content += "                return ResNet(config)\n"
+        model_content += "            elif arch_name == 'efficientnet':\n"
+        model_content += "                return EfficientNet(config)\n"
+        model_content += "            elif arch_name == 'mobilenet':\n"
+        model_content += "                return MobileNet(config)\n"
+        model_content += "            elif arch_name == 'densenet':\n"
+        model_content += "                return DenseNet(config)\n"
+        model_content += "            elif arch_name == 'simple_cnn':\n"
+        model_content += "                return SimpleCNN(config)\n"
+        model_content += "            else:\n"
+        model_content += "                return BaseCNN(config)\n"
+        model_content += "    except ImportError as e2:\n"
+        model_content += "        raise ImportError('Cannot load nesy-factory CNN models')\n\n"
+        model_content += "class CNNModel(nn.Module):\n"
+        model_content += "    def __init__(self):\n"
+        model_content += "        super(CNNModel, self).__init__()\n"
+        model_content += "        with open(os.path.join(os.path.dirname(__file__), 'model_config.json'), 'r') as f:\n"
+        model_content += "            config_data = json.load(f)\n"
+        model_content += "        model_config = config_data.get('model_info', {})\n"
+        model_content += "        architecture = model_config.get('architecture', 'BaseCNN')\n"
+        model_content += "        self.model = create_cnn_model(architecture, model_config)\n"
+        model_content += "    def forward(self, x):\n"
+        model_content += "        return self.model(x)\n\n"
+        model_content += "def model_fn(model_dir):\n"
+        model_content += "    config_path = os.path.join(model_dir, 'model_config.json')\n"
+        model_content += "    with open(config_path, 'r') as f:\n"
+        model_content += "        config_data = json.load(f)\n"
+        model_content += "    model_config = config_data.get('model_info', {})\n"
+        model_content += "    architecture = model_config.get('architecture', 'BaseCNN')\n"
+        model_content += "    model = create_cnn_model(architecture, model_config)\n"
+        model_content += "    model_files = [f for f in os.listdir(model_dir) if f.endswith(('.pth', '.pt'))]\n"
+        model_content += "    if not model_files:\n"
+        model_content += "        raise FileNotFoundError(f'No model weights found in {model_dir}')\n"
+        model_content += "    weights_path = os.path.join(model_dir, model_files[0])\n"
+        model_content += "    checkpoint = torch.load(weights_path, map_location='cpu')\n"
+        model_content += "    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:\n"
+        model_content += "        model.load_state_dict(checkpoint['model_state_dict'])\n"
+        model_content += "    elif isinstance(checkpoint, dict):\n"
+        model_content += "        model.load_state_dict(checkpoint)\n"
+        model_content += "    else:\n"
+        model_content += "        model.load_state_dict(checkpoint)\n"
+        model_content += "    model.eval()\n"
+        model_content += "    return model\n"
+        
         try:
             os.makedirs('/tmp/cnn_model', exist_ok=True)
             
