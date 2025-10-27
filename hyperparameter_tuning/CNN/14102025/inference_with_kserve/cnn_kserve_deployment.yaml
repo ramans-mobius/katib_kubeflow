@@ -1,0 +1,73 @@
+name: CNN KServe Deployment
+description: Deploys CNN model with KServe for image classification
+inputs:
+  - name: model_uri
+    type: String
+  - name: model_name
+    type: String
+    default: "cnn-classifier"
+  - name: namespace
+    type: String
+    default: "kubeflow"
+outputs:
+  - name: inference_service_status
+    type: String
+implementation:
+  container:
+    image: nikhilv215/kserve:kserve_component-v6
+    command: ['python']
+    args:
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--model_uri', type=str, required=True)
+        parser.add_argument('--model_name', type=str, default='cnn-classifier')
+        parser.add_argument('--namespace', type=str, default='kubeflow')
+        parser.add_argument('--inference_service_status', type=str, required=True)
+        args = parser.parse_args()
+        isvc_yaml = {
+            "apiVersion": "serving.kserve.io/v1beta1",
+            "kind": "InferenceService",
+            "metadata": {
+                "name": args.model_name,
+                "namespace": args.namespace
+            },
+            "spec": {
+                "predictor": {
+                    "pytorch": {
+                        "storageUri": args.model_uri,
+                        "resources": {
+                            "requests": {
+                                "cpu": "1",
+                                "memory": "2Gi"
+                            },
+                            "limits": {
+                                "cpu": "2", 
+                                "memory": "4Gi"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        output = {
+            "inferenceservice_yaml": json.dumps(isvc_yaml),
+            "action": "create",
+            "model_name": args.model_name,
+            "namespace": args.namespace,
+            "framework": "pytorch",
+            "runtime_version": "latest"
+        }
+        with open(args.inference_service_status, 'w') as f:
+            json.dump(output, f, indent=2)
+      - --model_uri
+      - {inputValue: model_uri}
+      - --model_name
+      - {inputValue: model_name}
+      - --namespace
+      - {inputValue: namespace}
+      - --inference_service_status
+      - {outputPath: inference_service_status}
