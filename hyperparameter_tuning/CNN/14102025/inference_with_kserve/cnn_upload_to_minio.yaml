@@ -1,4 +1,4 @@
-name: CNN Upload to MinIO
+name: Inference CNN Upload to MinIO
 description: Uploads CNN MAR file and config to MinIO
 inputs:
   - name: mar_file
