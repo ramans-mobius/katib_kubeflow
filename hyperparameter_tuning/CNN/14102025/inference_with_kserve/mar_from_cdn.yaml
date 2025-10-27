@@ -39,11 +39,8 @@ implementation:
         pip install torchserve torch-model-archiver > /dev/null 2>&1 || \
         (echo "Installing torch-model-archiver from GitHub..." && \
          pip install https://github.com/pytorch/serve/archive/refs/heads/master.zip#subdirectory=model-archiver > /dev/null)
-        exec "$0" "$@"
-      - python3
-      - -u
-      - -c
-      - |
+        
+        python3 << 'EOF'
         import argparse
         import subprocess
         import os
@@ -84,7 +81,7 @@ implementation:
 
         print("MAR_CREATION: Parsing model config JSON")
         model_config_data = json.loads(args.model_config_json)
-        print(f"MAR_CREATION: Model config keys: {model_config_data.keys()}")
+        print(f"MAR_CREATION: Model config keys: {list(model_config_data.keys())}")
         with open(work_dir / "model_config.json", 'w') as f:
             json.dump(model_config_data, f)
 
@@ -104,7 +101,7 @@ implementation:
 
         print("MAR_CREATION: Converting config to YAML")
         model_info = model_config_data.get('model_info', {})
-        print(f"MAR_CREATION: Model info keys: {model_info.keys()}")
+        print(f"MAR_CREATION: Model info keys: {list(model_info.keys())}")
         yaml_config = {
             'architecture': model_info.get('architecture', 'resnet'),
             'variant': model_info.get('variant', 'resnet50'),
@@ -174,6 +171,7 @@ implementation:
         print(f"MAR_CREATION: Output MAR file: {args.mar_file}")
         print(f"MAR_CREATION: Output config file: {args.config_properties}")
         print("MAR_CREATION: Process completed successfully")
+        EOF
     args:
       - --model_weights_url
       - {inputValue: model_weights_url}
