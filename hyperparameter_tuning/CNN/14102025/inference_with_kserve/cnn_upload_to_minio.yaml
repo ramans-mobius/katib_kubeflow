@@ -1,0 +1,48 @@
+name: CNN Upload to MinIO
+description: Uploads CNN MAR file and config to MinIO
+inputs:
+  - name: mar_file
+    type: String
+  - name: model_config
+    type: String
+  - name: bucket_name
+    type: String
+  - name: app_name
+    type: String
+  - name: minio_username
+    type: String
+  - name: minio_password
+    type: String
+outputs:
+  - name: minio_path
+    type: String
+implementation:
+  container:
+    image: ubuntu:22.04
+    command:
+      - sh
+      - -c
+      - |
+        apt-get update && apt-get install -y wget
+        wget https://dl.min.io/client/mc/release/linux-amd64/mc
+        chmod +x mc && mv mc /usr/local/bin/
+        mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$3" "$4"
+        mc mb myminio/"$2" || true
+        MAR_FILE="$0/*.mar"
+        mar_path=$(ls $MAR_FILE 2>/dev/null | head -1)
+        if [ -z "$mar_path" ]; then
+            echo "MAR file not found in $0"
+            ls -la "$0"
+            exit 1
+        fi
+        mc cp "$mar_path" "myminio/$2/$1/model-store/cnn-model.mar"
+        mc cp "$1" "myminio/$2/$1/config/model-config.json"
+        mkdir -p "$(dirname "$5")"
+        echo "s3://$2/$1/" > "$5"
+        echo "Upload completed successfully!"
+      - {inputPath: mar_file}
+      - {inputValue: app_name}
+      - {inputValue: bucket_name}
+      - {inputValue: minio_username}
+      - {inputValue: minio_password}
+      - {outputPath: minio_path}
