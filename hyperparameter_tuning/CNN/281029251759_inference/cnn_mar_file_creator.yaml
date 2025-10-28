@@ -1,4 +1,4 @@
-name: 2 MAR File Creator for CNN
+name: MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - {name: handler_file, type: String, description: "Downloaded cnn_handler.py file"}
@@ -29,6 +29,7 @@ implementation:
         import subprocess
         import json
         import argparse
+        import shutil
         from datetime import datetime
 
         def create_mar_file(model_name, model_version, handler_path, weights_path, extra_files, output_dir):
@@ -84,31 +85,31 @@ implementation:
             try:
                 print("=== CNN MAR File Creator Started ===")
                 
-                # Inputs are already file paths, not directories
-                handler_path = args.handler_file
-                weights_path = args.model_weights_file
-                config_path = args.model_config_file
-                preprocess_path = args.preprocess_config_file
-                labels_path = args.class_labels_file
+                # Create a temp directory and copy files with proper names
+                temp_dir = '/tmp/mar_files'
+                os.makedirs(temp_dir, exist_ok=True)
                 
-                print("Handler file: " + handler_path)
-                print("Weights file: " + weights_path)
-                print("Config file: " + config_path)
-                print("Preprocess file: " + preprocess_path)
-                print("Labels file: " + labels_path)
+                # Copy and rename files
+                handler_path = os.path.join(temp_dir, 'cnn_handler.py')
+                weights_path = os.path.join(temp_dir, 'model_weights.pth')
+                config_path = os.path.join(temp_dir, 'model_config.json')
+                preprocess_path = os.path.join(temp_dir, 'preprocess_config.pkl')
+                labels_path = os.path.join(temp_dir, 'class_labels.json')
                 
-                # Verify files exist
-                for path, name in [
-                    (handler_path, 'handler'),
-                    (weights_path, 'weights'), 
-                    (config_path, 'config'),
-                    (preprocess_path, 'preprocess'),
-                    (labels_path, 'labels')
-                ]:
-                    if not os.path.exists(path):
-                        raise Exception(f"{name} file not found: {path}")
+                shutil.copy2(args.handler_file, handler_path)
+                shutil.copy2(args.model_weights_file, weights_path)
+                shutil.copy2(args.model_config_file, config_path)
+                shutil.copy2(args.preprocess_config_file, preprocess_path)
+                shutil.copy2(args.class_labels_file, labels_path)
                 
-                log_data['steps'].append({'step': 1, 'action': 'verify_files', 'status': 'success'})
+                print("Files copied and renamed:")
+                print("Handler: " + handler_path)
+                print("Weights: " + weights_path)
+                print("Config: " + config_path)
+                print("Preprocess: " + preprocess_path)
+                print("Labels: " + labels_path)
+                
+                log_data['steps'].append({'step': 1, 'action': 'copy_files', 'status': 'success'})
                 
                 extra_files = config_path + "," + preprocess_path + "," + labels_path
                 mar_file_path, creation_output = create_mar_file(args.model_name, args.model_version, handler_path, weights_path, extra_files, args.mar_file_out)
