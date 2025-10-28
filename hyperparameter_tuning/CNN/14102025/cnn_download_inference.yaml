@@ -1,4 +1,4 @@
-name: 4 CNN Download Artifacts
+name: 5 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -63,18 +63,25 @@ implementation:
         parser.add_argument('--preprocess_data', type=str, required=True)
         args = parser.parse_args()
 
-        def decode_url(url):
-            # Decode standard URL encoding
-            decoded_url = urllib.parse.unquote(url)
-            print(f"Original URL: {url}")
-            print(f"Decoded URL: {decoded_url}")
-            return decoded_url
+        def clean_url(url):
+            """Clean URL by removing newlines and extra spaces"""
+            # Remove any newlines and extra whitespace
+            cleaned_url = url.replace('\n', '').replace('\r', '').strip()
+            # If URL was encoded, decode it first
+            if '%' in cleaned_url:
+                cleaned_url = urllib.parse.unquote(cleaned_url)
+            # Remove any newlines that might have been introduced during decoding
+            cleaned_url = cleaned_url.replace('\n', '').replace('\r', '').strip()
+            return cleaned_url
 
         def download_file(url, output_path, description):
-            # Decode the URL first
-            decoded_url = decode_url(url)
-            print(f"Fetching {description} from: {decoded_url}")
-            r = requests.get(decoded_url)
+            # Clean the URL first
+            cleaned_url = clean_url(url)
+            print(f"Original URL: {repr(url)}")
+            print(f"Cleaned URL: {repr(cleaned_url)}")
+            print(f"Fetching {description} from: {cleaned_url}")
+            
+            r = requests.get(cleaned_url)
             r.raise_for_status()
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             with open(output_path, "wb") as f:
@@ -82,7 +89,7 @@ implementation:
             print(f"{description} saved to {output_path}")
             return output_path
 
-        # Download all files with URL decoding
+        # Download all files with URL cleaning
         download_file(args.model_weights_url, args.model_weights, "model weights")
         download_file(args.model_config_url, args.model_config, "model config")
         download_file(args.class_labels_url, args.class_labels, "class labels")
