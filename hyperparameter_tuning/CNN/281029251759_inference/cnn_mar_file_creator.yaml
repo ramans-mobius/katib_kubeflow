@@ -1,4 +1,4 @@
-name: 2 MAR File Creator for CNN
+name: 3 MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - {name: handler_file, type: String, description: "Downloaded cnn_handler.py file"}
