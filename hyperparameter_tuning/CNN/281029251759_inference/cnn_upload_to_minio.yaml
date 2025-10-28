@@ -1,111 +1,104 @@
 name: Upload to MinIO for CNN
 description: Upload config.properties and cnn-classifier.mar files to MinIO bucket
 inputs:
-  - {name: config_file, type: String, description: "config.properties file path"}
-  - {name: model_file, type: String, description: "cnn-classifier.mar file path"}
-  - {name: minio_bucket, type: String, description: "MinIO bucket name", default: "models"}
-  - {name: application_name, type: String, description: "Application name for path", default: "cnn-classifier"}
-  - {name: minio_username, type: String, description: "MinIO username"}
-  - {name: minio_password, type: String, description: "MinIO password"}
+- {name: Config File, type: String}
+- {name: Model File, type: String}  
+- {name: MinIO bucket name, type: String, default: "models"}
+- {name: Application name, type: String, default: "cnn-classifier"}
+- {name: MinIO username, type: String}
+- {name: MinIO password, type: String}
 outputs:
-  - {name: minio_path, type: String, description: "Output MinIO path"}
+- {name: MinIO path, type: String}
 implementation:
-  container:
-    image: ubuntu:22.04
-    command:
-    - sh
-    - -c
-    - |
-        set -e
-        echo "Starting MinIO upload process..."
-        
-        # Install dependencies
-        apt-get update && apt-get install -y wget
-        
-        # Download and setup MinIO client
-        wget -q -O mc https://dl.min.io/client/mc/release/linux-amd64/mc
-        chmod +x mc
-        
-        # Set MinIO alias
-        ./mc alias set myminio http://minio-service:9000 "$4" "$5"
-        
-        # Create bucket if it doesn't exist
-        if ! ./mc ls myminio/"$2" > /dev/null 2>&1; then
-          echo "Creating bucket: $2"
-          ./mc mb myminio/"$2"
-        fi
-        
-        # Create directory structure in MinIO
-        ./mc mb myminio/"$2"/"$3"/config --parents || true
-        ./mc mb myminio/"$2"/"$3"/model-store --parents || true
-        
-        # Create upload directory
-        mkdir -p /tmp/upload
-        
-        # Handle config file (could be file or directory)
-        echo "Processing config file: $0"
-        if [ -d "$0" ]; then
-          echo "Config input is a directory, copying recursively..."
-          cp -r "$0"/* /tmp/upload/
-        else
-          echo "Config input is a file, copying..."
-          cp "$0" /tmp/upload/config.properties
-        fi
-        
-        # Handle model file (could be file or directory)
-        echo "Processing model file: $1"
-        if [ -d "$1" ]; then
-          echo "Model input is a directory, copying recursively..."
-          cp -r "$1"/* /tmp/upload/
-          # Find .mar file in the directory
-          mar_file=$(find /tmp/upload -name "*.mar" | head -1)
-          if [ -n "$mar_file" ]; then
-            echo "Found MAR file: $mar_file"
-            cp "$mar_file" /tmp/upload/cnn-classifier.mar
-          fi
-        else
-          echo "Model input is a file, copying..."
-          cp "$1" /tmp/upload/cnn-classifier.mar
-        fi
-        
-        # Verify files exist before upload
-        echo "Files ready for upload:"
-        ls -la /tmp/upload/
-        
-        # Upload to MinIO
-        echo "Uploading config.properties..."
-        if [ -f "/tmp/upload/config.properties" ]; then
-          ./mc cp /tmp/upload/config.properties "myminio/$2/$3/config/config.properties"
-        else
-          echo "WARNING: config.properties not found in upload directory"
-        fi
-        
-        echo "Uploading cnn-classifier.mar..."
-        if [ -f "/tmp/upload/cnn-classifier.mar" ]; then
-          ./mc cp /tmp/upload/cnn-classifier.mar "myminio/$2/$3/model-store/cnn-classifier.mar"
-        else
-          echo "WARNING: cnn-classifier.mar not found in upload directory"
-          # Try to find any .mar file
-          mar_file=$(find /tmp/upload -name "*.mar" | head -1)
-          if [ -n "$mar_file" ]; then
-            echo "Found MAR file: $mar_file, uploading as cnn-classifier.mar"
-            ./mc cp "$mar_file" "myminio/$2/$3/model-store/cnn-classifier.mar"
-          else
-            echo "ERROR: No MAR file found to upload!"
-            exit 1
-          fi
-        fi
-        
-        # Create output
-        mkdir -p "$(dirname "$6")"
-        echo "s3://$2/$3/" > "$6"
-        echo "Upload completed successfully!"
-        echo "MinIO path: s3://$2/$3/"
-    args:
-    - {inputPath: config_file}
-    - {inputPath: model_file}
-    - {inputValue: minio_bucket}
-    - {inputValue: application_name}
-    - {inputValue: minio_username}
-    - {inputValue: minio_password}
-    - {outputPath: minio_path}
+    container:
+        image: ubuntu:22.04
+        command:
+        - sh
+        - -ex
+        - -c
+        - |
+            echo "=== Starting MinIO Upload ==="
+            echo "Input 0 (Config): $0"
+            echo "Input 1 (Model): $1"
+            echo "Input 2 (Bucket): $2"
+            echo "Input 3 (App): $3"
+            echo "Input 4 (User): $4"
+            echo "Input 5 (Pass): [hidden]"
+            
+            apt-get -o Acquire::ForceIPv4=true update
+            apt-get -o Acquire::ForceIPv4=true install -y wget
+            wget https://dl.min.io/client/mc/release/linux-amd64/mc
+            chmod +x mc
+            mv mc /usr/local/bin/
+            
+            echo "Setting up MinIO alias..."
+            mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$4" "$5"
+            
+            echo "Checking/creating bucket: $2"
+            if ! mc ls myminio/"$2"; then
+              mc mb myminio/"$2"
+            fi
+            
+            echo "=== File Discovery ==="
+            echo "Config input details:"
+            ls -la "$0" 2>/dev/null || echo "Cannot list config input"
+            
+            echo "Model input details:"
+            ls -la "$1" 2>/dev/null || echo "Cannot list model input"
+            
+            # Enhanced file discovery
+            CONFIG_FILE=""
+            if [ -f "$0/config.properties" ]; then
+                CONFIG_FILE="$0/config.properties"
+            elif [ -f "$0" ]; then
+                CONFIG_FILE="$0"
+            elif [ -d "$0" ]; then
+                # If it's a directory, find any .properties file
+                found_config=$(find "$0" -name "*.properties" | head -1)
+                if [ -n "$found_config" ]; then
+                    CONFIG_FILE="$found_config"
+                fi
+            fi
+            
+            MODEL_FILE=""
+            if [ -f "$1/cnn-classifier.mar" ]; then
+                MODEL_FILE="$1/cnn-classifier.mar"
+            elif [ -f "$1" ]; then
+                MODEL_FILE="$1"
+            elif [ -d "$1" ]; then
+                # If it's a directory, find any .mar file
+                found_mar=$(find "$1" -name "*.mar" | head -1)
+                if [ -n "$found_mar" ]; then
+                    MODEL_FILE="$found_mar"
+                fi
+            fi
+            
+            echo "Final config file: $CONFIG_FILE"
+            echo "Final model file: $MODEL_FILE"
+            
+            if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
+                echo "ERROR: Config file not found!"
+                exit 1
+            fi
+            
+            if [ -z "$MODEL_FILE" ] || [ ! -f "$MODEL_FILE" ]; then
+                echo "ERROR: Model file not found!"
+                exit 1
+            fi
+            
+            echo "=== Uploading Files ==="
+            mc cp "$CONFIG_FILE" "myminio/$2/$3/config/config.properties"
+            mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/cnn-classifier.mar"
+            
+            mkdir -p "$(dirname "$6")"
+            echo "s3://$2/$3/" > "$6"
+            echo "=== Upload Completed Successfully ==="
+            echo "MinIO path: s3://$2/$3/"
+        args:
+        - {inputPath: Config File}
+        - {inputPath: Model File}
+        - {inputValue: MinIO bucket name}
+        - {inputValue: Application name}
+        - {inputValue: MinIO username}
+        - {inputValue: MinIO password}
+        - {outputPath: MinIO path}
