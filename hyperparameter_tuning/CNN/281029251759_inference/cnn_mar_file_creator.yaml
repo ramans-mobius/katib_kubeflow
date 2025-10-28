@@ -1,4 +1,4 @@
-name: 2 MAR File Creator for CNN
+name: Stupid MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded cnn_handler.py file"}
@@ -31,21 +31,12 @@ implementation:
         import argparse
         from datetime import datetime
 
-        def create_placeholder_model():
-            placeholder_content = 'import torch\\nimport torch.nn as nn\n\nclass CNNPlaceholderModel(nn.Module):\\n    def __init__(self):\\n        super().__init__()\\n        self.dummy = nn.Parameter(torch.zeros(1))\\n    \\n    def forward(self, x):\\n        return x\\n'
-            placeholder_path = '/tmp/cnn_model.py'
-            with open(placeholder_path, 'w') as f:
-                f.write(placeholder_content)
-            print("Created placeholder CNN model at: " + placeholder_path)
-            return placeholder_path
-
-        def create_mar_file(model_name, model_version, model_path, handler_path, weights_path, extra_files, output_dir):
+        def create_mar_file(model_name, model_version, handler_path, weights_path, extra_files, output_dir):
             os.makedirs(output_dir, exist_ok=True)
             cmd = [
                 'torch-model-archiver',
                 '--model-name', model_name,
                 '--version', model_version,
-                '--model-file', model_path,
                 '--serialized-file', weights_path,
                 '--handler', handler_path,
                 '--extra-files', extra_files,
@@ -108,11 +99,9 @@ implementation:
                 print("Handler file found: " + handler_path)
                 print("Weights file found: " + weights_path)
                 log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
-                model_path = create_placeholder_model()
-                log_data['steps'].append({'step': 2, 'action': 'create_model', 'status': 'success'})
                 extra_files = config_path + "," + preprocess_path + "," + labels_path
-                mar_file_path, creation_output = create_mar_file(args.model_name, args.model_version, model_path, handler_path, weights_path, extra_files, args.mar_file_out)
-                log_data['steps'].append({'step': 3, 'action': 'create_mar', 'status': 'success'})
+                mar_file_path, creation_output = create_mar_file(args.model_name, args.model_version, handler_path, weights_path, extra_files, args.mar_file_out)
+                log_data['steps'].append({'step': 2, 'action': 'create_mar', 'status': 'success'})
                 log_data['mar_file_path'] = mar_file_path
                 log_data['creation_output'] = creation_output
                 log_data['status'] = 'completed'
