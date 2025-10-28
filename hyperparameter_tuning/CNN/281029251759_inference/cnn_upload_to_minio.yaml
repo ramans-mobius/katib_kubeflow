@@ -17,29 +17,90 @@ implementation:
     - -c
     - |
         set -e
-        apt-get -o Acquire::ForceIPv4=true update
-        apt-get -o Acquire::ForceIPv4=true install -y wget
-        wget https://dl.min.io/client/mc/release/linux-amd64/mc
-        chmod +x mc
-        mv mc /usr/local/bin/
-        mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$4" "$5"
+        echo "Starting MinIO upload process..."
         
-        if ! mc ls myminio/"$2"; then
-          mc mb myminio/"$2"
+        # Install dependencies
+        apt-get update && apt-get install -y wget
+        
+        # Download and setup MinIO client
+        wget -q -O mc https://dl.min.io/client/mc/release/linux-amd64/mc
+        chmod +x mc
+        
+        # Set MinIO alias
+        ./mc alias set myminio http://minio-service:9000 "$4" "$5"
+        
+        # Create bucket if it doesn't exist
+        if ! ./mc ls myminio/"$2" > /dev/null 2>&1; then
+          echo "Creating bucket: $2"
+          ./mc mb myminio/"$2"
         fi
         
-        # Copy files to temp location with proper names
+        # Create directory structure in MinIO
+        ./mc mb myminio/"$2"/"$3"/config --parents || true
+        ./mc mb myminio/"$2"/"$3"/model-store --parents || true
+        
+        # Create upload directory
         mkdir -p /tmp/upload
-        cp "$0" /tmp/upload/config.properties
-        cp "$1" /tmp/upload/cnn-classifier.mar
+        
+        # Handle config file (could be file or directory)
+        echo "Processing config file: $0"
+        if [ -d "$0" ]; then
+          echo "Config input is a directory, copying recursively..."
+          cp -r "$0"/* /tmp/upload/
+        else
+          echo "Config input is a file, copying..."
+          cp "$0" /tmp/upload/config.properties
+        fi
+        
+        # Handle model file (could be file or directory)
+        echo "Processing model file: $1"
+        if [ -d "$1" ]; then
+          echo "Model input is a directory, copying recursively..."
+          cp -r "$1"/* /tmp/upload/
+          # Find .mar file in the directory
+          mar_file=$(find /tmp/upload -name "*.mar" | head -1)
+          if [ -n "$mar_file" ]; then
+            echo "Found MAR file: $mar_file"
+            cp "$mar_file" /tmp/upload/cnn-classifier.mar
+          fi
+        else
+          echo "Model input is a file, copying..."
+          cp "$1" /tmp/upload/cnn-classifier.mar
+        fi
+        
+        # Verify files exist before upload
+        echo "Files ready for upload:"
+        ls -la /tmp/upload/
         
         # Upload to MinIO
-        mc cp /tmp/upload/config.properties "myminio/$2/$3/config/config.properties"
-        mc cp /tmp/upload/cnn-classifier.mar "myminio/$2/$3/model-store/cnn-classifier.mar"
+        echo "Uploading config.properties..."
+        if [ -f "/tmp/upload/config.properties" ]; then
+          ./mc cp /tmp/upload/config.properties "myminio/$2/$3/config/config.properties"
+        else
+          echo "WARNING: config.properties not found in upload directory"
+        fi
         
+        echo "Uploading cnn-classifier.mar..."
+        if [ -f "/tmp/upload/cnn-classifier.mar" ]; then
+          ./mc cp /tmp/upload/cnn-classifier.mar "myminio/$2/$3/model-store/cnn-classifier.mar"
+        else
+          echo "WARNING: cnn-classifier.mar not found in upload directory"
+          # Try to find any .mar file
+          mar_file=$(find /tmp/upload -name "*.mar" | head -1)
+          if [ -n "$mar_file" ]; then
+            echo "Found MAR file: $mar_file, uploading as cnn-classifier.mar"
+            ./mc cp "$mar_file" "myminio/$2/$3/model-store/cnn-classifier.mar"
+          else
+            echo "ERROR: No MAR file found to upload!"
+            exit 1
+          fi
+        fi
+        
+        # Create output
         mkdir -p "$(dirname "$6")"
         echo "s3://$2/$3/" > "$6"
         echo "Upload completed successfully!"
+        echo "MinIO path: s3://$2/$3/"
     args:
     - {inputPath: config_file}
     - {inputPath: model_file}
