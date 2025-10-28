@@ -1,4 +1,4 @@
-name: MAR File Creator for CNN
+name: F MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - name: handler_file
@@ -21,7 +21,7 @@ outputs:
   - name: mar_file_out
     type: String
   - name: mar_creation_log
-  - type: String
+    type: String
 implementation:
   container:
     image: nikhilv215/nesy-factory:testv2
@@ -30,45 +30,7 @@ implementation:
     - -c
     - |
         python3 -m pip install -q torch-model-archiver
-        python3 -c "
-        import sys, os, subprocess, json
-        handler_dir = sys.argv[1]
-        weights_dir = sys.argv[2]
-        config_dir = sys.argv[3]
-        preprocess_dir = sys.argv[4]
-        labels_dir = sys.argv[5]
-        model_name = sys.argv[6]
-        model_version = sys.argv[7]
-        mar_output_dir = sys.argv[8]
-        log_file = sys.argv[9]
-        def get_first_file(directory):
-            files = os.listdir(directory)
-            if not files:
-                raise Exception('No files in directory')
-            return os.path.join(directory, files[0])
-        try:
-            handler_path = get_first_file(handler_dir)
-            weights_path = get_first_file(weights_dir)
-            config_path = get_first_file(config_dir)
-            preprocess_path = get_first_file(preprocess_dir)
-            labels_path = get_first_file(labels_dir)
-            with open('/tmp/model.py', 'w') as f:
-                f.write('import torch.nn as nn\nclass Model(nn.Module):\n    def forward(self, x): return x')
-            os.makedirs(mar_output_dir, exist_ok=True)
-            extra_files = config_path + ',' + preprocess_path + ',' + labels_path
-            cmd = ['torch-model-archiver', '--model-name', model_name, '--version', model_version, '--model-file', '/tmp/model.py', '--serialized-file', weights_path, '--handler', handler_path, '--extra-files', extra_files, '--export-path', mar_output_dir, '--force']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            log_data = {'status': 'success' if result.returncode == 0 else 'failed', 'stdout': result.stdout, 'stderr': result.stderr, 'returncode': result.returncode}
-            with open(log_file, 'w') as f:
-                json.dump(log_data, f, indent=2)
-            if result.returncode != 0:
-                sys.exit(1)
-        except Exception as e:
-            error_data = {'status': 'failed', 'error': str(e)}
-            with open(log_file, 'w') as f:
-                json.dump(error_data, f, indent=2)
-            sys.exit(1)
-        "
+        python3 -c "import sys, os, subprocess, json; handler_dir = sys.argv[1]; weights_dir = sys.argv[2]; config_dir = sys.argv[3]; preprocess_dir = sys.argv[4]; labels_dir = sys.argv[5]; model_name = sys.argv[6]; model_version = sys.argv[7]; mar_output_dir = sys.argv[8]; log_file = sys.argv[9]; def get_first_file(directory): files = os.listdir(directory); return os.path.join(directory, files[0]) if files else None; handler_path = get_first_file(handler_dir); weights_path = get_first_file(weights_dir); config_path = get_first_file(config_dir); preprocess_path = get_first_file(preprocess_dir); labels_path = get_first_file(labels_dir); open('/tmp/model.py', 'w').write('import torch.nn as nn\nclass Model(nn.Module):\n    def forward(self, x): return x'); os.makedirs(mar_output_dir, exist_ok=True); extra_files = config_path + ',' + preprocess_path + ',' + labels_path; cmd = ['torch-model-archiver', '--model-name', model_name, '--version', model_version, '--model-file', '/tmp/model.py', '--serialized-file', weights_path, '--handler', handler_path, '--extra-files', extra_files, '--export-path', mar_output_dir, '--force']; result = subprocess.run(cmd, capture_output=True, text=True); log_data = {'status': 'success' if result.returncode == 0 else 'failed', 'stdout': result.stdout, 'stderr': result.stderr, 'returncode': result.returncode}; open(log_file, 'w').write(json.dumps(log_data, indent=2)); exit(1) if result.returncode != 0 else exit(0)"
     args:
     - {inputPath: handler_file}
     - {inputPath: model_weights_file}
