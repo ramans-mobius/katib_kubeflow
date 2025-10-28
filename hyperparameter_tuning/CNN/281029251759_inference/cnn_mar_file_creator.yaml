@@ -1,4 +1,4 @@
-name: MAR File Creator for CNN
+name: 2 MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - name: handler_file
@@ -18,11 +18,9 @@ inputs:
     description: Directory containing class_labels.json
   - name: model_name
     type: String
-    default: "cnn-classifier"
     description: Name for the MAR model
   - name: model_version
     type: String
-    default: "1.0"
     description: Version for the MAR model
 outputs:
   - name: mar_file_out
@@ -36,12 +34,12 @@ implementation:
   container:
     image: nikhilv215/nesy-factory:testv2
     command:
-      - sh
-      - -c
-      - |
+    - sh
+    - -c
+    - |
         set -e
         python3 -m pip install --quiet torch-model-archiver
-        python3 -c "
+        python3 -u -c "
         import os, sys, subprocess, json, argparse, glob
         from datetime import datetime
         
@@ -85,18 +83,17 @@ implementation:
             labels_path = find_file(class_labels_file, 'Class labels')
             
             # Create placeholder model file (required by torch-model-archiver)
-            placeholder_content = '''
-import torch
-import torch.nn as nn
-
-class PlaceholderModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.dummy = nn.Parameter(torch.zeros(1))
-    
-    def forward(self, x):
-        return x
-'''
+            placeholder_content = '''import torch
+            import torch.nn as nn
+            
+            class PlaceholderModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.dummy = nn.Parameter(torch.zeros(1))
+                
+                def forward(self, x):
+                    return x
+            '''
             placeholder_path = '/tmp/placeholder_model.py'
             with open(placeholder_path, 'w') as f:
                 f.write(placeholder_content)
@@ -178,14 +175,23 @@ class PlaceholderModel(nn.Module):
             with open(mar_creation_log, 'w') as f:
                 json.dump(error_log, f, indent=2)
             sys.exit(1)
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+        "
     args:
-      - {inputPath: handler_file}
-      - {inputPath: model_weights_file}
-      - {inputPath: model_config_file}
-      - {inputPath: preprocess_config_file}
-      - {inputPath: class_labels_file}
-      - {inputValue: model_name}
-      - {inputValue: model_version}
-      - {outputPath: mar_file_out}
-      - {outputPath: mar_creation_log}
+    - --handler_file
+    - {inputPath: handler_file}
+    - --model_weights_file
+    - {inputPath: model_weights_file}
+    - --model_config_file
+    - {inputPath: model_config_file}
+    - --preprocess_config_file
+    - {inputPath: preprocess_config_file}
+    - --class_labels_file
+    - {inputPath: class_labels_file}
+    - --model_name
+    - {inputValue: model_name}
+    - --model_version
+    - {inputValue: model_version}
+    - --mar_file_out
+    - {outputPath: mar_file_out}
+    - --mar_creation_log
+    - {outputPath: mar_creation_log}
