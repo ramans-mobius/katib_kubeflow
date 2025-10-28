@@ -1,4 +1,4 @@
-name: 6 CNN Download Artifacts
+name: 7 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -45,8 +45,7 @@ implementation:
         exec "$0" "$@"
       - python3
       - -u
-      - -c
-      - |
+      - -
         import argparse, os, requests, json, pickle, urllib.parse
         import io
 
@@ -64,17 +63,14 @@ implementation:
         args = parser.parse_args()
 
         def clean_url(url):
-            # Remove any newlines and extra whitespace
+            "Clean URL by removing newlines and extra spaces"
             cleaned_url = url.replace('\n', '').replace('\r', '').strip()
-            # If URL was encoded, decode it first
             if '%' in cleaned_url:
                 cleaned_url = urllib.parse.unquote(cleaned_url)
-            # Remove any newlines that might have been introduced during decoding
             cleaned_url = cleaned_url.replace('\n', '').replace('\r', '').strip()
             return cleaned_url
 
         def download_file(url, output_path, description):
-            # Clean the URL first
             cleaned_url = clean_url(url)
             print(f"Original URL: {repr(url)}")
             print(f"Cleaned URL: {repr(cleaned_url)}")
@@ -88,7 +84,6 @@ implementation:
             print(f"{description} saved to {output_path}")
             return output_path
 
-        # Download all files with URL cleaning
         download_file(args.model_weights_url, args.model_weights, "model weights")
         download_file(args.model_config_url, args.model_config, "model config")
         download_file(args.class_labels_url, args.class_labels, "class labels")
