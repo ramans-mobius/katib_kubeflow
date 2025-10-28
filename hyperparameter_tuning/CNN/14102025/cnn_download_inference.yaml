@@ -1,4 +1,4 @@
-name: 2 CNN Download Artifacts
+name: 3 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -64,7 +64,6 @@ implementation:
         args = parser.parse_args()
 
         def decode_url(url):
-            """Decode URL-encoded characters"""
             # Decode standard URL encoding
             decoded_url = urllib.parse.unquote(url)
             print(f"Original URL: {url}")
