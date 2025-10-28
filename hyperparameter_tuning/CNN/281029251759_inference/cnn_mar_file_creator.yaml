@@ -33,7 +33,7 @@ implementation:
         from datetime import datetime
 
         def copy_input_files(source_path, dest_path):
-            """Copy files or directories recursively"""
+            
             if os.path.isdir(source_path):
                 print(f"Source {source_path} is a directory, copying recursively...")
                 if os.path.exists(dest_path):
@@ -48,7 +48,7 @@ implementation:
                 return dest_path
 
         def find_mar_file(directory):
-            """Find .mar file in directory"""
+         
             if os.path.isdir(directory):
                 for file in os.listdir(directory):
                     if file.endswith('.mar'):
