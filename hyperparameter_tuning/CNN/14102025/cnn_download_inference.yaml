@@ -1,4 +1,4 @@
-name: Pls Pls CNN Download Artifacts
+name: CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -66,7 +66,7 @@ implementation:
         def download_file(url, output_path, description):
             print(f"Original URL: {repr(url)}")
             url = url.replace("%28", "(").replace("%29", ")").replace("%24", "$")
-            url = url.replace("\n", "").replace("\r", "")
+            url = "".join(url.splitlines())
             print(f"Cleaned URL: {repr(url)}")
             print(f"Fetching {description} from: {url}")
             r = requests.get(url)
