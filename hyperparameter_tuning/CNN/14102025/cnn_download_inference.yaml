@@ -1,4 +1,4 @@
-name: 5 CNN Download Artifacts
+name: 6 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -64,7 +64,6 @@ implementation:
         args = parser.parse_args()
 
         def clean_url(url):
-            """Clean URL by removing newlines and extra spaces"""
             # Remove any newlines and extra whitespace
             cleaned_url = url.replace('\n', '').replace('\r', '').strip()
             # If URL was encoded, decode it first
