@@ -1,4 +1,4 @@
-name: MAR File Creator for CNN
+name: 2 MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded cnn_handler.py file"}
@@ -15,37 +15,24 @@ implementation:
   container:
     image: nikhilv215/nesy-factory:testv2
     command:
-      - sh
-      - -c
-      - |
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver || \
-        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver --user
+    - sh
+    - -c
+    - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver --user
         exec "$0" "$@"
-      - python3
-      - -u
-      - -c
-      - |
+    - python3
+    - -u
+    - -c
+    - |
         import os
         import sys
         import subprocess
         import json
         import argparse
         from datetime import datetime
-        import shutil
-        import glob
 
         def create_placeholder_model():
-            placeholder_content = '''import torch
-import torch.nn as nn
-
-class CNNPlaceholderModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.dummy = nn.Parameter(torch.zeros(1))
-    
-    def forward(self, x):
-        return x
-'''
+            placeholder_content = 'import torch\\nimport torch.nn as nn\n\nclass CNNPlaceholderModel(nn.Module):\\n    def __init__(self):\\n        super().__init__()\\n        self.dummy = nn.Parameter(torch.zeros(1))\\n    \\n    def forward(self, x):\\n        return x\\n'
             placeholder_path = '/tmp/cnn_model.py'
             with open(placeholder_path, 'w') as f:
                 f.write(placeholder_content)
@@ -86,18 +73,16 @@ class CNNPlaceholderModel(nn.Module):
 
         def main():
             parser = argparse.ArgumentParser()
-            parser.add_argument('--handler_file', type=str, required=True, help='Directory containing cnn_handler.py')
-            parser.add_argument('--model_weights_file', type=str, required=True, help='Directory containing model weights')
-            parser.add_argument('--model_config_file', type=str, required=True, help='Directory containing model_config.json')
-            parser.add_argument('--preprocess_config_file', type=str, required=True, help='Directory containing preprocess_config.pkl')
-            parser.add_argument('--class_labels_file', type=str, required=True, help='Directory containing class_labels.json')
-            parser.add_argument('--model_name', type=str, default='cnn-classifier', help='Model name for MAR file')
-            parser.add_argument('--model_version', type=str, default='1.0', help='Model version')
-            parser.add_argument('--mar_file_out', type=str, required=True, help='Output directory for MAR file')
-            parser.add_argument('--mar_creation_log', type=str, required=True, help='Output path for creation log')
-            
+            parser.add_argument('--handler_file', type=str, required=True)
+            parser.add_argument('--model_weights_file', type=str, required=True)
+            parser.add_argument('--model_config_file', type=str, required=True)
+            parser.add_argument('--preprocess_config_file', type=str, required=True)
+            parser.add_argument('--class_labels_file', type=str, required=True)
+            parser.add_argument('--model_name', type=str, default='cnn-classifier')
+            parser.add_argument('--model_version', type=str, default='1.0')
+            parser.add_argument('--mar_file_out', type=str, required=True)
+            parser.add_argument('--mar_creation_log', type=str, required=True)
             args = parser.parse_args()
-            
             log_data = {
                 'timestamp': datetime.now().isoformat(),
                 'model_name': args.model_name,
@@ -105,12 +90,8 @@ class CNNPlaceholderModel(nn.Module):
                 'status': 'starting',
                 'steps': []
             }
-            
             try:
                 print("=== CNN MAR File Creator Started ===")
-                print("Model Name: " + args.model_name)
-                print("Model Version: " + args.model_version)
-                
                 def find_file(directory, filename):
                     exact_path = os.path.join(directory, filename)
                     if os.path.exists(exact_path):
@@ -118,45 +99,30 @@ class CNNPlaceholderModel(nn.Module):
                     files = os.listdir(directory)
                     if files:
                         return os.path.join(directory, files[0])
-                    raise Exception(f"No files found in {directory}")
-                
+                    raise Exception("No files found in directory")
                 handler_path = find_file(args.handler_file, 'cnn_handler.py')
                 weights_path = find_file(args.model_weights_file, 'model_weights.pth')
                 config_path = find_file(args.model_config_file, 'model_config.json')
                 preprocess_path = find_file(args.preprocess_config_file, 'preprocess_config.pkl')
                 labels_path = find_file(args.class_labels_file, 'class_labels.json')
-                    
                 print("Handler file found: " + handler_path)
                 print("Weights file found: " + weights_path)
                 log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
-                
                 model_path = create_placeholder_model()
                 log_data['steps'].append({'step': 2, 'action': 'create_model', 'status': 'success'})
-                
-                extra_files = f"{config_path},{preprocess_path},{labels_path}"
-                mar_file_path, creation_output = create_mar_file(
-                    args.model_name, 
-                    args.model_version, 
-                    model_path, 
-                    handler_path, 
-                    weights_path, 
-                    extra_files,
-                    args.mar_file_out
-                )
+                extra_files = config_path + "," + preprocess_path + "," + labels_path
+                mar_file_path, creation_output = create_mar_file(args.model_name, args.model_version, model_path, handler_path, weights_path, extra_files, args.mar_file_out)
                 log_data['steps'].append({'step': 3, 'action': 'create_mar', 'status': 'success'})
                 log_data['mar_file_path'] = mar_file_path
                 log_data['creation_output'] = creation_output
                 log_data['status'] = 'completed'
-                
                 print("=== CNN MAR File Creation Completed Successfully ===")
-                
             except Exception as e:
                 error_msg = str(e)
                 print("MAR File Creation Failed: " + error_msg)
                 log_data['status'] = 'failed'
                 log_data['error'] = error_msg
                 sys.exit(1)
-                
             finally:
                 log_dir = os.path.dirname(args.mar_creation_log)
                 if log_dir and not os.path.exists(log_dir):
@@ -164,26 +130,24 @@ class CNNPlaceholderModel(nn.Module):
                 with open(args.mar_creation_log, 'w') as f:
                     json.dump(log_data, f, indent=2)
                 print("Log saved to: " + args.mar_creation_log)
-
         if __name__ == "__main__":
             main()
-
     args:
-      - --handler_file
-      - {inputPath: handler_file}
-      - --model_weights_file
-      - {inputPath: model_weights_file}
-      - --model_config_file
-      - {inputPath: model_config_file}
-      - --preprocess_config_file
-      - {inputPath: preprocess_config_file}
-      - --class_labels_file
-      - {inputPath: class_labels_file}
-      - --model_name
-      - {inputValue: model_name}
-      - --model_version
-      - {inputValue: model_version}
-      - --mar_file_out
-      - {outputPath: mar_file_out}
-      - --mar_creation_log
-      - {outputPath: mar_creation_log}
+    - --handler_file
+    - {inputPath: handler_file}
+    - --model_weights_file
+    - {inputPath: model_weights_file}
+    - --model_config_file
+    - {inputPath: model_config_file}
+    - --preprocess_config_file
+    - {inputPath: preprocess_config_file}
+    - --class_labels_file
+    - {inputPath: class_labels_file}
+    - --model_name
+    - {inputValue: model_name}
+    - --model_version
+    - {inputValue: model_version}
+    - --mar_file_out
+    - {outputPath: mar_file_out}
+    - --mar_creation_log
+    - {outputPath: mar_creation_log}
