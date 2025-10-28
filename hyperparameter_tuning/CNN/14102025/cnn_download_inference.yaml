@@ -1,4 +1,4 @@
-name: 3 CNN Download Artifacts
+name: 4 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -65,7 +65,7 @@ implementation:
 
         def download_file(url, output_path, description):
             url = url.replace("%28", "(").replace("%29", ")").replace("%24", "$")
-            url = url.replace("\n", "").replace("\r", "")
+            url = url.replace(chr(10), "").replace(chr(13), "")
             print(f"Fetching {description} from: {url}")
             r = requests.get(url)
             r.raise_for_status()
@@ -204,7 +204,7 @@ implementation:
                 print(f"Number of classes in data: {found_output_dim}")
                 
             if hasattr(processed_data, 'num_classes'):
-                print(f"Found num_classes: {processed_data.num_classes})
+                print(f"Found num_classes: {processed_data.num_classes}")
                 found_output_dim = processed_data.num_classes
                 
             if hasattr(processed_data, 'label_mapping'):
