@@ -1,43 +1,189 @@
-name: F MAR File Creator for CNN
+name: MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
-  - name: handler_file
-    type: String
-  - name: model_weights_file
-    type: Model
-  - name: model_config_file
-    type: String
-  - name: preprocess_config_file
-    type: String
-  - name: class_labels_file
-    type: String
-  - name: model_name
-    type: String
-    default: "cnn-classifier"
-  - name: model_version
-    type: String
-    default: "1.0"
+  - {name: handler_file, type: String, description: "Directory containing downloaded cnn_handler.py file"}
+  - {name: model_weights_file, type: Model, description: "Directory containing downloaded model weights"}
+  - {name: model_config_file, type: String, description: "Directory containing model_config.json"}
+  - {name: preprocess_config_file, type: String, description: "Directory containing preprocess_config.pkl"}
+  - {name: class_labels_file, type: String, description: "Directory containing class_labels.json"}
+  - {name: model_name, type: String, description: "Name for the MAR model", default: "cnn-classifier"}
+  - {name: model_version, type: String, description: "Version for the MAR model", default: "1.0"}
 outputs:
-  - name: mar_file_out
-    type: String
-  - name: mar_creation_log
-    type: String
+  - {name: mar_file_out, type: String, description: "Output directory containing the MAR file"}
+  - {name: mar_creation_log, type: String, description: "Log file with MAR creation details"}
 implementation:
   container:
     image: nikhilv215/nesy-factory:testv2
     command:
-    - sh
-    - -c
-    - |
-        python3 -m pip install -q torch-model-archiver
-        python3 -c "import sys, os, subprocess, json; handler_dir = sys.argv[1]; weights_dir = sys.argv[2]; config_dir = sys.argv[3]; preprocess_dir = sys.argv[4]; labels_dir = sys.argv[5]; model_name = sys.argv[6]; model_version = sys.argv[7]; mar_output_dir = sys.argv[8]; log_file = sys.argv[9]; def get_first_file(directory): files = os.listdir(directory); return os.path.join(directory, files[0]) if files else None; handler_path = get_first_file(handler_dir); weights_path = get_first_file(weights_dir); config_path = get_first_file(config_dir); preprocess_path = get_first_file(preprocess_dir); labels_path = get_first_file(labels_dir); open('/tmp/model.py', 'w').write('import torch.nn as nn\nclass Model(nn.Module):\n    def forward(self, x): return x'); os.makedirs(mar_output_dir, exist_ok=True); extra_files = config_path + ',' + preprocess_path + ',' + labels_path; cmd = ['torch-model-archiver', '--model-name', model_name, '--version', model_version, '--model-file', '/tmp/model.py', '--serialized-file', weights_path, '--handler', handler_path, '--extra-files', extra_files, '--export-path', mar_output_dir, '--force']; result = subprocess.run(cmd, capture_output=True, text=True); log_data = {'status': 'success' if result.returncode == 0 else 'failed', 'stdout': result.stdout, 'stderr': result.stderr, 'returncode': result.returncode}; open(log_file, 'w').write(json.dumps(log_data, indent=2)); exit(1) if result.returncode != 0 else exit(0)"
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import sys
+        import subprocess
+        import json
+        import argparse
+        from datetime import datetime
+        import shutil
+        import glob
+
+        def create_placeholder_model():
+            placeholder_content = '''import torch
+import torch.nn as nn
+
+class CNNPlaceholderModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dummy = nn.Parameter(torch.zeros(1))
+    
+    def forward(self, x):
+        return x
+'''
+            placeholder_path = '/tmp/cnn_model.py'
+            with open(placeholder_path, 'w') as f:
+                f.write(placeholder_content)
+            print("Created placeholder CNN model at: " + placeholder_path)
+            return placeholder_path
+
+        def create_mar_file(model_name, model_version, model_path, handler_path, weights_path, extra_files, output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+            cmd = [
+                'torch-model-archiver',
+                '--model-name', model_name,
+                '--version', model_version,
+                '--model-file', model_path,
+                '--serialized-file', weights_path,
+                '--handler', handler_path,
+                '--extra-files', extra_files,
+                '--export-path', output_dir,
+                '--force'
+            ]
+            print("Creating MAR file with command:")
+            print(' '.join(cmd))
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                print("MAR file created successfully!")
+                print("STDOUT: " + result.stdout)
+                mar_file = os.path.join(output_dir, model_name + ".mar")
+                if os.path.exists(mar_file):
+                    file_size = os.path.getsize(mar_file)
+                    print("MAR file created: " + mar_file + " (" + str(file_size) + " bytes)")
+                    return mar_file, result.stdout
+                else:
+                    raise Exception("MAR file was not created in expected location")
+            except subprocess.CalledProcessError as e:
+                print("MAR file creation failed!")
+                print("STDOUT: " + str(e.stdout))
+                print("STDERR: " + str(e.stderr))
+                raise Exception("torch-model-archiver failed: " + str(e.stderr))
+
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--handler_file', type=str, required=True, help='Directory containing cnn_handler.py')
+            parser.add_argument('--model_weights_file', type=str, required=True, help='Directory containing model weights')
+            parser.add_argument('--model_config_file', type=str, required=True, help='Directory containing model_config.json')
+            parser.add_argument('--preprocess_config_file', type=str, required=True, help='Directory containing preprocess_config.pkl')
+            parser.add_argument('--class_labels_file', type=str, required=True, help='Directory containing class_labels.json')
+            parser.add_argument('--model_name', type=str, default='cnn-classifier', help='Model name for MAR file')
+            parser.add_argument('--model_version', type=str, default='1.0', help='Model version')
+            parser.add_argument('--mar_file_out', type=str, required=True, help='Output directory for MAR file')
+            parser.add_argument('--mar_creation_log', type=str, required=True, help='Output path for creation log')
+            
+            args = parser.parse_args()
+            
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'model_name': args.model_name,
+                'model_version': args.model_version,
+                'status': 'starting',
+                'steps': []
+            }
+            
+            try:
+                print("=== CNN MAR File Creator Started ===")
+                print("Model Name: " + args.model_name)
+                print("Model Version: " + args.model_version)
+                
+                def find_file(directory, filename):
+                    exact_path = os.path.join(directory, filename)
+                    if os.path.exists(exact_path):
+                        return exact_path
+                    files = os.listdir(directory)
+                    if files:
+                        return os.path.join(directory, files[0])
+                    raise Exception(f"No files found in {directory}")
+                
+                handler_path = find_file(args.handler_file, 'cnn_handler.py')
+                weights_path = find_file(args.model_weights_file, 'model_weights.pth')
+                config_path = find_file(args.model_config_file, 'model_config.json')
+                preprocess_path = find_file(args.preprocess_config_file, 'preprocess_config.pkl')
+                labels_path = find_file(args.class_labels_file, 'class_labels.json')
+                    
+                print("Handler file found: " + handler_path)
+                print("Weights file found: " + weights_path)
+                log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
+                
+                model_path = create_placeholder_model()
+                log_data['steps'].append({'step': 2, 'action': 'create_model', 'status': 'success'})
+                
+                extra_files = f"{config_path},{preprocess_path},{labels_path}"
+                mar_file_path, creation_output = create_mar_file(
+                    args.model_name, 
+                    args.model_version, 
+                    model_path, 
+                    handler_path, 
+                    weights_path, 
+                    extra_files,
+                    args.mar_file_out
+                )
+                log_data['steps'].append({'step': 3, 'action': 'create_mar', 'status': 'success'})
+                log_data['mar_file_path'] = mar_file_path
+                log_data['creation_output'] = creation_output
+                log_data['status'] = 'completed'
+                
+                print("=== CNN MAR File Creation Completed Successfully ===")
+                
+            except Exception as e:
+                error_msg = str(e)
+                print("MAR File Creation Failed: " + error_msg)
+                log_data['status'] = 'failed'
+                log_data['error'] = error_msg
+                sys.exit(1)
+                
+            finally:
+                log_dir = os.path.dirname(args.mar_creation_log)
+                if log_dir and not os.path.exists(log_dir):
+                    os.makedirs(log_dir, exist_ok=True)
+                with open(args.mar_creation_log, 'w') as f:
+                    json.dump(log_data, f, indent=2)
+                print("Log saved to: " + args.mar_creation_log)
+
+        if __name__ == "__main__":
+            main()
+
     args:
-    - {inputPath: handler_file}
-    - {inputPath: model_weights_file}
-    - {inputPath: model_config_file}
-    - {inputPath: preprocess_config_file}
-    - {inputPath: class_labels_file}
-    - {inputValue: model_name}
-    - {inputValue: model_version}
-    - {outputPath: mar_file_out}
-    - {outputPath: mar_creation_log}
+      - --handler_file
+      - {inputPath: handler_file}
+      - --model_weights_file
+      - {inputPath: model_weights_file}
+      - --model_config_file
+      - {inputPath: model_config_file}
+      - --preprocess_config_file
+      - {inputPath: preprocess_config_file}
+      - --class_labels_file
+      - {inputPath: class_labels_file}
+      - --model_name
+      - {inputValue: model_name}
+      - --model_version
+      - {inputValue: model_version}
+      - --mar_file_out
+      - {outputPath: mar_file_out}
+      - --mar_creation_log
+      - {outputPath: mar_creation_log}
