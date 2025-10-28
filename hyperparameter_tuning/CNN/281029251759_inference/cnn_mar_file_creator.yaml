@@ -1,4 +1,4 @@
-name: 2 MAR File Creator for CNN
+name: GL MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - name: handler_file
@@ -18,9 +18,11 @@ inputs:
     description: Directory containing class_labels.json
   - name: model_name
     type: String
+    default: "cnn-classifier"
     description: Name for the MAR model
   - name: model_version
     type: String
+    default: "1.0"
     description: Version for the MAR model
 outputs:
   - name: mar_file_out
@@ -39,25 +41,27 @@ implementation:
     - |
         set -e
         python3 -m pip install --quiet torch-model-archiver
-        python3 -u -c "
-        import os, sys, subprocess, json, argparse, glob
+        python3 -c "
+        import os, sys, subprocess, json
         from datetime import datetime
         
         print('=== CNN MAR File Creator ===')
         
-        # Parse arguments
-        args = sys.argv[1:]
-        print('Arguments received:', len(args))
-        
-        handler_file = args[0]
-        model_weights_file = args[1] 
-        model_config_file = args[2]
-        preprocess_config_file = args[3]
-        class_labels_file = args[4]
-        model_name = args[5] if len(args) > 5 else 'cnn-classifier'
-        model_version = args[6] if len(args) > 6 else '1.0'
-        mar_file_out = args[7]
-        mar_creation_log = args[8]
+        # Parse command line arguments properly
+        if len(sys.argv) != 10:
+            print(f'Error: Expected 9 arguments, got {len(sys.argv)-1}')
+            print('Usage: python script.py handler_file model_weights_file model_config_file preprocess_config_file class_labels_file model_name model_version mar_file_out mar_creation_log')
+            sys.exit(1)
+            
+        handler_file = sys.argv[1]
+        model_weights_file = sys.argv[2]
+        model_config_file = sys.argv[3]
+        preprocess_config_file = sys.argv[4]
+        class_labels_file = sys.argv[5]
+        model_name = sys.argv[6]
+        model_version = sys.argv[7]
+        mar_file_out = sys.argv[8]
+        mar_creation_log = sys.argv[9]
         
         print(f'Model Name: {model_name}')
         print(f'Model Version: {model_version}')
@@ -84,16 +88,16 @@ implementation:
             
             # Create placeholder model file (required by torch-model-archiver)
             placeholder_content = '''import torch
-            import torch.nn as nn
-            
-            class PlaceholderModel(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.dummy = nn.Parameter(torch.zeros(1))
-                
-                def forward(self, x):
-                    return x
-            '''
+import torch.nn as nn
+
+class PlaceholderModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dummy = nn.Parameter(torch.zeros(1))
+    
+    def forward(self, x):
+        return x
+'''
             placeholder_path = '/tmp/placeholder_model.py'
             with open(placeholder_path, 'w') as f:
                 f.write(placeholder_content)
