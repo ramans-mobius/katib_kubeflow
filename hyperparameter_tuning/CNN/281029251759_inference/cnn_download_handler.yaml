@@ -1,0 +1,93 @@
+name: CDN Download Handler Config
+description: Downloads handler.py and config.properties files from CDN URLs
+inputs:
+  - name: handler_url
+    type: String
+    description: URL to fetch the handler.py file from
+  - name: config_url
+    type: String
+    description: URL to fetch the config.properties file from
+outputs:
+  - name: handler_file
+    type: String
+    description: Downloaded handler.py file
+  - name: config_file
+    type: String
+    description: Downloaded config.properties file
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet requests
+        python3 -c "
+        import sys, os, requests, json, pickle, urllib.parse, io
+        
+        print('=== Downloading Handler and Config Files ===')
+        
+        # Get args
+        handler_url = sys.argv[1]
+        config_url = sys.argv[2]
+        handler_path = sys.argv[3]
+        config_path = sys.argv[4]
+        
+        def clean_url(url):
+            url = url.replace('\n', '').replace('\r', '')
+            url = urllib.parse.unquote(url)
+            return url
+        
+        def download_file(url, output_path, description):
+            cleaned_url = clean_url(url)
+            print(f'Fetching {description} from: {cleaned_url}')
+            r = requests.get(cleaned_url, timeout=300)
+            r.raise_for_status()
+            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            
+            # Determine if it's text or binary
+            if output_path.endswith('.py') or output_path.endswith('.properties'):
+                mode = 'w'
+                content = r.text
+            else:
+                mode = 'wb'
+                content = r.content
+                
+            with open(output_path, mode) as f:
+                f.write(content)
+            
+            file_size = os.path.getsize(output_path)
+            print(f'{description} saved to {output_path} ({file_size} bytes)')
+            return output_path
+
+        try:
+            # Download files
+            download_file(handler_url, handler_path, 'handler.py')
+            download_file(config_url, config_path, 'config.properties')
+
+            # Verify downloads
+            if os.path.exists(handler_path) and os.path.getsize(handler_path) > 0:
+                print('handler.py verified')
+            else:
+                raise Exception('handler.py download failed')
+                
+            if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
+                print('config.properties verified')
+            else:
+                raise Exception('config.properties download failed')
+
+            print('Handler and config files downloaded successfully')
+            
+        except Exception as e:
+            print(f'Error: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        " "$0" "$1" "$2" "$3"
+    args:
+      - {inputValue: handler_url}
+      - {inputValue: config_url}
+      - {outputPath: handler_file}
+      - {outputPath: config_file}
