@@ -1,6 +1,5 @@
-name: Chatgpt CNN Download Artifacts
+name: Deep CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
-
 inputs:
   - name: model_weights_url
     type: String
@@ -17,7 +16,6 @@ inputs:
   - name: preprocess_data_url
     type: String
     description: URL to fetch preprocessed dataset
-
 outputs:
   - name: model_weights
     type: Model
@@ -44,51 +42,52 @@ implementation:
       - |
         set -e
         python3 -m pip install --quiet requests
-
         python3 -c "
-import sys, os, requests, json, pickle, urllib.parse, io
+        import sys, os, requests, json, pickle, urllib.parse, io
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        # Get args directly from command line - CORRECT INDICES like UI component
+        model_weights_url = sys.argv[1]
+        model_config_url = sys.argv[2]
+        class_labels_url = sys.argv[3]
+        inference_config_url = sys.argv[4]
+        preprocess_data_url = sys.argv[5]
+        model_weights_path = sys.argv[6]
+        model_config_path = sys.argv[7]
+        class_labels_path = sys.argv[8]
+        inference_config_path = sys.argv[9]
+        preprocess_data_path = sys.argv[10]
+        
+        print('Starting CNN artifacts download...')
+        print(f'model_weights_url: {model_weights_url}')
+        print(f'model_config_url: {model_config_url}')
+        print(f'class_labels_url: {class_labels_url}')
+        print(f'inference_config_url: {inference_config_url}')
+        print(f'preprocess_data_url: {preprocess_data_url}')
+        
+        def download_file(url, output_path, description):
+            # Handle URL encoding like the UI component
+            decoded_url = urllib.parse.unquote(url)
+            print(f'Fetching {description} from: {decoded_url}')
+            r = requests.get(decoded_url)
+            r.raise_for_status()
+            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            with open(output_path, 'wb') as f:
+                f.write(r.content)
+            print(f'{description} saved to {output_path}')
+            return output_path
 
-print('Number of arguments:', len(sys.argv))
-print('Arguments:', sys.argv)
+        # Download all files
+        download_file(model_weights_url, model_weights_path, 'model weights')
+        download_file(model_config_url, model_config_path, 'model config')
+        download_file(class_labels_url, class_labels_path, 'class labels')
+        download_file(inference_config_url, inference_config_path, 'inference config')
+        download_file(preprocess_data_url, preprocess_data_path, 'preprocessed data')
 
-# Assign arguments in the expected order
-model_weights_url = sys.argv[1]
-model_config_url = sys.argv[2]
-class_labels_url = sys.argv[3]
-inference_config_url = sys.argv[4]
-preprocess_data_url = sys.argv[5]
-model_weights_path = sys.argv[6]
-model_config_path = sys.argv[7]
-class_labels_path = sys.argv[8]
-inference_config_path = sys.argv[9]
-preprocess_data_path = sys.argv[10]
-
-print('=== INPUT PARAMETERS RECEIVED ===')
-for i, arg in enumerate(sys.argv[1:], 1):
-    print(f'{i}: {arg}')
-print('=== END INPUT PARAMETERS ===')
-
-def download_file(url, output_path, description):
-    decoded_url = urllib.parse.unquote(url)
-    print(f'Fetching {description} from: {decoded_url}')
-    r = requests.get(decoded_url)
-    r.raise_for_status()
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    with open(output_path, 'wb') as f:
-        f.write(r.content)
-    print(f'{description} saved to {output_path}')
-    return output_path
-
-# Download all required artifacts
-download_file(model_weights_url, model_weights_path, 'model weights')
-download_file(model_config_url, model_config_path, 'model config')
-download_file(class_labels_url, class_labels_path, 'class labels')
-download_file(inference_config_url, inference_config_path, 'inference config')
-download_file(preprocess_data_url, preprocess_data_path, 'preprocessed data')
-
-print('All CNN artifacts downloaded successfully')
-" "$@"
-
+        print('All CNN artifacts downloaded successfully')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
     args:
       - {inputValue: model_weights_url}
       - {inputValue: model_config_url}
