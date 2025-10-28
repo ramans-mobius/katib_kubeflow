@@ -1,4 +1,4 @@
-name: 3 CNN Download Artifacts
+name: 4 CNN Download Artifacts
 description: Downloads CNN model artifacts from CDN URLs for inference and prints detailed information
 inputs:
   - name: model_weights_url
@@ -27,7 +27,7 @@ outputs:
     type: String
     description: Downloaded class labels
   - name: inference_config
-  - type: String
+    type: String
     description: Downloaded inference configuration
   - name: preprocess_data
     type: Dataset
