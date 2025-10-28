@@ -1,4 +1,4 @@
-name: MAR File Creator for CNN
+name: 2 MAR File Creator for CNN
 description: Creates a torch-model-archiver MAR file for CNN using downloaded files
 inputs:
   - {name: handler_file, type: String, description: "Downloaded cnn_handler.py file"}
@@ -32,6 +32,29 @@ implementation:
         import shutil
         from datetime import datetime
 
+        def copy_input_files(source_path, dest_path):
+            """Copy files or directories recursively"""
+            if os.path.isdir(source_path):
+                print(f"Source {source_path} is a directory, copying recursively...")
+                if os.path.exists(dest_path):
+                    shutil.rmtree(dest_path)
+                shutil.copytree(source_path, dest_path)
+                print(f"Copied directory {source_path} to {dest_path}")
+                return dest_path
+            else:
+                print(f"Source {source_path} is a file, copying...")
+                shutil.copy2(source_path, dest_path)
+                print(f"Copied file {source_path} to {dest_path}")
+                return dest_path
+
+        def find_mar_file(directory):
+            """Find .mar file in directory"""
+            if os.path.isdir(directory):
+                for file in os.listdir(directory):
+                    if file.endswith('.mar'):
+                        return os.path.join(directory, file)
+            return None
+
         def create_mar_file(model_name, model_version, handler_path, weights_path, extra_files, output_dir):
             os.makedirs(output_dir, exist_ok=True)
             cmd = [
@@ -56,6 +79,12 @@ implementation:
                     print("MAR file created: " + mar_file + " (" + str(file_size) + " bytes)")
                     return mar_file, result.stdout
                 else:
+                    # Try to find any .mar file
+                    found_mar = find_mar_file(output_dir)
+                    if found_mar:
+                        file_size = os.path.getsize(found_mar)
+                        print("Found MAR file: " + found_mar + " (" + str(file_size) + " bytes)")
+                        return found_mar, result.stdout
                     raise Exception("MAR file was not created in expected location")
             except subprocess.CalledProcessError as e:
                 print("MAR file creation failed!")
@@ -75,6 +104,7 @@ implementation:
             parser.add_argument('--mar_file_out', type=str, required=True)
             parser.add_argument('--mar_creation_log', type=str, required=True)
             args = parser.parse_args()
+            
             log_data = {
                 'timestamp': datetime.now().isoformat(),
                 'model_name': args.model_name,
@@ -82,6 +112,7 @@ implementation:
                 'status': 'starting',
                 'steps': []
             }
+            
             try:
                 print("=== CNN MAR File Creator Started ===")
                 
@@ -89,20 +120,14 @@ implementation:
                 temp_dir = '/tmp/mar_files'
                 os.makedirs(temp_dir, exist_ok=True)
                 
-                # Copy and rename files
-                handler_path = os.path.join(temp_dir, 'cnn_handler.py')
-                weights_path = os.path.join(temp_dir, 'model_weights.pth')
-                config_path = os.path.join(temp_dir, 'model_config.json')
-                preprocess_path = os.path.join(temp_dir, 'preprocess_config.pkl')
-                labels_path = os.path.join(temp_dir, 'class_labels.json')
+                # Copy and rename files with directory handling
+                handler_path = copy_input_files(args.handler_file, os.path.join(temp_dir, 'cnn_handler.py'))
+                weights_path = copy_input_files(args.model_weights_file, os.path.join(temp_dir, 'model_weights.pth'))
+                config_path = copy_input_files(args.model_config_file, os.path.join(temp_dir, 'model_config.json'))
+                preprocess_path = copy_input_files(args.preprocess_config_file, os.path.join(temp_dir, 'preprocess_config.pkl'))
+                labels_path = copy_input_files(args.class_labels_file, os.path.join(temp_dir, 'class_labels.json'))
                 
-                shutil.copy2(args.handler_file, handler_path)
-                shutil.copy2(args.model_weights_file, weights_path)
-                shutil.copy2(args.model_config_file, config_path)
-                shutil.copy2(args.preprocess_config_file, preprocess_path)
-                shutil.copy2(args.class_labels_file, labels_path)
-                
-                print("Files copied and renamed:")
+                print("Final file paths:")
                 print("Handler: " + handler_path)
                 print("Weights: " + weights_path)
                 print("Config: " + config_path)
@@ -118,6 +143,7 @@ implementation:
                 log_data['creation_output'] = creation_output
                 log_data['status'] = 'completed'
                 print("=== CNN MAR File Creation Completed Successfully ===")
+                
             except Exception as e:
                 error_msg = str(e)
                 print("MAR File Creation Failed: " + error_msg)
@@ -131,6 +157,7 @@ implementation:
                 with open(args.mar_creation_log, 'w') as f:
                     json.dump(log_data, f, indent=2)
                 print("Log saved to: " + args.mar_creation_log)
+                
         if __name__ == "__main__":
             main()
     args:
