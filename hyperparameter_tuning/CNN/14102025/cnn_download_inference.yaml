@@ -27,7 +27,7 @@ outputs:
     type: String
     description: Downloaded class labels
   - name: inference_config
-    type: String
+  - type: String
     description: Downloaded inference configuration
   - name: preprocess_data
     type: Dataset
@@ -47,7 +47,7 @@ implementation:
       - -u
       - -c
       - |
-        import argparse, os, requests, json, pickle
+        import argparse, os, requests, json, pickle, urllib.parse
         import io
 
         parser = argparse.ArgumentParser(description="Download CNN model artifacts from CDN URLs.")
@@ -63,10 +63,19 @@ implementation:
         parser.add_argument('--preprocess_data', type=str, required=True)
         args = parser.parse_args()
 
+        def decode_url(url):
+            """Decode URL-encoded characters"""
+            # Decode standard URL encoding
+            decoded_url = urllib.parse.unquote(url)
+            print(f"Original URL: {url}")
+            print(f"Decoded URL: {decoded_url}")
+            return decoded_url
+
         def download_file(url, output_path, description):
-            print(f"Fetching {description} from: {url}")
-            url = url.replace("$$", "$$$").replace("%24%24", "$$")
-            r = requests.get(url)
+            # Decode the URL first
+            decoded_url = decode_url(url)
+            print(f"Fetching {description} from: {decoded_url}")
+            r = requests.get(decoded_url)
             r.raise_for_status()
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             with open(output_path, "wb") as f:
@@ -74,6 +83,7 @@ implementation:
             print(f"{description} saved to {output_path}")
             return output_path
 
+        # Download all files with URL decoding
         download_file(args.model_weights_url, args.model_weights, "model weights")
         download_file(args.model_config_url, args.model_config, "model config")
         download_file(args.class_labels_url, args.class_labels, "class labels")
