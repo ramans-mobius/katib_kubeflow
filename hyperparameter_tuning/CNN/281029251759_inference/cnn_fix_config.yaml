@@ -1,4 +1,4 @@
-name: CNN Fix Config Properties
+name: 2 Fix Config Properties
 description: Fix JSON formatting in config.properties file
 inputs:
   - name: config_file
@@ -12,26 +12,36 @@ implementation:
   container:
     image: python:3.9
     command:
-    - sh
+    - python3
     - -c
     - |
         import re
         import sys
+        import os
         
         input_file = sys.argv[1]
         output_file = sys.argv[2]
         
+        print(f"Reading config from: {input_file}")
+        
         with open(input_file, 'r') as f:
             content = f.read()
+        
+        print(f"Original content: {content[:200]}...")
         
         # Fix JSON formatting - remove spaces after colons and commas
         fixed_content = re.sub(r':\s+', ':', content)
         fixed_content = re.sub(r',\s+', ',', fixed_content)
         
+        print(f"Fixed content: {fixed_content[:200]}...")
+        
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
+        
         with open(output_file, 'w') as f:
             f.write(fixed_content)
         
-        print("Fixed config.properties file")
+        print("Fixed config.properties file successfully")
     args:
     - {inputPath: config_file}
     - {outputPath: fixed_config}
