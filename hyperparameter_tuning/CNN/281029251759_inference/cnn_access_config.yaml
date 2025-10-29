@@ -1,0 +1,80 @@
+name: Configure MinIO Access for KServe
+description: Create service account and secrets for KServe to access MinIO
+inputs:
+  - name: Namespace
+    type: String
+    default: 'kubeflow-user-example-com'
+  - name: Service Account Name
+    type: String
+    default: 'minio-sa'
+  - name: MinIO Username
+    type: String
+  - name: MinIO Password
+    type: String
+  - name: MinIO Endpoint
+    type: String
+    default: 'minio-service.kubeflow.svc.cluster.local:9000'
+outputs:
+  - name: Service Account Name
+    type: String
+implementation:
+  container:
+    image: bitnami/kubectl:latest
+    command:
+    - sh
+    - -c
+    - |
+        set -e
+        echo "Configuring MinIO access for KServe..."
+        
+        # Create secret with MinIO credentials
+        kubectl create secret generic minio-secret \
+          --namespace="$0" \
+          --from-literal=MINIO_USERNAME="$2" \
+          --from-literal=MINIO_PASSWORD="$3" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create service account
+        kubectl create serviceaccount "$1" --namespace="$0" --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Add MinIO secret to service account
+        kubectl patch serviceaccount "$1" --namespace="$0" \
+          --type='json' \
+          -p='[{"op": "add", "path": "/imagePullSecrets/-", "value": {"name": "minio-secret"}}]'
+        
+        # Create role and rolebinding for KServe
+        cat <<EOF | kubectl apply -f -
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: Role
+        metadata:
+          namespace: $0
+          name: kserve-minio-access
+        rules:
+        - apiGroups: [""]
+          resources: ["secrets"]
+          verbs: ["get", "list"]
+        ---
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        metadata:
+          namespace: $0
+          name: kserve-minio-access-binding
+        subjects:
+        - kind: ServiceAccount
+          name: $1
+          namespace: $0
+        roleRef:
+          kind: Role
+          name: kserve-minio-access
+          apiGroup: rbac.authorization.k8s.io
+        EOF
+        
+        echo "$1" > "$4"
+        echo "MinIO access configured successfully for service account: $1"
+    args:
+    - {inputValue: Namespace}
+    - {inputValue: Service Account Name}
+    - {inputValue: MinIO Username}
+    - {inputValue: MinIO Password}
+    - {inputValue: MinIO Endpoint}
+    - {outputPath: Service Account Name}
