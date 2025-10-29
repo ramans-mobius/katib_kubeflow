@@ -1,0 +1,91 @@
+name: Data Loader
+description: Downloads HR Compensation CSV and splits into train/test datasets
+inputs:
+  - {name: cdn_url, type: String, description: 'CDN URL to download CSV file'}
+  - {name: target_column, type: String, description: 'Target column name for prediction'}
+  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
+  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
+
+outputs:
+  - {name: train_data, type: Dataset}
+  - {name: test_data, type: Dataset}
+  - {name: dataset_info, type: DatasetInfo}
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        pip install pandas numpy requests >/dev/null 2>&1
+        python -c "
+        import os, sys, io, pandas as pd, numpy as np, requests, pickle
+        from urllib.parse import unquote
+
+        cdn_url = sys.argv[1]
+        target_column = sys.argv[2]
+        train_split = float(sys.argv[3])
+        shuffle_seed = int(sys.argv[4])
+        train_data_path = sys.argv[5]
+        test_data_path = sys.argv[6]
+        dataset_info_path = sys.argv[7]
+
+        print('HR Compensation Data Loader')
+        print(f'CDN URL: {cdn_url}')
+        print(f'Target column: {target_column}')
+        print(f'Train split: {train_split}')
+        print(f'Shuffle seed: {shuffle_seed}')
+
+        decoded_url = unquote(cdn_url)
+        try:
+            print('Downloading CSV')
+            response = requests.get(decoded_url, timeout=30)
+            response.raise_for_status()
+            df = pd.read_csv(io.BytesIO(response.content))
+            print(f'Loaded CSV with shape: {df.shape}')
+        except Exception as e:
+            print(f'Failed to load dataset: {e}')
+            raise
+
+        df = df.sample(frac=1, random_state=shuffle_seed).reset_index(drop=True)
+
+        train_size = int(len(df) * train_split)
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
+
+        print(f'Train shape: {train_df.shape}, Test shape: {test_df.shape}')
+
+        feature_columns = [col for col in df.columns if col != target_column]
+        dataset_info = {
+            'total_samples': len(df),
+            'train_samples': len(train_df),
+            'test_samples': len(test_df),
+            'target_column': target_column,
+            'feature_columns': feature_columns,
+            'train_split_ratio': train_split,
+            'shuffle_seed': shuffle_seed,
+            'columns': list(df.columns),
+            'dtypes': {col: str(df[col].dtype) for col in df.columns},
+        }
+
+        os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+        train_df.to_csv(train_data_path, index=False)
+
+        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+        test_df.to_csv(test_data_path, index=False)
+
+        os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+        with open(dataset_info_path, 'wb') as f:
+            pickle.dump(dataset_info, f)
+
+        print('Dataset processing complete!')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+    args:
+      - {inputValue: cdn_url}
+      - {inputValue: target_column}
+      - {inputValue: train_split}
+      - {inputValue: shuffle_seed}
+      - {outputPath: train_data}
+      - {outputPath: test_data}
+      - {outputPath: dataset_info}
