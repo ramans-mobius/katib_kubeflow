@@ -1,0 +1,126 @@
+name: 3 Preprocess Features
+description: Preprocesses features based on dataset name and algorithm
+inputs:
+  - name: extracted_data
+    type: String
+    description: Extracted dataset from previous step
+  - name: dataset_name
+    type: String
+    description: Dataset name for preprocessing configuration
+  - name: algorithm
+    type: String
+    description: Algorithm to be used for processing
+outputs:
+  - name: processed_data
+    type: String
+    description: Processed training data
+  - name: test_data
+    type: String
+    description: Test data for evaluation
+  - name: preprocessing_report
+    type: String
+    description: Report on preprocessing steps
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas scikit-learn numpy
+        python3 -c "
+        import sys, os, json, pandas as pd, numpy as np
+        from sklearn.model_selection import train_test_split
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        extracted_data_str = sys.argv[1]
+        dataset_name = sys.argv[2]
+        algorithm = sys.argv[3]
+        processed_data_path = sys.argv[4]
+        test_data_path = sys.argv[5]
+        preprocessing_report_path = sys.argv[6]
+        
+        print('Starting feature preprocessing...')
+        print(f'dataset_name: {dataset_name}')
+        print(f'algorithm: {algorithm}')
+        
+        extracted_data = json.loads(extracted_data_str)
+        df = pd.DataFrame(extracted_data)
+        
+        preprocessing_configs = {
+            'NetworkX-Graph-Intialize': {
+                'features': ['degree', 'pagerank', 'betweenness'],
+                'target': 'reachable'
+            },
+            'LineChart-Generation-Dbaas': {
+                'features': ['x', 'chart_type'],
+                'target': 'y'
+            },
+            'LLM-MODEL-BUILDING-TRAINING': {
+                'features': ['tokens', 'length'],
+                'target': 'accuracy'
+            },
+            'Mig-Setup-Single-Playbook': {
+                'features': ['GPU', 'mig_profile', 'batch', 'mem'],
+                'target': 'runtime'
+            },
+            'GNN-STGNN': {
+                'features': ['timestamp', 'cpu_usage'],
+                'target': 'latency'
+            }
+        }
+        
+        config = preprocessing_configs.get(dataset_name)
+        features = [f for f in config['features'] if f in df.columns]
+        target = config['target'] if config['target'] in df.columns else df.columns[0]
+        
+        X = df[features]
+        y = df[target]
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        processed_data = {
+            'X_train': X_train.to_dict('records'),
+            'y_train': y_train.tolist(),
+            'feature_names': features,
+            'target_name': target
+        }
+        
+        test_data = {
+            'X_test': X_test.to_dict('records'),
+            'y_test': y_test.tolist()
+        }
+        
+        preprocessing_report = {
+            'dataset_name': dataset_name,
+            'algorithm': algorithm,
+            'features_used': features,
+            'target_variable': target,
+            'train_samples': len(X_train),
+            'test_samples': len(X_test)
+        }
+        
+        os.makedirs(os.path.dirname(processed_data_path) or '.', exist_ok=True)
+        with open(processed_data_path, 'w') as f:
+            json.dump(processed_data, f)
+        
+        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+        with open(test_data_path, 'w') as f:
+            json.dump(test_data, f)
+        
+        os.makedirs(os.path.dirname(preprocessing_report_path) or '.', exist_ok=True)
+        with open(preprocessing_report_path, 'w') as f:
+            json.dump(preprocessing_report, f)
+        
+        print('Feature preprocessing completed successfully')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+    args:
+      - {inputPath: extracted_data}
+      - {inputValue: dataset_name}
+      - {inputValue: algorithm}
+      - {outputPath: processed_data}
+      - {outputPath: test_data}
+      - {outputPath: preprocessing_report}
