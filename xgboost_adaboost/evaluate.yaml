@@ -1,0 +1,198 @@
+name: Evaluation
+description: Evaluates trained boosting model and generates comprehensive metrics
+inputs:
+  - name: trained_model
+    type: Model
+  - name: data_path
+    type: Dataset
+  - name: feature_importance
+    type: String
+  - name: algorithm
+    type: String
+    description: 'Algorithm type: xgboost or adaboost'
+
+outputs:
+  - name: metrics
+    type: Metrics
+  - name: metrics_json
+    type: String
+  - name: evaluation_report
+    type: String
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        python -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+        trained_model_path = sys.argv[1]
+        data_path = sys.argv[2]
+        feature_importance_path = sys.argv[3]
+        algorithm = sys.argv[4]
+        metrics_path = sys.argv[5]
+        metrics_json_path = sys.argv[6]
+        evaluation_report_path = sys.argv[7]
+
+        print(f'Starting {algorithm.upper()} Evaluation')
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        if not os.path.exists(trained_model_path):
+            raise FileNotFoundError(f'trained_model does not exist: {trained_model_path}')
+            
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(f'data_path does not exist: {data_path}')
+            
+        try:
+            with open(trained_model_path, 'rb') as f:
+                model_pipeline = pickle.load(f)
+            print(f'Trained {algorithm} model loaded successfully')
+        except Exception as e:
+            raise Exception(f'ERROR loading trained model: {e}')
+            
+        try:
+            with open(data_path, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            print('Data loaded successfully')
+        except Exception as e:
+            raise Exception(f'ERROR loading data: {e}')
+
+        try:
+            with open(feature_importance_path, 'r') as f:
+                feature_importance_csv = f.read()
+            feature_importance_df = pd.read_csv(pd.compat.StringIO(feature_importance_csv))
+            print('Feature importance loaded successfully')
+        except Exception as e:
+            print(f'Warning loading feature importance: {e}')
+            feature_importance_df = pd.DataFrame()
+
+        try:
+            X_test = data_wrapper.X_test
+            y_test = data_wrapper.y_test
+            dataset_info = data_wrapper.dataset_info
+        except AttributeError:
+            if hasattr(data_wrapper, '__dict__'):
+                X_test = data_wrapper.__dict__.get('X_test')
+                y_test = data_wrapper.__dict__.get('y_test')
+                dataset_info = data_wrapper.__dict__.get('dataset_info', {})
+            else:
+                X_test = data_wrapper.get('X_test')
+                y_test = data_wrapper.get('y_test')
+                dataset_info = data_wrapper.get('dataset_info', {})
+
+        if not dataset_info:
+            dataset_info = {
+                'feature_columns': list(X_test.columns) if X_test is not None else [],
+                'target_column': 'salary'
+            }
+
+        print(f'Evaluating {algorithm} on {len(X_test)} test samples')
+
+        y_pred = model_pipeline.predict(X_test)
+
+        r2 = r2_score(y_test, y_pred)
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        mse = mean_squared_error(y_test, y_pred)
+
+        mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+        explained_variance = 1 - (np.var(y_test - y_pred) / np.var(y_test))
+
+        error_percentage_10 = np.mean(np.abs((y_test - y_pred) / y_test) <= 0.10) * 100
+        error_percentage_20 = np.mean(np.abs((y_test - y_pred) / y_test) <= 0.20) * 100
+        error_percentage_30 = np.mean(np.abs((y_test - y_pred) / y_test) <= 0.30) * 100
+
+        metrics = {
+            'algorithm': algorithm,
+            'test_metrics': {
+                'r2_score': float(r2),
+                'mae': float(mae),
+                'rmse': float(rmse),
+                'mse': float(mse),
+                'mape': float(mape),
+                'explained_variance': float(explained_variance),
+                'error_within_10pct': float(error_percentage_10),
+                'error_within_20pct': float(error_percentage_20),
+                'error_within_30pct': float(error_percentage_30)
+            },
+            'target_statistics': {
+                'actual_mean': float(np.mean(y_test)),
+                'actual_std': float(np.std(y_test)),
+                'predicted_mean': float(np.mean(y_pred)),
+                'predicted_std': float(np.std(y_pred))
+            },
+            'model_info': {
+                'model_type': f'{algorithm}_regression',
+                'total_samples': len(y_test),
+                'features_used': dataset_info.get('feature_columns', []),
+                'top_features': feature_importance_df.head(5).to_dict('records') if not feature_importance_df.empty else []
+            }
+        }
+
+        evaluation_report = f'''{algorithm.upper()} HR Compensation Evaluation Report
+==========================================
+Model Performance:
+- R² Score: {r2:.3f}
+- Mean Absolute Error: {mae:,.0f}
+- Root Mean Squared Error: {rmse:,.0f}
+- Mean Absolute Percentage Error: {mape:.1f}%
+
+Prediction Accuracy:
+- Predictions within 10% of actual: {error_percentage_10:.1f}%
+- Predictions within 20% of actual: {error_percentage_20:.1f}%
+- Predictions within 30% of actual: {error_percentage_30:.1f}%
+
+Target Statistics:
+- Actual Salary - Mean: {np.mean(y_test):,.0f}, Std: {np.std(y_test):,.0f}
+- Predicted Salary - Mean: {np.mean(y_pred):,.0f}, Std: {np.std(y_pred):,.0f}
+
+Top Features:
+'''
+        
+        if not feature_importance_df.empty:
+            for _, row in feature_importance_df.head(5).iterrows():
+                evaluation_report += f\"- {row['feature']}: {row['importance']:.3f}\\n\"
+        
+        evaluation_report += f\"\\nTotal Test Samples: {len(y_test)}\"
+
+        try:
+            os.makedirs(os.path.dirname(metrics_path) or '.', exist_ok=True)
+            os.makedirs(os.path.dirname(metrics_json_path) or '.', exist_ok=True)
+            os.makedirs(os.path.dirname(evaluation_report_path) or '.', exist_ok=True)
+            
+            with open(metrics_path, 'w') as f:
+                json.dump(metrics, f, indent=2)
+            
+            with open(metrics_json_path, 'w') as f:
+                json.dump(metrics, f, indent=2)
+            
+            with open(evaluation_report_path, 'w') as f:
+                f.write(evaluation_report)
+            
+            print(f'{algorithm.upper()} Evaluation Complete')
+            print(f'R^2:  {r2:.3f}')
+            print(f'MAE:  {mae:,.0f}')
+            print(f'RMSE: {rmse:,.0f}')
+            print(f'MAPE: {mape:.1f}%')
+            
+        except Exception as e:
+            raise Exception(f'ERROR saving results: {e}')
+
+        print(f'{algorithm.upper()} evaluation completed successfully!')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: trained_model}
+      - {inputPath: data_path}
+      - {inputPath: feature_importance}
+      - {inputValue: algorithm}
+      - {outputPath: metrics}
+      - {outputPath: metrics_json}
+      - {outputPath: evaluation_report}
