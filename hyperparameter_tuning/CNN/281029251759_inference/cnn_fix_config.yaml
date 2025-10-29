@@ -1,0 +1,37 @@
+name: CNN Fix Config Properties
+description: Fix JSON formatting in config.properties file
+inputs:
+  - name: config_file
+    type: String
+    description: Input config.properties file
+outputs:
+  - name: fixed_config
+    type: String
+    description: Fixed config.properties file
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |
+        import re
+        import sys
+        
+        input_file = sys.argv[1]
+        output_file = sys.argv[2]
+        
+        with open(input_file, 'r') as f:
+            content = f.read()
+        
+        # Fix JSON formatting - remove spaces after colons and commas
+        fixed_content = re.sub(r':\s+', ':', content)
+        fixed_content = re.sub(r',\s+', ',', fixed_content)
+        
+        with open(output_file, 'w') as f:
+            f.write(fixed_content)
+        
+        print("Fixed config.properties file")
+    args:
+    - {inputPath: config_file}
+    - {outputPath: fixed_config}
