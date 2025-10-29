@@ -1,0 +1,202 @@
+name: Training
+description: Trains boosting algorithm (XGBoost/AdaBoost) 
+inputs:
+  - name: data_path
+    type: Dataset
+  - name: preprocessing_pipeline
+    type: Model
+  - name: algorithm
+    type: String
+    description: 'Algorithm type: xgboost or adaboost'
+  - name: model_config
+    type: String
+    description: 'Algorithm hyperparameters as JSON string'
+
+outputs:
+  - name: trained_model
+    type: Model
+  - name: training_history
+    type: String
+  - name: feature_importance
+    type: String
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        python -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+        import xgboost as xgb
+        from sklearn.ensemble import AdaBoostRegressor
+
+        data_path = sys.argv[1]
+        preprocessing_path = sys.argv[2]
+        algorithm = sys.argv[3]
+        config_str = sys.argv[4]
+        trained_model_path = sys.argv[5]
+        training_history_path = sys.argv[6]
+        feature_importance_path = sys.argv[7]
+
+        print(f'Starting {algorithm.upper()} Training')
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        if not os.path.exists(data_path):
+            raise FileNotFoundError(f'data_path does not exist: {data_path}')
+            
+        if not os.path.exists(preprocessing_path):
+            raise FileNotFoundError(f'preprocessing_pipeline does not exist: {preprocessing_path}')
+            
+        try:
+            with open(data_path, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            print('Data loaded successfully')
+        except Exception as e:
+            raise Exception(f'ERROR loading data: {e}')
+            
+        try:
+            with open(preprocessing_path, 'rb') as f:
+                preprocess = pickle.load(f)
+            print('Preprocessing pipeline loaded successfully')
+        except Exception as e:
+            raise Exception(f'ERROR loading preprocessing pipeline: {e}')
+
+        try:
+            X_train = data_wrapper.X_train
+            y_train = data_wrapper.y_train
+            X_test = data_wrapper.X_test
+            y_test = data_wrapper.y_test
+            model_pipeline = data_wrapper.model_pipeline
+            numeric_features = data_wrapper.numeric_features
+            categorical_features = data_wrapper.categorical_features
+        except AttributeError:
+            if hasattr(data_wrapper, '__dict__'):
+                X_train = data_wrapper.__dict__.get('X_train')
+                y_train = data_wrapper.__dict__.get('y_train')
+                X_test = data_wrapper.__dict__.get('X_test')
+                y_test = data_wrapper.__dict__.get('y_test')
+                model_pipeline = data_wrapper.__dict__.get('model_pipeline')
+                numeric_features = data_wrapper.__dict__.get('numeric_features', ['years_exp'])
+                categorical_features = data_wrapper.__dict__.get('categorical_features', ['level', 'location', 'function'])
+            else:
+                X_train = data_wrapper.get('X_train')
+                y_train = data_wrapper.get('y_train')
+                X_test = data_wrapper.get('X_test')
+                y_test = data_wrapper.get('y_test')
+                model_pipeline = data_wrapper.get('model_pipeline')
+                numeric_features = data_wrapper.get('numeric_features', ['years_exp'])
+                categorical_features = data_wrapper.get('categorical_features', ['level', 'location', 'function'])
+
+        print(f'Training {algorithm.upper()} on {len(X_train)} samples, testing on {len(X_test)} samples')
+
+        try:
+            config = json.loads(config_str) if config_str else {}
+            model_params = config
+            
+            if model_params:
+                model_pipeline.named_steps['model'].set_params(**model_params)
+                print(f'Using custom {algorithm} parameters: {model_params}')
+            else:
+                print(f'Using default {algorithm} parameters')
+                
+        except Exception as e:
+            print(f'Warning parsing config: {e}, using default parameters')
+
+        print(f'Training {algorithm} model')
+        model_pipeline.fit(X_train, y_train)
+
+        y_pred_train = model_pipeline.predict(X_train)
+        y_pred_test = model_pipeline.predict(X_test)
+
+        train_r2 = r2_score(y_train, y_pred_train)
+        test_r2 = r2_score(y_test, y_pred_test)
+        train_mae = mean_absolute_error(y_train, y_pred_train)
+        test_mae = mean_absolute_error(y_test, y_pred_test)
+        train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
+        test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+
+        model = model_pipeline.named_steps['model']
+        preprocessor = model_pipeline.named_steps['preprocessor']
+
+        try:
+            numeric_features_transformed = numeric_features
+            categorical_features_transformed = preprocessor.named_transformers_['cat'].get_feature_names_out(categorical_features)
+            feature_names = np.concatenate([numeric_features_transformed, categorical_features_transformed])
+            
+            importance_scores = model.feature_importances_
+            feature_importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance_scores
+            }).sort_values('importance', ascending=False)
+            
+        except Exception as e:
+            print(f'Warning: Could not extract detailed feature importance: {e}')
+            feature_names = list(X_train.columns)
+            feature_importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': [1.0/len(feature_names)] * len(feature_names)
+            })
+
+        history = {
+            'algorithm': algorithm,
+            'train_metrics': {
+                'r2_score': float(train_r2),
+                'mae': float(train_mae),
+                'rmse': float(train_rmse)
+            },
+            'test_metrics': {
+                'r2_score': float(test_r2),
+                'mae': float(test_mae),
+                'rmse': float(test_rmse)
+            },
+            'feature_importance': feature_importance_df.to_dict('records'),
+            'top_features': feature_importance_df.head(10).to_dict('records'),
+            'model_parameters': model.get_params(),
+            'training_samples': len(X_train),
+            'test_samples': len(X_test)
+        }
+
+        try:
+            os.makedirs(os.path.dirname(trained_model_path) or '.', exist_ok=True)
+            os.makedirs(os.path.dirname(training_history_path) or '.', exist_ok=True)
+            os.makedirs(os.path.dirname(feature_importance_path) or '.', exist_ok=True)
+            
+            with open(trained_model_path, 'wb') as f:
+                pickle.dump(model_pipeline, f)
+            
+            with open(training_history_path, 'w') as f:
+                json.dump(history, f, indent=2)
+            
+            feature_importance_csv = feature_importance_df.to_csv(index=False)
+            with open(feature_importance_path, 'w') as f:
+                f.write(feature_importance_csv)
+            
+            print(f'{algorithm.upper()} Training Complete')
+            print('Test Performance')
+            print(f'R^2:  {test_r2:.3f}')
+            print(f'MAE:  {test_mae:,.0f}')
+            print(f'RMSE: {test_rmse:,.0f}')
+            
+            print('Top 10 Feature Importances:')
+            print(feature_importance_df.head(10).to_string(index=False))
+            
+        except Exception as e:
+            raise Exception(f'ERROR saving results: {e}')
+
+        print(f'{algorithm.upper()} training completed successfully!')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: data_path}
+      - {inputPath: preprocessing_pipeline}
+      - {inputValue: algorithm}
+      - {inputValue: model_config}
+      - {outputPath: trained_model}
+      - {outputPath: training_history}
+      - {outputPath: feature_importance}
