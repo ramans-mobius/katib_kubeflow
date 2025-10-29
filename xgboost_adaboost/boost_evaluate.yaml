@@ -1,0 +1,121 @@
+name: 5 Evaluate Model
+description: Evaluates trained model and calculates metrics
+inputs:
+  - name: trained_model
+    type: String
+    description: Trained model from previous step
+  - name: test_data
+    type: String
+    description: Test data for evaluation
+  - name: dataset_name
+    type: String
+    description: Dataset name for metrics configuration
+  - name: algorithm
+    type: String
+    description: Algorithm used for training
+outputs:
+  - name: predictions
+    type: String
+    description: Model predictions on test data
+  - name: metrics
+    type: String
+    description: Evaluation metrics
+  - name: evaluation_report
+    type: String
+    description: Detailed evaluation report
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas scikit-learn numpy
+        python3 -c "
+        import sys, os, json, pandas as pd, pickle, base64, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        trained_model_str = sys.argv[1]
+        test_data_str = sys.argv[2]
+        dataset_name = sys.argv[3]
+        algorithm = sys.argv[4]
+        predictions_path = sys.argv[5]
+        metrics_path = sys.argv[6]
+        evaluation_report_path = sys.argv[7]
+        
+        print('Starting model evaluation...')
+        print(f'dataset_name: {dataset_name}')
+        print(f'algorithm: {algorithm}')
+        
+        model_b64 = trained_model_str
+        model_bytes = base64.b64decode(model_b64)
+        model = pickle.loads(model_bytes)
+        
+        test_data = json.loads(test_data_str)
+        X_test = pd.DataFrame(test_data['X_test'])
+        y_test = test_data['y_test']
+        
+        y_pred = model.predict(X_test)
+        
+        metrics_configs = {
+            'NetworkX-Graph-Intialize': ['r2', 'rmse', 'mae', 'mape'],
+            'LineChart-Generation-Dbaas': ['r2', 'mae', 'rmse'],
+            'LLM-MODEL-BUILDING-TRAINING': ['r2', 'mae', 'rmse'],
+            'Mig-Setup-Single-Playbook': ['r2', 'mse', 'mape'],
+            'GNN-STGNN': ['r2', 'rmse', 'mse', 'mae']
+        }
+        
+        metrics_to_calc = metrics_configs.get(dataset_name, ['r2', 'mae', 'rmse'])
+        
+        calculated_metrics = {}
+        if 'r2' in metrics_to_calc:
+            calculated_metrics['r2_score'] = float(r2_score(y_test, y_pred))
+        if 'mae' in metrics_to_calc:
+            calculated_metrics['mae'] = float(mean_absolute_error(y_test, y_pred))
+        if 'rmse' in metrics_to_calc:
+            calculated_metrics['rmse'] = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+        if 'mse' in metrics_to_calc:
+            calculated_metrics['mse'] = float(mean_squared_error(y_test, y_pred))
+        if 'mape' in metrics_to_calc:
+            calculated_metrics['mape'] = float(np.mean(np.abs((np.array(y_test) - y_pred) / np.array(y_test))) * 100)
+        
+        predictions = {
+            'y_true': y_test,
+            'y_pred': y_pred.tolist(),
+            'dataset_name': dataset_name,
+            'algorithm': algorithm
+        }
+        
+        evaluation_report = {
+            'dataset_name': dataset_name,
+            'algorithm': algorithm,
+            'test_samples': len(y_test),
+            'metrics_calculated': list(calculated_metrics.keys())
+        }
+        
+        os.makedirs(os.path.dirname(predictions_path) or '.', exist_ok=True)
+        with open(predictions_path, 'w') as f:
+            json.dump(predictions, f)
+        
+        os.makedirs(os.path.dirname(metrics_path) or '.', exist_ok=True)
+        with open(metrics_path, 'w') as f:
+            json.dump(calculated_metrics, f)
+        
+        os.makedirs(os.path.dirname(evaluation_report_path) or '.', exist_ok=True)
+        with open(evaluation_report_path, 'w') as f:
+            json.dump(evaluation_report, f)
+        
+        print('Model evaluation completed successfully')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: trained_model}
+      - {inputPath: test_data}
+      - {inputValue: dataset_name}
+      - {inputValue: algorithm}
+      - {outputPath: predictions}
+      - {outputPath: metrics}
+      - {outputPath: evaluation_report}
