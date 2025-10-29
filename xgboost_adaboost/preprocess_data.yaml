@@ -1,0 +1,168 @@
+name: Preprocessor
+description: Preprocesses data for boosting algorithms (XGBoost/AdaBoost)
+inputs:
+  - name: train_data
+    type: Dataset
+  - name: test_data
+    type: Dataset
+  - name: dataset_info
+    type: DatasetInfo
+  - name: algorithm
+    type: String
+    description: 'Algorithm type: xgboost or adaboost'
+  - name: model_config
+    type: String
+    description: 'Algorithm configuration as JSON string'
+
+outputs:
+  - name: processed_data_pickle
+    type: Dataset
+  - name: preprocessing_pipeline
+    type: Model
+  - name: weight_out
+    type: String
+    description: "Preprocessing config as JSON string"
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        python -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.compose import ColumnTransformer
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+        from sklearn.pipeline import Pipeline
+        import xgboost as xgb
+        from sklearn.ensemble import AdaBoostRegressor
+        from sklearn.tree import DecisionTreeRegressor
+
+        train_path = sys.argv[1]
+        test_path = sys.argv[2]
+        info_path = sys.argv[3]
+        algorithm = sys.argv[4]
+        config_str = sys.argv[5]
+        out_path = sys.argv[6]
+        pipeline_path = sys.argv[7]
+        weight_path = sys.argv[8]
+
+        print(f'Starting preprocessing for {algorithm.upper()}...')
+
+        class DataWrapper:
+            def __init__(self, data_dict): 
+                self.__dict__.update(data_dict)
+
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+        with open(info_path, 'rb') as f: 
+            dataset_info = pickle.load(f)
+
+        print(f'Loaded train: {train_df.shape[0]} samples, test: {test_df.shape[0]} samples')
+
+        target_col = dataset_info.get('target_column', 'salary')
+        feature_columns = dataset_info.get('feature_columns', [col for col in train_df.columns if col != target_col])
+
+        X_train = train_df.drop(columns=[target_col])
+        y_train = train_df[target_col]
+        X_test = test_df.drop(columns=[target_col])
+        y_test = test_df[target_col]
+
+        numeric_features = dataset_info.get('numeric_features', ['years_exp', 'age', 'performance_rating'])
+        categorical_features = dataset_info.get('categorical_features', ['level', 'location', 'function', 'department', 'education'])
+
+        numeric_features = [feat for feat in numeric_features if feat in X_train.columns]
+        categorical_features = [feat for feat in categorical_features if feat in X_train.columns]
+
+        print(f'Numeric features: {numeric_features}')
+        print(f'Categorical features: {categorical_features}')
+
+        if algorithm == 'xgboost':
+            preprocess = ColumnTransformer(
+                transformers=[
+                    ('num', StandardScaler(), numeric_features),
+                    ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
+                ]
+            )
+            model = xgb.XGBRegressor(
+                n_estimators=100,
+                max_depth=6,
+                learning_rate=0.1,
+                random_state=42
+            )
+            model_type = 'xgboost_regression'
+            
+        elif algorithm == 'adaboost':
+            preprocess = ColumnTransformer(
+                transformers=[
+                    ('num', 'passthrough', numeric_features),
+                    ('cat', OneHotEncoder(drop='first', handle_unknown='ignore'), categorical_features),
+                ]
+            )
+            base_estimator = DecisionTreeRegressor(max_depth=4, random_state=42)
+            model = AdaBoostRegressor(
+                estimator=base_estimator,
+                n_estimators=50,
+                learning_rate=1.0,
+                random_state=42
+            )
+            model_type = 'adaboost_regression'
+        else:
+            raise ValueError(f'Unsupported algorithm: {algorithm}')
+
+        model_pipeline = Pipeline(steps=[
+            ('preprocessor', preprocess),
+            ('model', model)
+        ])
+
+        print(f'{algorithm.upper()} preprocessing pipeline created successfully')
+
+        data_wrapper = DataWrapper({
+            'X_train': X_train,
+            'y_train': y_train,
+            'X_test': X_test,
+            'y_test': y_test,
+            'preprocessor': preprocess,
+            'model_pipeline': model_pipeline,
+            'numeric_features': numeric_features,
+            'categorical_features': categorical_features,
+            'dataset_info': dataset_info,
+            'algorithm': algorithm
+        })
+
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(out_path, 'wb') as f: 
+            pickle.dump(data_wrapper, f)
+
+        os.makedirs(os.path.dirname(pipeline_path) or '.', exist_ok=True)
+        with open(pipeline_path, 'wb') as f: 
+            pickle.dump(preprocess, f)
+
+        weight_config = {
+            'preprocessing_complete': True,
+            'numeric_features': numeric_features,
+            'categorical_features': categorical_features,
+            'feature_columns': feature_columns,
+            'target_column': target_col,
+            'model_type': model_type,
+            'algorithm': algorithm,
+            'train_samples': len(X_train),
+            'test_samples': len(X_test)
+        }
+
+        os.makedirs(os.path.dirname(weight_path) or '.', exist_ok=True)
+        with open(weight_path, 'w') as f: 
+            json.dump(weight_config, f, indent=2)
+
+        print(f'{algorithm.upper()} preprocessing complete!')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: train_data}
+      - {inputPath: test_data}
+      - {inputPath: dataset_info}
+      - {inputValue: algorithm}
+      - {inputValue: model_config}
+      - {outputPath: processed_data_pickle}
+      - {outputPath: preprocessing_pipeline}
+      - {outputPath: weight_out}
