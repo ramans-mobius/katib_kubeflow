@@ -1,5 +1,5 @@
 name: Data Loader
-description: Downloads HR Compensation CSV and splits into train/test datasets
+description: Downloads CSV and splits into train/test datasets
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download CSV file'}
   - {name: target_column, type: String, description: 'Target column name for prediction'}
