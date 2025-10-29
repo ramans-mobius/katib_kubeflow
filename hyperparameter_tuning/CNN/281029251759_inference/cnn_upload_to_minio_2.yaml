@@ -1,0 +1,103 @@
+name: Upload to MinIO Generic
+description: Upload config.properties and any .mar files to MinIO bucket with specific directory structure
+inputs:
+- {name: Config File}  # config.properties file path
+- {name: Model File}   # Any .mar file path  
+- {name: MinIO bucket name, type: String, default: "mlmodels"}  # MinIO bucket name
+- {name: Application name, type: String, default: "cnn-classifier"}  # Application name to include in the path
+- {name: MinIO username, type: String, default: "minio"}  # MinIO username
+- {name: MinIO password, type: String, default: "QD7AX5LVDHKE0FD8CNEQ5GO6KNG3HL"}  # MinIO password
+- {name: Model filename, type: String, default: "model.mar"}  # Target filename in MinIO
+outputs:
+- {name: MinIO path, type: String}  # Output MinIO path
+metadata:
+  annotations:
+    author: Nikhil <nikhil.v@mobiusdtaas.ai>
+implementation:
+    container:
+        image: ubuntu:22.04
+        command:
+        - sh
+        - -ex
+        - -c
+        - |
+            apt-get -o Acquire::ForceIPv4=true update
+            apt-get -o Acquire::ForceIPv4=true install -y wget
+            wget https://dl.min.io/client/mc/release/linux-amd64/mc
+            chmod +x mc
+            mv mc /usr/local/bin/
+            mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$4" "$5"
+            
+            if ! mc ls myminio/"$2"; then
+              mc mb myminio/"$2"
+            fi
+            
+            echo "=== File Discovery ==="
+            
+            # Find the actual config file
+            CONFIG_FILE="$0/config.properties"
+            if [ ! -f "$CONFIG_FILE" ]; then
+                CONFIG_FILE="$0"
+            fi
+            
+            # Find any .mar file in the model directory (generic approach)
+            MODEL_FILE=""
+            if [ -d "$1" ]; then
+                # If it's a directory, find the first .mar file
+                found_mar=$(find "$1" -name "*.mar" | head -1)
+                if [ -n "$found_mar" ]; then
+                    MODEL_FILE="$found_mar"
+                    echo "Found MAR file in directory: $MODEL_FILE"
+                else
+                    MODEL_FILE="$1"
+                fi
+            elif [ -f "$1" ]; then
+                # If it's a file, use it directly
+                MODEL_FILE="$1"
+            else
+                echo "Model input is neither file nor directory: $1"
+                ls -la "$(dirname "$1")" || echo "Cannot list parent directory"
+                exit 1
+            fi
+            
+            echo "Config file: $CONFIG_FILE"
+            echo "Model file: $MODEL_FILE"
+            echo "Target model filename: $6"
+            
+            # Verify files exist
+            if [ ! -f "$CONFIG_FILE" ]; then
+                echo "ERROR: Config file not found at $CONFIG_FILE"
+                ls -la "$0" || echo "Cannot list config input"
+                exit 1
+            fi
+            
+            if [ ! -f "$MODEL_FILE" ]; then
+                echo "ERROR: Model file not found at $MODEL_FILE"
+                ls -la "$1" || echo "Cannot list model input"
+                exit 1
+            fi
+            
+            echo "=== Uploading Files ==="
+            
+            # Upload config file
+            mc cp "$CONFIG_FILE" "myminio/$2/$3/config/config.properties"
+            echo "✓ Uploaded config.properties"
+            
+            # Upload model file with target filename
+            mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/$6"
+            echo "✓ Uploaded model as $6"
+            
+            # Create output
+            mkdir -p "$(dirname "$7")"
+            echo "s3://$2/$3/" > "$7"
+            echo "=== Upload Completed Successfully ==="
+            echo "MinIO path: s3://$2/$3/"
+        args:
+        - {inputPath: Config File}
+        - {inputPath: Model File}
+        - {inputValue: MinIO bucket name}
+        - {inputValue: Application name}
+        - {inputValue: MinIO username}
+        - {inputValue: MinIO password}
+        - {inputValue: Model filename}
+        - {outputPath: MinIO path}
