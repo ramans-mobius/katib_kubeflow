@@ -1,5 +1,5 @@
-name: Serve a model with KServe 452
-description: Serve Models using KServe 
+name: 2 Serve a model with KServe
+description: Serve Models using KServe for PyTorch CNN
 inputs:
   - name: Action
     type: String
@@ -7,7 +7,7 @@ inputs:
     description: 'Action to execute on KServe'
   - name: Model Name
     type: String
-    default: ''
+    default: 'cnn-classifier'
     description: 'Name to give to the deployed model'
   - name: Model URI
     type: String
@@ -19,11 +19,11 @@ inputs:
     description: 'The traffic split percentage between the candidate model and the last ready model'
   - name: Namespace
     type: String
-    default: ''
+    default: 'kubeflow-user-example-com'
     description: 'Kubernetes namespace where the KServe service is deployed.'
   - name: Framework
     type: String
-    default: ''
+    default: 'pytorch'
     description: 'Machine Learning Framework for Model Serving.'
   - name: Runtime Version
     type: String
@@ -31,11 +31,11 @@ inputs:
     description: 'Runtime Version of Machine Learning Framework'
   - name: Resource Requests
     type: String
-    default: '{"cpu": "0.5", "memory": "512Mi"}'
+    default: '{"cpu":"1","memory":"2Gi"}'
     description: 'CPU and Memory requests for Model Serving'
   - name: Resource Limits
     type: String
-    default: '{"cpu": "1", "memory": "1Gi"}'
+    default: '{"cpu":"2","memory":"4Gi"}'
     description: 'CPU and Memory limits for Model Serving'
   - name: Custom Model Spec
     type: String
@@ -43,11 +43,11 @@ inputs:
     description: 'Custom model runtime container spec in JSON'
   - name: Autoscaling Target
     type: String
-    default: '0'
+    default: '50'
     description: 'Autoscaling Target Number'
   - name: Service Account
     type: String
-    default: ''
+    default: 'default-editor'
     description: 'ServiceAccount to use to run the InferenceService pod'
   - name: Enable Istio Sidecar
     type: Bool
@@ -59,19 +59,19 @@ inputs:
     description: 'Raw InferenceService serialized YAML for deployment'
   - name: Watch Timeout
     type: String
-    default: '300'
+    default: '600'
     description: "Timeout seconds for watching until InferenceService becomes ready."
   - name: Min Replicas
     type: String
-    default: '-1'
+    default: '1'
     description: 'Minimum number of InferenceService replicas'
   - name: Max Replicas
     type: String
-    default: '-1'
+    default: '3'
     description: 'Maximum number of InferenceService replicas'
   - name: Request Timeout
     type: String
-    default: '60'
+    default: '120'
     description: "Specifies the number of seconds to wait before timing out a request to the component."
   - name: Enable ISVC Status
     type: Bool
