@@ -1,4 +1,4 @@
-name: Serve a model with KServe
+name: 2 Serve a model with KServe
 description: Serve Models using KServe for PyTorch CNN
 inputs:
   - name: Action
@@ -24,10 +24,10 @@ inputs:
     default: 'latest'
   - name: Resource Requests
     type: String
-    default: '{"cpu":"1","memory":"2Gi"}'
+    default: 'cpu=1,memory=2Gi'  # ← Simple string instead of JSON
   - name: Resource Limits
     type: String
-    default: '{"cpu":"2","memory":"4Gi"}'
+    default: 'cpu=2,memory=4Gi'  # ← Simple string instead of JSON
   - name: Custom Model Spec
     type: String
     default: '{}'
@@ -66,98 +66,47 @@ outputs:
 implementation:
   container:
     image: nikhilv215/kserve:kserve_component-v6
-    command:
-    - sh
-    - -c
-    - |
-        python3 -c "
-        import json
-        import sys
-        
-        # Parse JSON strings and remove any escape sequences
-        def parse_json_param(param_value):
-            if not param_value:
-                return '{}'
-            # Remove escape sequences and parse
-            try:
-                # Handle escaped JSON strings
-                cleaned = param_value.replace('\\\\\"', '\"').replace('\\\"', '\"')
-                parsed = json.loads(cleaned)
-                return json.dumps(parsed)  # Return valid JSON string
-            except json.JSONDecodeError:
-                # If it's already valid JSON, return as is
-                return param_value
-        
-        # Get arguments
-        args = sys.argv[1:]
-        action = args[0]
-        model_name = args[1]
-        model_uri = args[2]
-        canary_traffic_percent = args[3]
-        namespace = args[4]
-        framework = args[5]
-        runtime_version = args[6]
-        resource_requests = parse_json_param(args[7])
-        resource_limits = parse_json_param(args[8])
-        custom_model_spec = parse_json_param(args[9])
-        autoscaling_target = args[10]
-        service_account = args[11]
-        enable_istio_sidecar = args[12]
-        output_path = args[13]
-        inferenceservice_yaml = parse_json_param(args[14])
-        watch_timeout = args[15]
-        min_replicas = args[16]
-        max_replicas = args[17]
-        request_timeout = args[18]
-        enable_isvc_status = args[19]
-        
-        # Build command for kservedeployer.py
-        cmd = [
-            'python', '-u', 'kservedeployer.py',
-            '--action', action,
-            '--model-name', model_name,
-            '--model-uri', model_uri,
-            '--canary-traffic-percent', canary_traffic_percent,
-            '--namespace', namespace,
-            '--framework', framework,
-            '--runtime-version', runtime_version,
-            '--resource-requests', resource_requests,
-            '--resource-limits', resource_limits,
-            '--custom-model-spec', custom_model_spec,
-            '--autoscaling-target', autoscaling_target,
-            '--service-account', service_account,
-            '--enable-istio-sidecar', enable_istio_sidecar,
-            '--output-path', output_path,
-            '--inferenceservice-yaml', inferenceservice_yaml,
-            '--watch-timeout', watch_timeout,
-            '--min-replicas', min_replicas,
-            '--max-replicas', max_replicas,
-            '--request-timeout', request_timeout,
-            '--enable-isvc-status', enable_isvc_status
-        ]
-        
-        # Execute the command
-        import subprocess
-        subprocess.run(cmd, check=True)
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "$10" "$11" "$12" "$13" "$14" "$15" "$16" "$17" "$18" "$19"
+    command: ['python']
     args:
-    - {inputValue: Action}
-    - {inputValue: Model Name}
-    - {inputValue: Model URI}
-    - {inputValue: Canary Traffic Percent}
-    - {inputValue: Namespace}
-    - {inputValue: Framework}
-    - {inputValue: Runtime Version}
-    - {inputValue: Resource Requests}
-    - {inputValue: Resource Limits}
-    - {inputValue: Custom Model Spec}
-    - {inputValue: Autoscaling Target}
-    - {inputValue: Service Account}
-    - {inputValue: Enable Istio Sidecar}
-    - {outputPath: InferenceService Status}
-    - {inputValue: InferenceService YAML}
-    - {inputValue: Watch Timeout}
-    - {inputValue: Min Replicas}
-    - {inputValue: Max Replicas}
-    - {inputValue: Request Timeout}
-    - {inputValue: Enable ISVC Status}
+      - -u
+      - kservedeployer.py
+      - --action
+      - {inputValue: Action}
+      - --model-name
+      - {inputValue: Model Name}
+      - --model-uri
+      - {inputValue: Model URI}
+      - --canary-traffic-percent
+      - {inputValue: Canary Traffic Percent}
+      - --namespace
+      - {inputValue: Namespace}
+      - --framework
+      - {inputValue: Framework}
+      - --runtime-version
+      - {inputValue: Runtime Version}
+      - --resource-requests
+      - {inputValue: Resource Requests}
+      - --resource-limits
+      - {inputValue: Resource Limits}
+      - --custom-model-spec
+      - {inputValue: Custom Model Spec}
+      - --autoscaling-target
+      - {inputValue: Autoscaling Target}
+      - --service-account
+      - {inputValue: Service Account}
+      - --enable-istio-sidecar
+      - {inputValue: Enable Istio Sidecar}
+      - --output-path
+      - {outputPath: InferenceService Status}
+      - --inferenceservice-yaml
+      - {inputValue: InferenceService YAML}
+      - --watch-timeout
+      - {inputValue: Watch Timeout}
+      - --min-replicas
+      - {inputValue: Min Replicas}
+      - --max-replicas
+      - {inputValue: Max Replicas}
+      - --request-timeout
+      - {inputValue: Request Timeout}
+      - --enable-isvc-status
+      - {inputValue: Enable ISVC Status}
