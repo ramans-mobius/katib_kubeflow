@@ -1,66 +1,95 @@
-name: 1 Debug Data Structure 
+name: 1-debug-data-structure
 description: Downloads and analyzes data.txt structure with extensive debugging
 inputs:
-  - name: cdn_url
-    type: String
-  - name: dataset_name
-    type: String
+- name: cdn_url
+  type: String
+  description: URL to fetch the data.txt file from
+- name: dataset_name
+  type: String
+  description: Target dataset name to analyze
 outputs:
-  - name: raw_content
-    type: String
-  - name: debug_info
-    type: String
-  - name: structure_report
-    type: String
+- name: raw_content
+  type: String
+  description: Original data.txt content
+- name: debug_info
+  type: String
+  description: Debug information about file structure
+- name: structure_report
+  type: String
+  description: Detailed structure analysis report
 implementation:
   container:
     image: python:3.9
-    command: [python, -c]
+    command:
+    - sh
+    - -c
     args:
-      - |
-        import sys, os, requests, json, urllib.parse
-        
-        cdn_url = sys.argv[1]
-        dataset_name = sys.argv[2]
-        raw_content_path = sys.argv[3]
-        debug_info_path = sys.argv[4]
-        structure_report_path = sys.argv[5]
-        
-        # Install dependencies
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "pandas", "numpy"])
-        
-        decoded_url = urllib.parse.unquote(cdn_url)
-        response = requests.get(decoded_url)
-        response.raise_for_status()
-        raw_content = response.text
-        
-        with open(raw_content_path, 'w') as f:
-            f.write(raw_content)
-        
-        lines = raw_content.split('\n')
-        debug_info = {
-            'total_lines': len(lines),
-            'file_size_bytes': len(raw_content),
-            'dataset_target': dataset_name
-        }
-        
-        structure_report = {'dataset_locations': []}
-        for i, line in enumerate(lines):
-            if dataset_name in line:
-                structure_report['dataset_locations'].append({
-                    'line_number': i,
-                    'content_preview': line[:200]
-                })
-        
-        with open(debug_info_path, 'w') as f:
-            json.dump(debug_info, f)
-        with open(structure_report_path, 'w') as f:
-            json.dump(structure_report, f)
-        
-        print('Analysis completed')
-      - {inputValue: cdn_url}
-      - {inputValue: dataset_name}
-      - {outputPath: raw_content}
-      - {outputPath: debug_info}
-      - {outputPath: structure_report}
+    - |
+      set -e
+      python3 -m pip install --quiet requests pandas numpy
+      
+      cat > /tmp/analyze_data.py << 'EOF'
+      import sys, os, requests, json, pandas as pd, numpy as np, urllib.parse
+      
+      print('Number of arguments:', len(sys.argv))
+      print('Arguments:', sys.argv)
+      
+      cdn_url = sys.argv[1]
+      dataset_name = sys.argv[2]
+      raw_content_path = sys.argv[3]
+      debug_info_path = sys.argv[4]
+      structure_report_path = sys.argv[5]
+      
+      print('Starting data structure analysis...')
+      print('cdn_url:', cdn_url)
+      print('dataset_name:', dataset_name)
+      
+      decoded_url = urllib.parse.unquote(cdn_url)
+      print('Fetching data from:', decoded_url)
+      response = requests.get(decoded_url)
+      response.raise_for_status()
+      raw_content = response.text
+      
+      os.makedirs(os.path.dirname(raw_content_path) or '.', exist_ok=True)
+      with open(raw_content_path, 'w') as f:
+          f.write(raw_content)
+      
+      lines = raw_content.split('\n')
+      debug_info = {
+          'total_lines': len(lines),
+          'file_size_bytes': len(raw_content),
+          'dataset_target': dataset_name,
+          'first_5_lines': lines[:5],
+          'last_5_lines': lines[-5:] if len(lines) > 5 else lines
+      }
+      
+      structure_report = {
+          'dataset_locations': [],
+          'format_detection': {},
+          'parsing_attempts': []
+      }
+      
+      for i, line in enumerate(lines):
+          if dataset_name in line:
+              structure_report['dataset_locations'].append({
+                  'line_number': i,
+                  'content_preview': line[:200]
+              })
+      
+      os.makedirs(os.path.dirname(debug_info_path) or '.', exist_ok=True)
+      with open(debug_info_path, 'w') as f:
+          json.dump(debug_info, f, indent=2)
+      
+      os.makedirs(os.path.dirname(structure_report_path) or '.', exist_ok=True)
+      with open(structure_report_path, 'w') as f:
+          json.dump(structure_report, f, indent=2)
+      
+      print('Data structure analysis completed successfully')
+      EOF
+      
+      python3 /tmp/analyze_data.py "$1" "$2" "$3" "$4" "$5"
+    - {inputValue: cdn_url}
+    - {inputValue: dataset_name}
+    - {outputPath: raw_content}
+    - {outputPath: debug_info}
+    - {outputPath: structure_report}
