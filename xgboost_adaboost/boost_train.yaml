@@ -1,0 +1,117 @@
+name: 4 Train Model
+description: Trains model using specified algorithm and configuration
+inputs:
+  - name: processed_data
+    type: String
+    description: Processed training data from previous step
+  - name: dataset_name
+    type: String
+    description: Dataset name for model configuration
+  - name: algorithm
+    type: String
+    description: Algorithm to use for training
+  - name: model_config
+    type: String
+    description: Model configuration parameters
+outputs:
+  - name: trained_model
+    type: String
+    description: Trained model serialized as base64
+  - name: training_history
+    type: String
+    description: Training history and metrics
+  - name: model_report
+    type: String
+    description: Model training report
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas scikit-learn xgboost lightgbm catboost
+        python3 -c "
+        import sys, os, json, pandas as pd, pickle, base64
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        processed_data_str = sys.argv[1]
+        dataset_name = sys.argv[2]
+        algorithm = sys.argv[3]
+        model_config_str = sys.argv[4]
+        trained_model_path = sys.argv[5]
+        training_history_path = sys.argv[6]
+        model_report_path = sys.argv[7]
+        
+        print('Starting model training...')
+        print(f'dataset_name: {dataset_name}')
+        print(f'algorithm: {algorithm}')
+        
+        processed_data = json.loads(processed_data_str)
+        model_config = json.loads(model_config_str)
+        
+        X_train = pd.DataFrame(processed_data['X_train'])
+        y_train = processed_data['y_train']
+        
+        from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor
+        import xgboost as xgb
+        from lightgbm import LGBMRegressor
+        from catboost import CatBoostRegressor
+        
+        algorithm_map = {
+            'GradientBoosting': GradientBoostingRegressor,
+            'AdaBoost': AdaBoostRegressor,
+            'XGBoost': xgb.XGBRegressor,
+            'CatBoost': CatBoostRegressor,
+            'LightGBM': LGBMRegressor
+        }
+        
+        model_class = algorithm_map.get(algorithm)
+        if model_class is None:
+            raise ValueError(f'Unsupported algorithm: {algorithm}')
+        
+        model = model_class(**model_config)
+        model.fit(X_train, y_train)
+        
+        model_bytes = pickle.dumps(model)
+        model_b64 = base64.b64encode(model_bytes).decode('utf-8')
+        
+        training_history = {
+            'algorithm': algorithm,
+            'dataset_name': dataset_name,
+            'training_samples': len(X_train),
+            'model_config': model_config
+        }
+        
+        model_report = {
+            'algorithm': algorithm,
+            'dataset_name': dataset_name,
+            'model_trained': True,
+            'training_time': 'completed'
+        }
+        
+        os.makedirs(os.path.dirname(trained_model_path) or '.', exist_ok=True)
+        with open(trained_model_path, 'w') as f:
+            f.write(model_b64)
+        
+        os.makedirs(os.path.dirname(training_history_path) or '.', exist_ok=True)
+        with open(training_history_path, 'w') as f:
+            json.dump(training_history, f)
+        
+        os.makedirs(os.path.dirname(model_report_path) or '.', exist_ok=True)
+        with open(model_report_path, 'w') as f:
+            json.dump(model_report, f)
+        
+        print('Model training completed successfully')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: processed_data}
+      - {inputValue: dataset_name}
+      - {inputValue: algorithm}
+      - {inputValue: model_config}
+      - {outputPath: trained_model}
+      - {outputPath: training_history}
+      - {outputPath: model_report}
