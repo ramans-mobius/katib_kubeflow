@@ -1,0 +1,116 @@
+name: 6 Format Output
+description: Formats output based on dataset requirements
+inputs:
+  - name: predictions
+    type: String
+    description: Predictions from model evaluation
+  - name: metrics
+    type: String
+    description: Metrics from model evaluation
+  - name: dataset_name
+    type: String
+    description: Dataset name for output format configuration
+  - name: algorithm
+    type: String
+    description: Algorithm used for training
+  - name: output_format
+    type: String
+    description: Desired output format
+outputs:
+  - name: formatted_output
+    type: String
+    description: Formatted output in specified format
+  - name: final_report
+    type: String
+    description: Final pipeline report
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas pyyaml
+        python3 -c "
+        import sys, os, json, pandas as pd, yaml
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        predictions_str = sys.argv[1]
+        metrics_str = sys.argv[2]
+        dataset_name = sys.argv[3]
+        algorithm = sys.argv[4]
+        output_format = sys.argv[5]
+        formatted_output_path = sys.argv[6]
+        final_report_path = sys.argv[7]
+        
+        print('Starting output formatting...')
+        print(f'dataset_name: {dataset_name}')
+        print(f'algorithm: {algorithm}')
+        print(f'output_format: {output_format}')
+        
+        predictions = json.loads(predictions_str)
+        metrics = json.loads(metrics_str)
+        
+        output_configs = {
+            'NetworkX-Graph-Intialize': 'json',
+            'LineChart-Generation-Dbaas': 'csv',
+            'LLM-MODEL-BUILDING-TRAINING': 'json',
+            'Mig-Setup-Single-Playbook': 'yaml',
+            'GNN-STGNN': 'csv'
+        }
+        
+        default_format = output_configs.get(dataset_name, 'json')
+        final_format = output_format if output_format != 'default' else default_format
+        
+        result_data = {
+            'predictions': predictions,
+            'metrics': metrics,
+            'metadata': {
+                'dataset_name': dataset_name,
+                'algorithm': algorithm,
+                'output_format': final_format
+            }
+        }
+        
+        if final_format == 'json':
+            output_content = json.dumps(result_data, indent=2)
+        elif final_format == 'yaml':
+            output_content = yaml.dump(result_data, default_flow_style=False)
+        elif final_format == 'csv':
+            df = pd.DataFrame({
+                'predicted': predictions['y_pred'],
+                'actual': predictions['y_true']
+            })
+            output_content = df.to_csv(index=False)
+        else:
+            output_content = json.dumps(result_data, indent=2)
+        
+        final_report = {
+            'pipeline_completed': True,
+            'dataset_name': dataset_name,
+            'algorithm': algorithm,
+            'output_format': final_format,
+            'metrics_achieved': metrics
+        }
+        
+        os.makedirs(os.path.dirname(formatted_output_path) or '.', exist_ok=True)
+        with open(formatted_output_path, 'w') as f:
+            f.write(output_content)
+        
+        os.makedirs(os.path.dirname(final_report_path) or '.', exist_ok=True)
+        with open(final_report_path, 'w') as f:
+            json.dump(final_report, f)
+        
+        print('Output formatting completed successfully')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: predictions}
+      - {inputPath: metrics}
+      - {inputValue: dataset_name}
+      - {inputValue: algorithm}
+      - {inputValue: output_format}
+      - {outputPath: formatted_output}
+      - {outputPath: final_report}
