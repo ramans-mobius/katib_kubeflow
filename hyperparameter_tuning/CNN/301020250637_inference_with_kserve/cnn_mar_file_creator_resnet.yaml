@@ -1,4 +1,4 @@
-name: ResNet MAR File Creator from Downloads
+name: MAR File Creator from Downloads R
 description: Creates a torch-model-archiver MAR file using downloaded handler.py and trained_resnet_model.pth files along with the ResNet model from nesy_factory.CNNs.
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
