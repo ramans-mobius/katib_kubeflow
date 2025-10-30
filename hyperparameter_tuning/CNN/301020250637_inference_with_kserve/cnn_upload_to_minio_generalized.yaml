@@ -1,10 +1,10 @@
-name: 2 Generalized Upload to MinIO for CNN
-description: Upload config.properties and cnn-classifier.mar files to MinIO bucket
+name: Pls Generalized Upload to MinIO for CNN
+description: Upload config.properties and model files to MinIO bucket with dynamic naming
 inputs:
 - {name: Config File, type: String}
 - {name: Model File, type: String}  
-- {name: MinIO bucket name, type: String, default: "models"}
-- {name: Application name, type: String, default: "cnn-classifier"}
+- {name: MinIO bucket name, type: String, default: "mlmodels"}
+- {name: Application name, type: String, default: "cnnresnet"}
 - {name: MinIO username, type: String}
 - {name: MinIO password, type: String}
 outputs:
@@ -25,8 +25,9 @@ implementation:
             echo "Input 4 (User): $4"
             echo "Input 5 (Pass): [hidden]"
             
+            # Install dependencies
             apt-get -o Acquire::ForceIPv4=true update
-            apt-get -o Acquire::ForceIPv4=true install -y wget python3
+            apt-get -o Acquire::ForceIPv4=true install -y wget
             wget https://dl.min.io/client/mc/release/linux-amd64/mc
             chmod +x mc
             mv mc /usr/local/bin/
@@ -97,50 +98,17 @@ implementation:
             TEMP_CONFIG="/tmp/updated_config.properties"
             cp "$CONFIG_FILE" "$TEMP_CONFIG"
             
-            # Use Python for more reliable JSON manipulation
-            python3 -c "
-import json
-import re
-
-# Read the config file
-with open('$TEMP_CONFIG', 'r') as f:
-    content = f.read()
-
-# Find and update the model_snapshot line
-lines = content.split('\n')
-for i, line in enumerate(lines):
-    if line.startswith('model_snapshot='):
-        # Extract the JSON part
-        json_str = line.split('=', 1)[1]
-        try:
-            # Parse the JSON
-            snapshot = json.loads(json_str)
+            # Simple approach: just update the marName field
+            # This preserves the existing model structure but updates the filename
+            sed -i "s/\"marName\": \"[^\"]*\"/\"marName\": \"${MODEL_NAME}.mar\"/g" "$TEMP_CONFIG"
             
-            # Update the model name and marName
-            old_model_name = list(snapshot['models'].keys())[0]
-            model_data = snapshot['models'][old_model_name]
-            
-            # Update marName in the model data
-            model_data['1.0']['marName'] = '${MODEL_NAME}.mar'
-            
-            # Replace the model key
-            snapshot['models'] = {'${MODEL_NAME}': model_data}
-            
-            # Update the line
-            lines[i] = 'model_snapshot=' + json.dumps(snapshot)
-            print('Successfully updated config with model name: ${MODEL_NAME}')
-            break
-        except Exception as e:
-            print(f'Error parsing JSON: {e}')
-            # Fallback: simple string replacement
-            lines[i] = line.replace(old_model_name, '${MODEL_NAME}')
-            lines[i] = lines[i].replace('\"marName\": \"' + model_data['1.0']['marName'] + '\"', '\"marName\": \"${MODEL_NAME}.mar\"')
-            print('Used fallback string replacement')
-
-# Write the updated content back
-with open('$TEMP_CONFIG', 'w') as f:
-    f.write('\n'.join(lines))
-"
+            # If you also want to update the model key name, use this carefully:
+            # First, let's find the current model name in the config
+            CURRENT_MODEL=$(grep -o '"models": {"[^"]*"' "$TEMP_CONFIG" | head -1 | cut -d'"' -f4)
+            if [ -n "$CURRENT_MODEL" ] && [ "$CURRENT_MODEL" != "$MODEL_NAME" ]; then
+                echo "Updating model name from '$CURRENT_MODEL' to '$MODEL_NAME'"
+                sed -i "s/\"$CURRENT_MODEL\"/\"$MODEL_NAME\"/g" "$TEMP_CONFIG"
+            fi
             
             echo "Updated config content:"
             cat "$TEMP_CONFIG"
@@ -156,7 +124,7 @@ with open('$TEMP_CONFIG', 'w') as f:
             # Upload model file with the CORRECT name (matching the config)
             mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/${MODEL_NAME}.mar"
             
-            # Create output directory and file
+            # Create output directory and file - FIXED THIS LINE
             mkdir -p "$(dirname "$6")"
             echo "s3://$2/$3/" > "$6"
             echo "=== Upload Completed Successfully ==="
