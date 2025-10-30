@@ -1,0 +1,296 @@
+name: ResNet MAR File Creator from Downloads
+description: Creates a torch-model-archiver MAR file using downloaded handler.py and trained_resnet_model.pth files along with the ResNet model from nesy_factory.CNNs.
+inputs:
+  - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
+  - {name: resnet_model_file, type: Model, description: "Directory containing downloaded trained_resnet_model.pth file"}
+  - {name: model_name, type: String, description: "Name for the MAR model", default: "resnet_classifier"}
+  - {name: model_version, type: String, description: "Version for the MAR model", default: "1.0"}
+outputs:
+  - {name: mar_file_out, type: String, description: "Output directory containing the ResNet MAR file"}
+  - {name: mar_creation_log, type: String, description: "Log file with MAR creation details"}
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import sys
+        import subprocess
+        import json
+        import argparse
+        from datetime import datetime
+        import shutil
+        import glob
+
+        def find_resnet_module():
+            # Try nesy_factory.CNNs.resnet module first (correct path)
+            try:
+                from nesy_factory.CNNs.resnet import ResNet
+                import nesy_factory.CNNs.resnet as resnet_module
+                resnet_file = resnet_module.__file__
+                print("Found nesy_factory.CNNs.resnet module at: " + resnet_file)
+                
+                # Create a model file for torch-model-archiver using nesy_factory ResNet class
+                resnet_model_content = "# ResNet model file for torch-model-archiver\\nfrom nesy_factory.CNNs.resnet import ResNet\\n\\n# Export the ResNet class that can be used\\n__all__ = ['ResNet']\\n"
+                
+                local_resnet = os.path.join(os.getcwd(), 'resnet_model.py')
+                with open(local_resnet, 'w') as f:
+                    f.write(resnet_model_content)
+                print("Created resnet_model.py using nesy_factory.CNNs.resnet class at: " + local_resnet)
+                return local_resnet
+                    
+            except ImportError as e:
+                print("Could not import nesy_factory.CNNs.resnet module: " + str(e))
+                print("Trying fallback ResNet import...")
+                
+                # Fallback: try simple 'resnet' import
+                try:
+                    import resnet
+                    resnet_file = resnet.__file__
+                    print("Found fallback resnet module at: " + resnet_file)
+                    return resnet_file
+                except ImportError:
+                    pass
+                    
+                # Last resort: create minimal ResNet module
+                print("Creating minimal ResNet module as fallback...")
+                resnet_content = \"\"\"import torch
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class ResidualBlock(nn.Module):
+            def __init__(self, in_channels, out_channels, stride=1):
+                super().__init__()
+                self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+                self.bn1 = nn.BatchNorm2d(out_channels)
+                self.relu = nn.ReLU(inplace=True)
+                self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+                self.bn2 = nn.BatchNorm2d(out_channels)
+                self.skip_connection = None
+                if stride != 1 or in_channels != out_channels:
+                    self.skip_connection = nn.Sequential(
+                        nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                        nn.BatchNorm2d(out_channels)
+                    )
+
+            def forward(self, x):
+                identity = x
+                out = self.conv1(x)
+                out = self.bn1(out)
+                out = self.relu(out)
+                out = self.conv2(out)
+                out = self.bn2(out)
+                if self.skip_connection is not None:
+                    identity = self.skip_connection(x)
+                out += identity
+                out = self.relu(out)
+                return out
+
+        class ResNet(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.config = config
+                self.input_channels = config.get('input_channels', 3)
+                self.output_dim = config['output_dim']
+                self.variant = config.get('variant', 'resnet50')
+                
+                # Initial layers
+                self.conv1 = nn.Conv2d(self.input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+                self.bn1 = nn.BatchNorm2d(64)
+                self.relu = nn.ReLU(inplace=True)
+                self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                
+                # ResNet layers
+                self.layer1 = self._make_layer(64, 64, 3)
+                self.layer2 = self._make_layer(64, 128, 4, stride=2)
+                self.layer3 = self._make_layer(128, 256, 6, stride=2)
+                self.layer4 = self._make_layer(256, 512, 3, stride=2)
+                
+                # Classifier
+                self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+                self.fc = nn.Linear(512, self.output_dim)
+
+            def _make_layer(self, in_channels, out_channels, blocks, stride=1):
+                layers = []
+                layers.append(ResidualBlock(in_channels, out_channels, stride))
+                for _ in range(1, blocks):
+                    layers.append(ResidualBlock(out_channels, out_channels))
+                return nn.Sequential(*layers)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                x = self.maxpool(x)
+                x = self.layer1(x)
+                x = self.layer2(x)
+                x = self.layer3(x)
+                x = self.layer4(x)
+                x = self.avgpool(x)
+                x = torch.flatten(x, 1)
+                x = self.fc(x)
+                return x
+        \"\"\"
+                
+                fallback_resnet = os.path.join(os.getcwd(), 'resnet_fallback.py')
+                with open(fallback_resnet, 'w') as f:
+                    f.write(resnet_content)
+                print("Created fallback ResNet module at: " + fallback_resnet)
+                return fallback_resnet
+
+        def create_mar_file(model_name, model_version, resnet_path, handler_path, model_pth_path, output_dir):
+            
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Build the command
+            cmd = [
+                'torch-model-archiver',
+                '--model-name', model_name,
+                '--version', model_version,
+                '--model-file', resnet_path,
+                '--serialized-file', model_pth_path,
+                '--handler', handler_path,
+                '--export-path', output_dir,
+                '--force'
+            ]
+            
+            print("Creating MAR file with command:")
+            print(' '.join(cmd))
+            
+            # Execute the command
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                
+                print("MAR file created successfully!")
+                print("STDOUT: " + result.stdout)
+                
+                # Verify MAR file was created
+                mar_file = os.path.join(output_dir, model_name + ".mar")
+                if os.path.exists(mar_file):
+                    file_size = os.path.getsize(mar_file)
+                    print("MAR file created: " + mar_file + " (" + str(file_size) + " bytes)")
+                    return mar_file, result.stdout
+                else:
+                    raise Exception("MAR file was not created in expected location")
+                    
+            except subprocess.CalledProcessError as e:
+                print("MAR file creation failed!")
+                print("STDOUT: " + str(e.stdout))
+                print("STDERR: " + str(e.stderr))
+                raise Exception("torch-model-archiver failed: " + str(e.stderr))
+
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--handler_file', type=str, required=True, help='Directory containing handler.py')
+            parser.add_argument('--resnet_model_file', type=str, required=True, help='Directory containing trained_resnet_model.pth file')
+            parser.add_argument('--model_name', type=str, default='resnet_classifier', help='Model name for MAR file')
+            parser.add_argument('--model_version', type=str, default='1.0', help='Model version')
+            parser.add_argument('--mar_file_out', type=str, required=True, help='Output directory for MAR file')
+            parser.add_argument('--mar_creation_log', type=str, required=True, help='Output path for creation log')
+            
+            args = parser.parse_args()
+            
+            # Create log data structure
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'model_name': args.model_name,
+                'model_version': args.model_version,
+                'handler_input_dir': args.handler_file,
+                'resnet_model_input_dir': args.resnet_model_file,
+                'status': 'starting',
+                'steps': []
+            }
+            
+            try:
+                print("=== ResNet MAR File Creator Started ===")
+                print("Model Name: " + args.model_name)
+                print("Model Version: " + args.model_version)
+                print("Handler Input Directory: " + args.handler_file)
+                print("ResNet Model Input Directory: " + args.resnet_model_file)
+                print("Output Directory: " + args.mar_file_out)
+                
+                # Step 1: Locate input files
+                print("\\n--- Step 1: Locating input files ---")
+                handler_path = os.path.join(args.handler_file, 'handler.py')
+                
+                # Try both possible model file names
+                resnet_model_path = os.path.join(args.resnet_model_file, 'trained_resnet_model.pth')
+                if not os.path.exists(resnet_model_path):
+                    resnet_model_path = os.path.join(args.resnet_model_file, 'trained_model.pth')
+                
+                if not os.path.exists(handler_path):
+                    raise Exception("handler.py not found at: " + handler_path)
+                if not os.path.exists(resnet_model_path):
+                    raise Exception("ResNet model file not found at: " + args.resnet_model_file + " (tried trained_resnet_model.pth and trained_model.pth)")
+                    
+                print("Handler file found: " + handler_path)
+                print("ResNet model file found: " + resnet_model_path)
+                print("Model file name: " + os.path.basename(resnet_model_path))
+                log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
+                
+                # Step 2: Find resnet module
+                print("\\n--- Step 2: Locating resnet module ---")
+                resnet_path = find_resnet_module()
+                log_data['steps'].append({'step': 2, 'action': 'locate_resnet', 'status': 'success', 'resnet_path': resnet_path})
+                
+                # Step 3: Create MAR file
+                print("\\n--- Step 3: Creating MAR file ---")
+                mar_file_path, creation_output = create_mar_file(
+                    args.model_name, 
+                    args.model_version, 
+                    resnet_path, 
+                    handler_path, 
+                    resnet_model_path, 
+                    args.mar_file_out
+                )
+                log_data['steps'].append({'step': 3, 'action': 'create_mar', 'status': 'success', 'mar_file': mar_file_path})
+                log_data['mar_file_path'] = mar_file_path
+                log_data['creation_output'] = creation_output
+                log_data['status'] = 'completed'
+                
+                print("\\n=== ResNet MAR File Creation Completed Successfully ===")
+                print("MAR file created at: " + mar_file_path)
+                
+            except Exception as e:
+                error_msg = str(e)
+                print("\\nResNet MAR File Creation Failed: " + error_msg)
+                log_data['status'] = 'failed'
+                log_data['error'] = error_msg
+                sys.exit(1)
+                
+            finally:
+                # Write log file
+                log_dir = os.path.dirname(args.mar_creation_log)
+                if log_dir and not os.path.exists(log_dir):
+                    os.makedirs(log_dir, exist_ok=True)
+                    
+                with open(args.mar_creation_log, 'w') as f:
+                    json.dump(log_data, f, indent=2)
+                print("Log saved to: " + args.mar_creation_log)
+
+        if __name__ == "__main__":
+            main()
+
+    args:
+      - --handler_file
+      - {inputPath: handler_file}
+      - --resnet_model_file
+      - {inputPath: resnet_model_file}
+      - --model_name
+      - {inputValue: model_name}
+      - --model_version
+      - {inputValue: model_version}
+      - --mar_file_out
+      - {outputPath: mar_file_out}
+      - --mar_creation_log
+      - {outputPath: mar_creation_log}
