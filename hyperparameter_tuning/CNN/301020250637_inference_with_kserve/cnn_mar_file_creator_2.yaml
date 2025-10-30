@@ -1,4 +1,4 @@
-name: 2 CNN MAR File Creator
+name: III CNN MAR File Creator
 description: Creates a torch-model-archiver MAR file using downloaded model.py, handler.py and trained_model.pth files
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
@@ -33,7 +33,6 @@ implementation:
         import glob
 
         def find_file_in_directory(directory, possible_filenames):
-            """Find a file in directory with multiple possible names"""
             if not os.path.exists(directory):
                 return None
                 
