@@ -1,4 +1,4 @@
-name: V CNN MAR File Creator
+name: Vi CNN MAR File Creator
 description: Creates a torch-model-archiver MAR file using downloaded model.py, handler.py and trained_model.pth files
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
@@ -161,7 +161,7 @@ implementation:
                 print("Output Directory: " + args.mar_file_out)
                 
                 # Step 1: Locate input files with flexible path handling
-                print("\n--- Step 1: Locating input files ---")
+                print("--- Step 1: Locating input files ---")
                 
                 # Find handler.py
                 handler_path = find_input_file(args.handler_file, ['handler.py', 'handler'])
@@ -210,7 +210,7 @@ implementation:
                 
             except Exception as e:
                 error_msg = str(e)
-                print("\nMAR File Creation Failed: " + error_msg)
+                print("MAR File Creation Failed: " + error_msg)
                 log_data['status'] = 'failed'
                 log_data['error'] = error_msg
                 sys.exit(1)
