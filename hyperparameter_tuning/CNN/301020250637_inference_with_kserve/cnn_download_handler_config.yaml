@@ -1,0 +1,86 @@
+name: III CDN Download Handler Config
+description: Downloads handler.py and config.properties files from CDN URLs
+inputs:
+  - name: handler_url
+    type: String
+    description: URL to fetch the handler.py file from
+  - name: config_url
+    type: String
+    description: URL to fetch the config.properties file from
+outputs:
+  - name: handler_file
+    type: String
+    description: Downloaded handler.py file
+  - name: config_file
+    type: String
+    description: Downloaded config.properties file
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet requests
+        python3 -c "
+        import sys, os, requests, json, pickle, urllib.parse, io
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        # Get args directly from command line
+        handler_url = sys.argv[1]
+        config_url = sys.argv[2]
+        handler_dir = sys.argv[3]  # This is a directory path
+        config_dir = sys.argv[4]   # This is a directory path
+        
+        print('Starting handler and config download...')
+        print(f'handler_url: {handler_url}')
+        print(f'config_url: {config_url}')
+        print(f'handler_dir: {handler_dir}')
+        print(f'config_dir: {config_dir}')
+        
+        def download_file(url, output_dir, filename, description):
+            decoded_url = urllib.parse.unquote(url)
+            print(f'Fetching {description} from: {decoded_url}')
+            r = requests.get(decoded_url)
+            r.raise_for_status()
+            
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Save file inside the directory
+            output_path = os.path.join(output_dir, filename)
+            with open(output_path, 'wb') as f:
+                f.write(r.content)
+            print(f'{description} saved to {output_path}')
+            return output_path
+
+        # Download files to the correct directory structure
+        download_file(handler_url, handler_dir, 'handler.py', 'handler.py')
+        download_file(config_url, config_dir, 'config.properties', 'config.properties')
+
+        # Verify the files were created in the correct locations
+        handler_path = os.path.join(handler_dir, 'handler.py')
+        config_path = os.path.join(config_dir, 'config.properties')
+        
+        if os.path.exists(handler_path):
+            print(f'Handler file verified: {handler_path} ({os.path.getsize(handler_path)} bytes)')
+        else:
+            raise Exception('Handler file not found at expected location')
+            
+        if os.path.exists(config_path):
+            print(f'Config file verified: {config_path} ({os.path.getsize(config_path)} bytes)')
+        else:
+            raise Exception('Config file not found at expected location')
+
+        print('Handler and config files downloaded successfully')
+        print(f'Handler directory contents: {os.listdir(handler_dir)}')
+        print(f'Config directory contents: {os.listdir(config_dir)}')
+        " "$0" "$1" "$2" "$3" "$4"
+    args:
+      - {inputValue: handler_url}
+      - {inputValue: config_url}
+      - {outputPath: handler_file}
+      - {outputPath: config_file}
