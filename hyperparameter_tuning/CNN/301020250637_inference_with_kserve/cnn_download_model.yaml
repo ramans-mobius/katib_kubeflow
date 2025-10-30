@@ -1,4 +1,4 @@
-name: CNN Model Downloader
+name: 2 CNN Model Downloader
 description: Downloads model.py file from CDN URL for CNN architectures
 inputs:
   - name: model_py_url
@@ -31,13 +31,13 @@ implementation:
         # Get args directly from command line
         model_py_url = sys.argv[1]
         output_filename = sys.argv[2]
-        output_path = sys.argv[3]
+        output_path = sys.argv[3]  # This is the directory path
         
         print(f'model_py_url: {model_py_url}')
         print(f'output_filename: {output_filename}')
         print(f'output_path: {output_path}')
         
-        def download_model_py(url, output_path, filename):
+        def download_model_py(url, output_dir, filename):
             # Decode URL
             decoded_url = urllib.parse.unquote(url)
             print(f'Fetching model.py from: {decoded_url}')
@@ -47,10 +47,10 @@ implementation:
             r.raise_for_status()
             
             # Ensure output directory exists
-            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
             
-            # Save the model.py file
-            final_output = os.path.join(os.path.dirname(output_path), filename)
+            # Save the model.py file to the output directory
+            final_output = os.path.join(output_dir, filename)
             with open(final_output, 'wb') as f:
                 f.write(r.content)
             
@@ -74,16 +74,16 @@ implementation:
             
             return final_output
 
-        # Download model.py
+        # Download model.py - pass the output_path as directory
         model_file = download_model_py(model_py_url, output_path, output_filename)
         
-        # Verify the file was created
+        # Verify the file was created in the correct location
         if os.path.exists(model_file):
             file_size = os.path.getsize(model_file)
             print(f'model.py successfully downloaded: {model_file} ({file_size} bytes)')
             
             # List the directory contents for debugging
-            dir_path = os.path.dirname(model_file) or '.'
+            dir_path = os.path.dirname(model_file)
             print(f'Directory contents of {dir_path}:')
             for item in os.listdir(dir_path):
                 item_path = os.path.join(dir_path, item)
