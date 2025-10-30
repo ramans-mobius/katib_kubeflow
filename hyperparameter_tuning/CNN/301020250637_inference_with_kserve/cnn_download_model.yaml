@@ -1,0 +1,103 @@
+name: CNN Model Downloader
+description: Downloads model.py file from CDN URL for CNN architectures
+inputs:
+  - name: model_py_url
+    type: String
+    description: URL to fetch the model.py file from
+  - name: output_filename
+    type: String
+    description: Name for the output model.py file
+    default: model.py
+outputs:
+  - name: model_py_file
+    type: String
+    description: Downloaded model.py file
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet requests
+        python3 -c "
+        import sys, os, requests, urllib.parse
+        
+        print('Starting model.py download...')
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        # Get args directly from command line
+        model_py_url = sys.argv[1]
+        output_filename = sys.argv[2]
+        output_path = sys.argv[3]
+        
+        print(f'model_py_url: {model_py_url}')
+        print(f'output_filename: {output_filename}')
+        print(f'output_path: {output_path}')
+        
+        def download_model_py(url, output_path, filename):
+            # Decode URL
+            decoded_url = urllib.parse.unquote(url)
+            print(f'Fetching model.py from: {decoded_url}')
+            
+            # Download the file
+            r = requests.get(decoded_url)
+            r.raise_for_status()
+            
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            
+            # Save the model.py file
+            final_output = os.path.join(os.path.dirname(output_path), filename)
+            with open(final_output, 'wb') as f:
+                f.write(r.content)
+            
+            print(f'model.py saved as: {final_output}')
+            
+            # Verify the content is valid Python
+            try:
+                # Try to compile the Python code to check syntax
+                compile(r.content.decode('utf-8'), filename, 'exec')
+                print('model.py syntax validation passed')
+            except SyntaxError as e:
+                print(f'Warning: model.py has syntax issues: {e}')
+            except Exception as e:
+                print(f'Could not validate model.py syntax: {e}')
+            
+            # Print first few lines for verification
+            content_lines = r.content.decode('utf-8').split('\\n')
+            print('First 10 lines of model.py:')
+            for i, line in enumerate(content_lines[:10]):
+                print(f'  {i+1}: {line}')
+            
+            return final_output
+
+        # Download model.py
+        model_file = download_model_py(model_py_url, output_path, output_filename)
+        
+        # Verify the file was created
+        if os.path.exists(model_file):
+            file_size = os.path.getsize(model_file)
+            print(f'model.py successfully downloaded: {model_file} ({file_size} bytes)')
+            
+            # List the directory contents for debugging
+            dir_path = os.path.dirname(model_file) or '.'
+            print(f'Directory contents of {dir_path}:')
+            for item in os.listdir(dir_path):
+                item_path = os.path.join(dir_path, item)
+                if os.path.isfile(item_path):
+                    size = os.path.getsize(item_path)
+                    print(f'  {item} ({size} bytes)')
+                else:
+                    print(f'  {item}/')
+        else:
+            raise Exception('Failed to create model.py file')
+            
+        print('Model.py download completed successfully')
+        " "$0" "$1" "$2" "$3"
+    args:
+      - {inputValue: model_py_url}
+      - {inputValue: output_filename}
+      - {outputPath: model_py_file}
