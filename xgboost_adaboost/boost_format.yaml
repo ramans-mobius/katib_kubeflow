@@ -1,4 +1,4 @@
-name: 6 Format Output
+name: 6 2 Format Output
 description: Formats output based on dataset requirements
 inputs:
   - name: predictions
