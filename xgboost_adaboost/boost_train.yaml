@@ -1,4 +1,4 @@
-name: 4 Train Model
+name: 4 2 Train Model
 description: Trains model using specified algorithm and configuration
 inputs:
   - name: processed_data
