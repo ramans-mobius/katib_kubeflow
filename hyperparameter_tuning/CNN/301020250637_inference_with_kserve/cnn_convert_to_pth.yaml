@@ -1,4 +1,4 @@
-name: Model Weights Download and Converter
+name: 2 Model Weights Download and Converter
 description: Downloads model weights from CDN URL and converts/saves as .pth file
 inputs:
   - name: model_weights_url
@@ -24,7 +24,9 @@ implementation:
         python3 -c "
         import sys, os, requests, json, pickle, urllib.parse, io
         import torch
+        import time
         
+        print('Starting model weights download and conversion...')
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
         
@@ -33,18 +35,24 @@ implementation:
         output_filename = sys.argv[2]
         output_path = sys.argv[3]
         
-        print('Starting model weights download and conversion...')
         print(f'model_weights_url: {model_weights_url}')
         print(f'output_filename: {output_filename}')
         
         def download_and_convert_weights(url, output_path, filename):
+            start_time = time.time()
+            
             # Decode URL
             decoded_url = urllib.parse.unquote(url)
             print(f'Fetching model weights from: {decoded_url}')
             
-            # Download the file
-            r = requests.get(decoded_url)
+            # Download the file with progress tracking
+            print('Starting download...')
+            download_start = time.time()
+            r = requests.get(decoded_url, stream=True, timeout=300)  # 5 minute timeout
             r.raise_for_status()
+            download_time = time.time() - download_start
+            print(f'Download completed in {download_time:.2f} seconds')
+            print(f'Content length: {len(r.content)} bytes')
             
             # Ensure output directory exists
             os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
@@ -55,72 +63,55 @@ implementation:
             
             # Process based on file type
             if file_extension in ['.pth', '.pt', '.pth.tar']:
-                # Already in PyTorch format, just save with correct name
+                print('File is already in PyTorch format, saving directly...')
                 final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
                 with open(final_output, 'wb') as f:
                     f.write(r.content)
                 print(f'Model weights saved as: {final_output}')
                 
             elif file_extension in ['.pkl', '.pickle']:
-                # Pickle format - load and convert to PyTorch
+                print('Converting pickle format to PyTorch...')
                 import pickle
+                pickle_start = time.time()
                 model_data = pickle.loads(r.content)
+                pickle_time = time.time() - pickle_start
+                print(f'Pickle load completed in {pickle_time:.2f} seconds')
+                
                 final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
                 
                 if isinstance(model_data, dict):
-                    # If it's a state dict
+                    print('Detected state dictionary format')
                     torch.save(model_data, final_output)
                 else:
-                    # If it's the entire model or other structure
+                    print('Detected model object format')
                     torch.save({'model_state_dict': model_data}, final_output)
                 print(f'Pickle model converted and saved as: {final_output}')
                 
-            elif file_extension in ['.bin', '.data']:
-                # Binary format - try to load as state dict
-                try:
-                    # Try to load as PyTorch first
-                    buffer = io.BytesIO(r.content)
-                    model_data = torch.load(buffer)
-                    final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
-                    torch.save(model_data, final_output)
-                    print(f'Binary model converted and saved as: {final_output}')
-                except:
-                    # If that fails, treat as raw weights and create state dict
-                    final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
-                    torch.save({'weights': r.content}, final_output)
-                    print(f'Raw weights saved as: {final_output}')
-                    
-            elif file_extension == '.json':
-                # JSON format - might be weights in JSON format
-                model_data = r.json()
-                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
-                torch.save(model_data, final_output)
-                print(f'JSON weights converted and saved as: {final_output}')
-                
             else:
-                # Unknown format - try to detect and handle
-                print('Unknown file format, attempting auto-detection...')
+                print(f'Unknown format {file_extension}, attempting auto-detection...')
                 final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
                 
                 # Try common formats
                 try:
-                    # Try PyTorch
+                    print('Trying PyTorch format...')
                     buffer = io.BytesIO(r.content)
                     model_data = torch.load(buffer)
                     torch.save(model_data, final_output)
                     print(f'Auto-detected PyTorch format, saved as: {final_output}')
                 except:
                     try:
-                        # Try pickle
+                        print('Trying pickle format...')
                         import pickle
                         model_data = pickle.loads(r.content)
                         torch.save({'model_state_dict': model_data}, final_output)
                         print(f'Auto-detected pickle format, saved as: {final_output}')
                     except:
-                        # Fallback - save raw content
+                        print('Falling back to raw content saving...')
                         torch.save({'raw_weights': r.content}, final_output)
                         print(f'Unknown format, saved raw content as: {final_output}')
             
+            total_time = time.time() - start_time
+            print(f'Total processing time: {total_time:.2f} seconds')
             return final_output
 
         # Download and convert model weights
