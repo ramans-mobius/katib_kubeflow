@@ -1,10 +1,10 @@
-name: Upload to MinIO for CNN
-description: Upload config.properties and cnn-classifier.mar files to MinIO bucket
+name: Upload to MinIO R
+description: Upload config.properties and resnet.mar files to MinIO bucket
 inputs:
 - {name: Config File, type: String}
 - {name: Model File, type: String}  
 - {name: MinIO bucket name, type: String, default: "models"}
-- {name: Application name, type: String, default: "cnn-classifier"}
+- {name: Application name, type: String, default: "resnet-classifier"}
 - {name: MinIO username, type: String}
 - {name: MinIO password, type: String}
 outputs:
@@ -61,8 +61,8 @@ implementation:
             fi
             
             MODEL_FILE=""
-            if [ -f "$1/cnn-classifier.mar" ]; then
-                MODEL_FILE="$1/cnn-classifier.mar"
+            if [ -f "$1/resnet.mar" ]; then
+                MODEL_FILE="$1/resnet.mar"
             elif [ -f "$1" ]; then
                 MODEL_FILE="$1"
             elif [ -d "$1" ]; then
@@ -88,7 +88,7 @@ implementation:
             
             echo "=== Uploading Files ==="
             mc cp "$CONFIG_FILE" "myminio/$2/$3/config/config.properties"
-            mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/cnn-classifier.mar"
+            mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/resnet.mar"
             
             mkdir -p "$(dirname "$6")"
             echo "s3://$2/$3/" > "$6"
