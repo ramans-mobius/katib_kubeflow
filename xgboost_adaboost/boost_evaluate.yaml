@@ -1,4 +1,4 @@
-name: 5 Evaluate Model
+name: 5 2 Evaluate Model
 description: Evaluates trained model and calculates metrics
 inputs:
   - name: trained_model
