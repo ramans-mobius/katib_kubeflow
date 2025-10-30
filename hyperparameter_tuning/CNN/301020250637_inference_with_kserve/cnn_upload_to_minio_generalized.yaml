@@ -1,4 +1,4 @@
-name: Pls Generalized Upload to MinIO for CNN
+name: Generalized Upload to MinIO for CNN
 description: Upload config.properties and model files to MinIO bucket with dynamic naming
 inputs:
 - {name: Config File, type: String}
@@ -18,17 +18,11 @@ implementation:
         - -c
         - |
             echo "=== Starting MinIO Upload ==="
-            echo "Input 0 (Config): $0"
-            echo "Input 1 (Model): $1"
-            echo "Input 2 (Bucket): $2"
-            echo "Input 3 (App): $3"
-            echo "Input 4 (User): $4"
-            echo "Input 5 (Pass): [hidden]"
             
             # Install dependencies
             apt-get -o Acquire::ForceIPv4=true update
             apt-get -o Acquire::ForceIPv4=true install -y wget
-            wget https://dl.min.io/client/mc/release/linux-amd64/mc
+            wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
             chmod +x mc
             mv mc /usr/local/bin/
             
@@ -36,101 +30,79 @@ implementation:
             mc alias set myminio http://minio-service.kubeflow.svc.cluster.local:9000 "$4" "$5"
             
             echo "Checking/creating bucket: $2"
-            if ! mc ls myminio/"$2"; then
-              mc mb myminio/"$2"
-            fi
+            mc mb myminio/"$2" --ignore-existing || true
             
             echo "=== File Discovery ==="
-            echo "Config input details:"
-            ls -la "$0" 2>/dev/null || echo "Cannot list config input"
             
-            echo "Model input details:"
-            ls -la "$1" 2>/dev/null || echo "Cannot list model input"
-            
-            # Enhanced file discovery
+            # Find config file
             CONFIG_FILE=""
             if [ -f "$0/config.properties" ]; then
                 CONFIG_FILE="$0/config.properties"
             elif [ -f "$0" ]; then
                 CONFIG_FILE="$0"
             elif [ -d "$0" ]; then
-                # If it's a directory, find any .properties file
                 found_config=$(find "$0" -name "*.properties" | head -1)
-                if [ -n "$found_config" ]; then
-                    CONFIG_FILE="$found_config"
-                fi
+                [ -n "$found_config" ] && CONFIG_FILE="$found_config"
             fi
             
+            # Find model file
             MODEL_FILE=""
             if [ -f "$1/cnn-classifier.mar" ]; then
                 MODEL_FILE="$1/cnn-classifier.mar"
             elif [ -f "$1" ]; then
                 MODEL_FILE="$1"
             elif [ -d "$1" ]; then
-                # If it's a directory, find any .mar file
                 found_mar=$(find "$1" -name "*.mar" | head -1)
-                if [ -n "$found_mar" ]; then
-                    MODEL_FILE="$found_mar"
-                fi
+                [ -n "$found_mar" ] && MODEL_FILE="$found_mar"
             fi
             
             echo "Final config file: $CONFIG_FILE"
             echo "Final model file: $MODEL_FILE"
             
-            if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
-                echo "ERROR: Config file not found!"
-                exit 1
-            fi
-            
-            if [ -z "$MODEL_FILE" ] || [ ! -f "$MODEL_FILE" ]; then
-                echo "ERROR: Model file not found!"
-                exit 1
-            fi
+            [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ] && echo "ERROR: Config file not found!" && exit 1
+            [ -z "$MODEL_FILE" ] || [ ! -f "$MODEL_FILE" ] && echo "ERROR: Model file not found!" && exit 1
             
             # === EXTRACT MODEL NAME AND UPDATE CONFIG ===
             echo "=== Updating Config with Model Name ==="
             
-            # Extract model name from MAR file (without extension)
+            # Extract model name from MAR file
             MODEL_NAME=$(basename "$MODEL_FILE" .mar)
             echo "Detected model name: $MODEL_NAME"
             
-            # Create a temporary copy of the config file
+            # Create temporary config
             TEMP_CONFIG="/tmp/updated_config.properties"
             cp "$CONFIG_FILE" "$TEMP_CONFIG"
             
-            # Simple approach: just update the marName field
-            # This preserves the existing model structure but updates the filename
-            sed -i "s/\"marName\": \"[^\"]*\"/\"marName\": \"${MODEL_NAME}.mar\"/g" "$TEMP_CONFIG"
+            # SIMPLE AND SAFE APPROACH: Use different delimiters and simpler patterns
+            # Update marName field
+            sed -i "s|marName\": \"[^\"]*\"|marName\": \"${MODEL_NAME}.mar\"|g" "$TEMP_CONFIG"
             
-            # If you also want to update the model key name, use this carefully:
-            # First, let's find the current model name in the config
-            CURRENT_MODEL=$(grep -o '"models": {"[^"]*"' "$TEMP_CONFIG" | head -1 | cut -d'"' -f4)
+            # Find current model name and update it
+            CURRENT_MODEL=$(grep -o '"models": *{"[^"]*"' "$TEMP_CONFIG" | head -1 | cut -d'"' -f4)
             if [ -n "$CURRENT_MODEL" ] && [ "$CURRENT_MODEL" != "$MODEL_NAME" ]; then
                 echo "Updating model name from '$CURRENT_MODEL' to '$MODEL_NAME'"
-                sed -i "s/\"$CURRENT_MODEL\"/\"$MODEL_NAME\"/g" "$TEMP_CONFIG"
+                sed -i "s|\"$CURRENT_MODEL\"|\"$MODEL_NAME\"|g" "$TEMP_CONFIG"
             fi
             
             echo "Updated config content:"
             cat "$TEMP_CONFIG"
             
             echo "=== Uploading Files ==="
-            # Create directory structure in MinIO
+            # Create directory structure
             mc mb myminio/"$2"/"$3"/config --ignore-existing || true
             mc mb myminio/"$2"/"$3"/model-store --ignore-existing || true
             
-            # Upload the UPDATED config file
+            # Upload files
             mc cp "$TEMP_CONFIG" "myminio/$2/$3/config/config.properties"
-            
-            # Upload model file with the CORRECT name (matching the config)
             mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/${MODEL_NAME}.mar"
             
-            # Create output directory and file - FIXED THIS LINE
+            # Create output
             mkdir -p "$(dirname "$6")"
             echo "s3://$2/$3/" > "$6"
+            
             echo "=== Upload Completed Successfully ==="
             echo "MinIO path: s3://$2/$3/"
             echo "Model name used: $MODEL_NAME"
-            echo "Config updated to match model file"
         args:
         - {inputPath: Config File}
         - {inputPath: Model File}
