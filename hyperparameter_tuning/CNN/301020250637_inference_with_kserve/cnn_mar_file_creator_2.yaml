@@ -1,4 +1,4 @@
-name: CNN MAR File Creator
+name: 2 CNN MAR File Creator
 description: Creates a torch-model-archiver MAR file using downloaded model.py, handler.py and trained_model.pth files
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
@@ -30,6 +30,28 @@ implementation:
         import argparse
         from datetime import datetime
         import shutil
+        import glob
+
+        def find_file_in_directory(directory, possible_filenames):
+            """Find a file in directory with multiple possible names"""
+            if not os.path.exists(directory):
+                return None
+                
+            for filename in possible_filenames:
+                file_path = os.path.join(directory, filename)
+                if os.path.exists(file_path):
+                    return file_path
+            
+            # If not found, list what's actually in the directory
+            print(f"Files in {directory}:")
+            for item in os.listdir(directory):
+                item_path = os.path.join(directory, item)
+                if os.path.isfile(item_path):
+                    print(f"  - {item} ({os.path.getsize(item_path)} bytes)")
+                else:
+                    print(f"  - {item}/ (directory)")
+            
+            return None
 
         def create_mar_file(model_name, model_version, model_py_path, handler_path, model_pth_path, output_dir):
             
@@ -106,37 +128,37 @@ implementation:
                 print("PTH Input Directory: " + args.pth_file)
                 print("Output Directory: " + args.mar_file_out)
                 
-                # Step 1: Locate input files
-                print("--- Step 1: Locating input files ---")
-                handler_path = os.path.join(args.handler_file, 'handler.py')
-                model_py_path = os.path.join(args.model_py_file, 'model.py')
-                pth_path = os.path.join(args.pth_file, 'model_weights.pth')
+                # Step 1: Locate input files with better error handling
+                print("\\n--- Step 1: Locating input files ---")
                 
-                # Check if files exist
-                if not os.path.exists(handler_path):
-                    raise Exception("handler.py not found at: " + handler_path)
-                if not os.path.exists(model_py_path):
-                    raise Exception("model.py not found at: " + model_py_path)
-                if not os.path.exists(pth_path):
-                    # Try alternative name
-                    pth_path = os.path.join(args.pth_file, 'trained_model.pth')
-                    if not os.path.exists(pth_path):
-                        raise Exception("model weights file not found. Looked for: model_weights.pth and trained_model.pth")
-                    
+                # Find handler.py
+                handler_path = find_file_in_directory(args.handler_file, ['handler.py', 'handler'])
+                if not handler_path:
+                    raise Exception(f"handler.py not found in {args.handler_file}")
                 print("Handler file found: " + handler_path)
+                
+                # Find model.py
+                model_py_path = find_file_in_directory(args.model_py_file, ['model.py', 'model'])
+                if not model_py_path:
+                    raise Exception(f"model.py not found in {args.model_py_file}")
                 print("Model.py file found: " + model_py_path)
+                
+                # Find model weights
+                pth_path = find_file_in_directory(args.pth_file, ['model_weights.pth', 'trained_model.pth', 'model.pth'])
+                if not pth_path:
+                    raise Exception(f"Model weights file not found in {args.pth_file}")
                 print("PTH file found: " + pth_path)
                 
-                # Verify model.py contains CNN model class
-                with open(model_py_path, 'r') as f:
-                    model_content = f.read()
-                    if 'class' not in model_content or 'BaseCNN' not in model_content:
-                        print("Warning: model.py may not contain proper CNN model class")
+                # Verify files have content
+                for file_path, file_type in [(handler_path, 'handler.py'), (model_py_path, 'model.py'), (pth_path, 'model weights')]:
+                    if os.path.getsize(file_path) == 0:
+                        raise Exception(f"{file_type} file is empty: {file_path}")
+                    print(f"{file_type} size: {os.path.getsize(file_path)} bytes")
                 
                 log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
                 
                 # Step 2: Create MAR file
-                print("--- Step 2: Creating MAR file ---")
+                print("\\n--- Step 2: Creating MAR file ---")
                 mar_file_path, creation_output = create_mar_file(
                     args.model_name, 
                     args.model_version, 
@@ -150,12 +172,12 @@ implementation:
                 log_data['creation_output'] = creation_output
                 log_data['status'] = 'completed'
                 
-                print("=== CNN MAR File Creation Completed Successfully ===")
+                print("\\n=== CNN MAR File Creation Completed Successfully ===")
                 print("MAR file created at: " + mar_file_path)
                 
             except Exception as e:
                 error_msg = str(e)
-                print("MAR File Creation Failed: " + error_msg)
+                print("\\nMAR File Creation Failed: " + error_msg)
                 log_data['status'] = 'failed'
                 log_data['error'] = error_msg
                 sys.exit(1)
