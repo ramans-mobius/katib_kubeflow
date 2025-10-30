@@ -1,0 +1,141 @@
+name: Model Weights Download and Converter
+description: Downloads model weights from CDN URL and converts/saves as .pth file
+inputs:
+  - name: model_weights_url
+    type: String
+    description: URL to fetch the model weights file from
+  - name: output_filename
+    type: String
+    description: Name for the output .pth file (without extension)
+    default: model_weights
+outputs:
+  - name: model_weights_file
+    type: String
+    description: Downloaded model weights in .pth format
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet requests torch
+        python3 -c "
+        import sys, os, requests, json, pickle, urllib.parse, io
+        import torch
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        # Get args directly from command line
+        model_weights_url = sys.argv[1]
+        output_filename = sys.argv[2]
+        output_path = sys.argv[3]
+        
+        print('Starting model weights download and conversion...')
+        print(f'model_weights_url: {model_weights_url}')
+        print(f'output_filename: {output_filename}')
+        
+        def download_and_convert_weights(url, output_path, filename):
+            # Decode URL
+            decoded_url = urllib.parse.unquote(url)
+            print(f'Fetching model weights from: {decoded_url}')
+            
+            # Download the file
+            r = requests.get(decoded_url)
+            r.raise_for_status()
+            
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            
+            # Get the file extension from URL to determine format
+            file_extension = os.path.splitext(decoded_url.split('/')[-1])[1].lower()
+            print(f'Detected file extension: {file_extension}')
+            
+            # Process based on file type
+            if file_extension in ['.pth', '.pt', '.pth.tar']:
+                # Already in PyTorch format, just save with correct name
+                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                with open(final_output, 'wb') as f:
+                    f.write(r.content)
+                print(f'Model weights saved as: {final_output}')
+                
+            elif file_extension in ['.pkl', '.pickle']:
+                # Pickle format - load and convert to PyTorch
+                import pickle
+                model_data = pickle.loads(r.content)
+                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                
+                if isinstance(model_data, dict):
+                    # If it's a state dict
+                    torch.save(model_data, final_output)
+                else:
+                    # If it's the entire model or other structure
+                    torch.save({'model_state_dict': model_data}, final_output)
+                print(f'Pickle model converted and saved as: {final_output}')
+                
+            elif file_extension in ['.bin', '.data']:
+                # Binary format - try to load as state dict
+                try:
+                    # Try to load as PyTorch first
+                    buffer = io.BytesIO(r.content)
+                    model_data = torch.load(buffer)
+                    final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                    torch.save(model_data, final_output)
+                    print(f'Binary model converted and saved as: {final_output}')
+                except:
+                    # If that fails, treat as raw weights and create state dict
+                    final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                    torch.save({'weights': r.content}, final_output)
+                    print(f'Raw weights saved as: {final_output}')
+                    
+            elif file_extension == '.json':
+                # JSON format - might be weights in JSON format
+                model_data = r.json()
+                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                torch.save(model_data, final_output)
+                print(f'JSON weights converted and saved as: {final_output}')
+                
+            else:
+                # Unknown format - try to detect and handle
+                print('Unknown file format, attempting auto-detection...')
+                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
+                
+                # Try common formats
+                try:
+                    # Try PyTorch
+                    buffer = io.BytesIO(r.content)
+                    model_data = torch.load(buffer)
+                    torch.save(model_data, final_output)
+                    print(f'Auto-detected PyTorch format, saved as: {final_output}')
+                except:
+                    try:
+                        # Try pickle
+                        import pickle
+                        model_data = pickle.loads(r.content)
+                        torch.save({'model_state_dict': model_data}, final_output)
+                        print(f'Auto-detected pickle format, saved as: {final_output}')
+                    except:
+                        # Fallback - save raw content
+                        torch.save({'raw_weights': r.content}, final_output)
+                        print(f'Unknown format, saved raw content as: {final_output}')
+            
+            return final_output
+
+        # Download and convert model weights
+        pth_file = download_and_convert_weights(model_weights_url, output_path, output_filename)
+        
+        # Verify the file was created
+        if os.path.exists(pth_file):
+            file_size = os.path.getsize(pth_file)
+            print(f'Model weights successfully converted to: {pth_file} ({file_size} bytes)')
+        else:
+            raise Exception('Failed to create .pth file')
+            
+        print('Model weights download and conversion completed successfully')
+        " "$0" "$1" "$2" "$3"
+    args:
+      - {inputValue: model_weights_url}
+      - {inputValue: output_filename}
+      - {outputPath: model_weights_file}
