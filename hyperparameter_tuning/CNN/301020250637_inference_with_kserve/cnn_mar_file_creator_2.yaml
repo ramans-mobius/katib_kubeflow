@@ -1,0 +1,190 @@
+name: CNN MAR File Creator
+description: Creates a torch-model-archiver MAR file using downloaded model.py, handler.py and trained_model.pth files
+inputs:
+  - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
+  - {name: model_py_file, type: String, description: "Directory containing downloaded model.py file"}
+  - {name: pth_file, type: String, description: "Directory containing downloaded trained_model.pth file"}
+  - {name: model_name, type: String, description: "Name for the MAR model", default: "cnn_model"}
+  - {name: model_version, type: String, description: "Version for the MAR model", default: "1.0"}
+outputs:
+  - {name: mar_file_out, type: String, description: "Output directory containing the MAR file"}
+  - {name: mar_creation_log, type: String, description: "Log file with MAR creation details"}
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:testv2
+    command:
+      - sh
+      - -c
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet torch-model-archiver --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import sys
+        import subprocess
+        import json
+        import argparse
+        from datetime import datetime
+        import shutil
+
+        def create_mar_file(model_name, model_version, model_py_path, handler_path, model_pth_path, output_dir):
+            
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Build the command
+            cmd = [
+                'torch-model-archiver',
+                '--model-name', model_name,
+                '--version', model_version,
+                '--model-file', model_py_path,
+                '--serialized-file', model_pth_path,
+                '--handler', handler_path,
+                '--export-path', output_dir,
+                '--force'
+            ]
+            
+            print("Creating MAR file with command:")
+            print(' '.join(cmd))
+            
+            # Execute the command
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                
+                print("MAR file created successfully!")
+                print("STDOUT: " + result.stdout)
+                
+                # Verify MAR file was created
+                mar_file = os.path.join(output_dir, model_name + ".mar")
+                if os.path.exists(mar_file):
+                    file_size = os.path.getsize(mar_file)
+                    print("MAR file created: " + mar_file + " (" + str(file_size) + " bytes)")
+                    return mar_file, result.stdout
+                else:
+                    raise Exception("MAR file was not created in expected location")
+                    
+            except subprocess.CalledProcessError as e:
+                print("MAR file creation failed!")
+                print("STDOUT: " + str(e.stdout))
+                print("STDERR: " + str(e.stderr))
+                raise Exception("torch-model-archiver failed: " + str(e.stderr))
+
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--handler_file', type=str, required=True, help='Directory containing handler.py')
+            parser.add_argument('--model_py_file', type=str, required=True, help='Directory containing model.py')
+            parser.add_argument('--pth_file', type=str, required=True, help='Directory containing trained_model.pth')
+            parser.add_argument('--model_name', type=str, default='cnn_model', help='Model name for MAR file')
+            parser.add_argument('--model_version', type=str, default='1.0', help='Model version')
+            parser.add_argument('--mar_file_out', type=str, required=True, help='Output directory for MAR file')
+            parser.add_argument('--mar_creation_log', type=str, required=True, help='Output path for creation log')
+            
+            args = parser.parse_args()
+            
+            # Create log data structure
+            log_data = {
+                'timestamp': datetime.now().isoformat(),
+                'model_name': args.model_name,
+                'model_version': args.model_version,
+                'handler_input_dir': args.handler_file,
+                'model_py_input_dir': args.model_py_file,
+                'pth_input_dir': args.pth_file,
+                'status': 'starting',
+                'steps': []
+            }
+            
+            try:
+                print("=== CNN MAR File Creator Started ===")
+                print("Model Name: " + args.model_name)
+                print("Model Version: " + args.model_version)
+                print("Handler Input Directory: " + args.handler_file)
+                print("Model.py Input Directory: " + args.model_py_file)
+                print("PTH Input Directory: " + args.pth_file)
+                print("Output Directory: " + args.mar_file_out)
+                
+                # Step 1: Locate input files
+                print("--- Step 1: Locating input files ---")
+                handler_path = os.path.join(args.handler_file, 'handler.py')
+                model_py_path = os.path.join(args.model_py_file, 'model.py')
+                pth_path = os.path.join(args.pth_file, 'model_weights.pth')
+                
+                # Check if files exist
+                if not os.path.exists(handler_path):
+                    raise Exception("handler.py not found at: " + handler_path)
+                if not os.path.exists(model_py_path):
+                    raise Exception("model.py not found at: " + model_py_path)
+                if not os.path.exists(pth_path):
+                    # Try alternative name
+                    pth_path = os.path.join(args.pth_file, 'trained_model.pth')
+                    if not os.path.exists(pth_path):
+                        raise Exception("model weights file not found. Looked for: model_weights.pth and trained_model.pth")
+                    
+                print("Handler file found: " + handler_path)
+                print("Model.py file found: " + model_py_path)
+                print("PTH file found: " + pth_path)
+                
+                # Verify model.py contains CNN model class
+                with open(model_py_path, 'r') as f:
+                    model_content = f.read()
+                    if 'class' not in model_content or 'BaseCNN' not in model_content:
+                        print("Warning: model.py may not contain proper CNN model class")
+                
+                log_data['steps'].append({'step': 1, 'action': 'locate_files', 'status': 'success'})
+                
+                # Step 2: Create MAR file
+                print("--- Step 2: Creating MAR file ---")
+                mar_file_path, creation_output = create_mar_file(
+                    args.model_name, 
+                    args.model_version, 
+                    model_py_path, 
+                    handler_path, 
+                    pth_path, 
+                    args.mar_file_out
+                )
+                log_data['steps'].append({'step': 2, 'action': 'create_mar', 'status': 'success', 'mar_file': mar_file_path})
+                log_data['mar_file_path'] = mar_file_path
+                log_data['creation_output'] = creation_output
+                log_data['status'] = 'completed'
+                
+                print("=== CNN MAR File Creation Completed Successfully ===")
+                print("MAR file created at: " + mar_file_path)
+                
+            except Exception as e:
+                error_msg = str(e)
+                print("MAR File Creation Failed: " + error_msg)
+                log_data['status'] = 'failed'
+                log_data['error'] = error_msg
+                sys.exit(1)
+                
+            finally:
+                # Write log file
+                log_dir = os.path.dirname(args.mar_creation_log)
+                if log_dir and not os.path.exists(log_dir):
+                    os.makedirs(log_dir, exist_ok=True)
+                    
+                with open(args.mar_creation_log, 'w') as f:
+                    json.dump(log_data, f, indent=2)
+                print("Log saved to: " + args.mar_creation_log)
+
+        if __name__ == "__main__":
+            main()
+
+    args:
+      - --handler_file
+      - {inputPath: handler_file}
+      - --model_py_file
+      - {inputPath: model_py_file}
+      - --pth_file
+      - {inputPath: pth_file}
+      - --model_name
+      - {inputValue: model_name}
+      - --model_version
+      - {inputValue: model_version}
+      - --mar_file_out
+      - {outputPath: mar_file_out}
+      - --mar_creation_log
+      - {outputPath: mar_creation_log}
