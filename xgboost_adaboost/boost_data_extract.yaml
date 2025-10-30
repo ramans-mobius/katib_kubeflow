@@ -1,4 +1,4 @@
-name: 2 Extract Dataset
+name: 2 2 Extract Dataset
 description: Extracts specific dataset based on dataset name and algorithm
 inputs:
   - name: cdn_url
