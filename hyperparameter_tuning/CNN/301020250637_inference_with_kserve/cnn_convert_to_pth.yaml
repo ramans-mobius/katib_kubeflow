@@ -1,4 +1,4 @@
-name: 2 Model Weights Download and Converter
+name: 3 Model Weights Download and Converter
 description: Downloads model weights from CDN URL and converts/saves as .pth file
 inputs:
   - name: model_weights_url
@@ -20,7 +20,7 @@ implementation:
       - -c
       - |
         set -e
-        python3 -m pip install --quiet requests torch
+        python3 -m pip install --quiet requests torch numpy
         python3 -c "
         import sys, os, requests, json, pickle, urllib.parse, io
         import torch
@@ -33,12 +33,13 @@ implementation:
         # Get args directly from command line
         model_weights_url = sys.argv[1]
         output_filename = sys.argv[2]
-        output_path = sys.argv[3]
+        output_dir = sys.argv[3]  # This is the directory path
         
         print(f'model_weights_url: {model_weights_url}')
         print(f'output_filename: {output_filename}')
+        print(f'output_dir: {output_dir}')
         
-        def download_and_convert_weights(url, output_path, filename):
+        def download_and_convert_weights(url, output_dir, filename):
             start_time = time.time()
             
             # Decode URL
@@ -48,23 +49,25 @@ implementation:
             # Download the file with progress tracking
             print('Starting download...')
             download_start = time.time()
-            r = requests.get(decoded_url, stream=True, timeout=300)  # 5 minute timeout
+            r = requests.get(decoded_url, timeout=600)  # 10 minute timeout
             r.raise_for_status()
             download_time = time.time() - download_start
             print(f'Download completed in {download_time:.2f} seconds')
-            print(f'Content length: {len(r.content)} bytes')
+            print(f'Content length: {len(r.content)} bytes ({len(r.content)/1024/1024:.2f} MB)')
             
             # Ensure output directory exists
-            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
             
             # Get the file extension from URL to determine format
             file_extension = os.path.splitext(decoded_url.split('/')[-1])[1].lower()
             print(f'Detected file extension: {file_extension}')
             
+            # Save to the correct output directory
+            final_output = os.path.join(output_dir, f'{filename}.pth')
+            
             # Process based on file type
             if file_extension in ['.pth', '.pt', '.pth.tar']:
                 print('File is already in PyTorch format, saving directly...')
-                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
                 with open(final_output, 'wb') as f:
                     f.write(r.content)
                 print(f'Model weights saved as: {final_output}')
@@ -77,8 +80,6 @@ implementation:
                 pickle_time = time.time() - pickle_start
                 print(f'Pickle load completed in {pickle_time:.2f} seconds')
                 
-                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
-                
                 if isinstance(model_data, dict):
                     print('Detected state dictionary format')
                     torch.save(model_data, final_output)
@@ -89,7 +90,6 @@ implementation:
                 
             else:
                 print(f'Unknown format {file_extension}, attempting auto-detection...')
-                final_output = os.path.join(os.path.dirname(output_path), f'{filename}.pth')
                 
                 # Try common formats
                 try:
@@ -114,13 +114,21 @@ implementation:
             print(f'Total processing time: {total_time:.2f} seconds')
             return final_output
 
-        # Download and convert model weights
-        pth_file = download_and_convert_weights(model_weights_url, output_path, output_filename)
+        # Download and convert model weights - pass output_dir as directory
+        pth_file = download_and_convert_weights(model_weights_url, output_dir, output_filename)
         
-        # Verify the file was created
+        # Verify the file was created in the correct location
         if os.path.exists(pth_file):
             file_size = os.path.getsize(pth_file)
             print(f'Model weights successfully converted to: {pth_file} ({file_size} bytes)')
+            
+            # List the directory contents for verification
+            print(f'Directory contents of {output_dir}:')
+            for item in os.listdir(output_dir):
+                item_path = os.path.join(output_dir, item)
+                if os.path.isfile(item_path):
+                    size = os.path.getsize(item_path)
+                    print(f'  {item} ({size} bytes)')
         else:
             raise Exception('Failed to create .pth file')
             
