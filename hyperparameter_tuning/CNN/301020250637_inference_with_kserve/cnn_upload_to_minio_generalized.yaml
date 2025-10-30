@@ -1,4 +1,4 @@
-name: Generalized Upload to MinIO for CNN
+name: 2 Generalized Upload to MinIO for CNN
 description: Upload config.properties and cnn-classifier.mar files to MinIO bucket
 inputs:
 - {name: Config File, type: String}
@@ -26,7 +26,7 @@ implementation:
             echo "Input 5 (Pass): [hidden]"
             
             apt-get -o Acquire::ForceIPv4=true update
-            apt-get -o Acquire::ForceIPv4=true install -y wget
+            apt-get -o Acquire::ForceIPv4=true install -y wget python3
             wget https://dl.min.io/client/mc/release/linux-amd64/mc
             chmod +x mc
             mv mc /usr/local/bin/
@@ -97,12 +97,50 @@ implementation:
             TEMP_CONFIG="/tmp/updated_config.properties"
             cp "$CONFIG_FILE" "$TEMP_CONFIG"
             
-            # Update the model name in the config file
-            # First update the marName field
-            sed -i "s/\"marName\": \"[^\"]*\"/\"marName\": \"${MODEL_NAME}.mar\"/g" "$TEMP_CONFIG"
+            # Use Python for more reliable JSON manipulation
+            python3 -c "
+import json
+import re
+
+# Read the config file
+with open('$TEMP_CONFIG', 'r') as f:
+    content = f.read()
+
+# Find and update the model_snapshot line
+lines = content.split('\n')
+for i, line in enumerate(lines):
+    if line.startswith('model_snapshot='):
+        # Extract the JSON part
+        json_str = line.split('=', 1)[1]
+        try:
+            # Parse the JSON
+            snapshot = json.loads(json_str)
             
-            # Then update the model key in the models section
-            sed -i "s/\"models\": {[^}]*}/\"models\": {\"${MODEL_NAME}\": {\"1.0\": {\"defaultVersion\": true, \"marName\": \"${MODEL_NAME}.mar\", \"minWorkers\": 1, \"maxWorkers\": 1, \"batchSize\": 1, \"maxBatchDelay\": 100, \"responseTimeout\": 120}}}/g" "$TEMP_CONFIG"
+            # Update the model name and marName
+            old_model_name = list(snapshot['models'].keys())[0]
+            model_data = snapshot['models'][old_model_name]
+            
+            # Update marName in the model data
+            model_data['1.0']['marName'] = '${MODEL_NAME}.mar'
+            
+            # Replace the model key
+            snapshot['models'] = {'${MODEL_NAME}': model_data}
+            
+            # Update the line
+            lines[i] = 'model_snapshot=' + json.dumps(snapshot)
+            print('Successfully updated config with model name: ${MODEL_NAME}')
+            break
+        except Exception as e:
+            print(f'Error parsing JSON: {e}')
+            # Fallback: simple string replacement
+            lines[i] = line.replace(old_model_name, '${MODEL_NAME}')
+            lines[i] = lines[i].replace('\"marName\": \"' + model_data['1.0']['marName'] + '\"', '\"marName\": \"${MODEL_NAME}.mar\"')
+            print('Used fallback string replacement')
+
+# Write the updated content back
+with open('$TEMP_CONFIG', 'w') as f:
+    f.write('\n'.join(lines))
+"
             
             echo "Updated config content:"
             cat "$TEMP_CONFIG"
@@ -118,6 +156,7 @@ implementation:
             # Upload model file with the CORRECT name (matching the config)
             mc cp "$MODEL_FILE" "myminio/$2/$3/model-store/${MODEL_NAME}.mar"
             
+            # Create output directory and file
             mkdir -p "$(dirname "$6")"
             echo "s3://$2/$3/" > "$6"
             echo "=== Upload Completed Successfully ==="
