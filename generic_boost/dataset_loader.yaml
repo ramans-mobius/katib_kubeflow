@@ -1,4 +1,4 @@
-name: B Generic Boosting Data Loader
+name: C Generic Boosting Data Loader
 description: Downloads data from CDN and prepares train/test datasets for boosting algorithms
 inputs:
   - name: cdn_url
@@ -37,108 +37,108 @@ implementation:
         set -e
         python3 -m pip install --quiet requests pandas numpy
         python3 -c "
-import sys, os, requests, json, pickle, urllib.parse, pandas as pd
-
-print('Number of arguments:', len(sys.argv))
-print('Arguments:', sys.argv)
-
-cdn_url = sys.argv[1]
-dataset_name = sys.argv[2]
-target_column = sys.argv[3]
-train_split = float(sys.argv[4])
-shuffle_seed = int(sys.argv[5])
-train_data_path = sys.argv[6]
-test_data_path = sys.argv[7]
-dataset_info_path = sys.argv[8]
-
-print('Starting dataset download...')
-print(f'cdn_url: {cdn_url}')
-print(f'dataset_name: {dataset_name}')
-print(f'target_column: {target_column}')
-print(f'train_split: {train_split}')
-print(f'shuffle_seed: {shuffle_seed}')
-
-decoded_url = urllib.parse.unquote(cdn_url)
-print(f'Fetching data from: {decoded_url}')
-
-response = requests.get(decoded_url)
-response.raise_for_status()
-content = response.text
-
-lines = content.splitlines()
-current_section = None
-json_buffer = []
-in_target_section = False
-in_json_array = False
-
-for line in lines:
-    line = line.strip()
-    if not line:
-        continue
-    if line.endswith('Data:'):
-        current_section = line.replace('Data:', '').strip()
-        if dataset_name in current_section:
-            in_target_section = True
-            continue
-        else:
-            in_target_section = False
-            continue
-    if in_target_section:
-        if line == '[':
-            in_json_array = True
-            continue
-        if in_json_array:
-            if line == ']':
-                in_json_array = False
-                break
-            json_buffer.append(line)
-
-if not json_buffer:
-    raise ValueError(f'No data found for dataset: {dataset_name}')
-
-json_str = '[' + ','.join(json_buffer) + ']'
-data = json.loads(json_str)
-df = pd.json_normalize(data)
-
-if target_column not in df.columns:
-    available_targets = [col for col in df.columns if col not in ['id', 'timestamp', 'tenantid']]
-    if available_targets:
-        target_column = available_targets[0]
-    else:
-        target_column = df.columns[0]
-
-df = df.sample(frac=1, random_state=shuffle_seed).reset_index(drop=True)
-train_size = int(len(df) * train_split)
-train_df = df.iloc[:train_size]
-test_df = df.iloc[train_size:]
-
-feature_columns = [col for col in df.columns if col != target_column]
-
-dataset_info = {
-    'dataset_name': dataset_name,
-    'total_samples': len(df),
-    'train_samples': len(train_df),
-    'test_samples': len(test_df),
-    'target_column': target_column,
-    'feature_columns': feature_columns,
-    'all_columns': list(df.columns),
-    'train_split_ratio': train_split,
-    'shuffle_seed': shuffle_seed
-}
-
-os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
-train_df.to_csv(train_data_path, index=False)
-
-os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
-test_df.to_csv(test_data_path, index=False)
-
-os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
-with open(dataset_info_path, 'wb') as f:
-    pickle.dump(dataset_info, f)
-
-print('Dataset loading complete!')
-print(f'Train samples: {len(train_df)}')
-print(f'Test samples: {len(test_df)}')
+        import sys, os, requests, json, pickle, urllib.parse, pandas as pd
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        cdn_url = sys.argv[1]
+        dataset_name = sys.argv[2]
+        target_column = sys.argv[3]
+        train_split = float(sys.argv[4])
+        shuffle_seed = int(sys.argv[5])
+        train_data_path = sys.argv[6]
+        test_data_path = sys.argv[7]
+        dataset_info_path = sys.argv[8]
+        
+        print('Starting dataset download...')
+        print(f'cdn_url: {cdn_url}')
+        print(f'dataset_name: {dataset_name}')
+        print(f'target_column: {target_column}')
+        print(f'train_split: {train_split}')
+        print(f'shuffle_seed: {shuffle_seed}')
+        
+        decoded_url = urllib.parse.unquote(cdn_url)
+        print(f'Fetching data from: {decoded_url}')
+        
+        response = requests.get(decoded_url)
+        response.raise_for_status()
+        content = response.text
+        
+        lines = content.splitlines()
+        current_section = None
+        json_buffer = []
+        in_target_section = False
+        in_json_array = False
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.endswith('Data:'):
+                current_section = line.replace('Data:', '').strip()
+                if dataset_name in current_section:
+                    in_target_section = True
+                    continue
+                else:
+                    in_target_section = False
+                    continue
+            if in_target_section:
+                if line == '[':
+                    in_json_array = True
+                    continue
+                if in_json_array:
+                    if line == ']':
+                        in_json_array = False
+                        break
+                    json_buffer.append(line)
+        
+        if not json_buffer:
+            raise ValueError(f'No data found for dataset: {dataset_name}')
+        
+        json_str = '[' + ','.join(json_buffer) + ']'
+        data = json.loads(json_str)
+        df = pd.json_normalize(data)
+        
+        if target_column not in df.columns:
+            available_targets = [col for col in df.columns if col not in ['id', 'timestamp', 'tenantid']]
+            if available_targets:
+                target_column = available_targets[0]
+            else:
+                target_column = df.columns[0]
+        
+        df = df.sample(frac=1, random_state=shuffle_seed).reset_index(drop=True)
+        train_size = int(len(df) * train_split)
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
+        
+        feature_columns = [col for col in df.columns if col != target_column]
+        
+        dataset_info = {
+            'dataset_name': dataset_name,
+            'total_samples': len(df),
+            'train_samples': len(train_df),
+            'test_samples': len(test_df),
+            'target_column': target_column,
+            'feature_columns': feature_columns,
+            'all_columns': list(df.columns),
+            'train_split_ratio': train_split,
+            'shuffle_seed': shuffle_seed
+        }
+        
+        os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+        train_df.to_csv(train_data_path, index=False)
+        
+        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+        test_df.to_csv(test_data_path, index=False)
+        
+        os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+        with open(dataset_info_path, 'wb') as f:
+            pickle.dump(dataset_info, f)
+        
+        print('Dataset loading complete!')
+        print(f'Train samples: {len(train_df)}')
+        print(f'Test samples: {len(test_df)}')
         " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
     args:
       - {inputValue: cdn_url}
