@@ -1,4 +1,4 @@
-name: 2 CNN Store Inference Results
+name: CNN Store Inference Results
 description: Stores CNN inference results in database schema with basic columns
 inputs:
   - name: schema_id
@@ -74,7 +74,7 @@ implementation:
         schema_data = {
             # Required fields from original SLM schema - CORRECTED NAMES
             "tenant_id": tenant_id,
-            "project_id": args.project_id,
+            "projectId": args.project_id,
             "execution_id": args.execution_id,
             "infernce_input": "image_classification",  # CORRECTED: missing 'e'
             "infernce_output": predicted_class,        # CORRECTED: missing 'e'
