@@ -1,4 +1,4 @@
-name: Load Dataset from Datatxt
+name: A Load Dataset from Data.txt
 description: Dynamically loads datasets from data.txt file by auto-detecting sections and datasets.
 
 inputs:
@@ -49,7 +49,6 @@ implementation:
         print(f'Train split: {train_split}')
 
         def fix_url(url):
-            \"\"\"Ensure URL has proper protocol\"\"\"
             parsed = urlparse(url)
             if not parsed.scheme:
                 fixed_url = 'https://' + url.lstrip('/')
@@ -58,14 +57,12 @@ implementation:
             return url
 
         def safe_float_conversion(value, default=0.0):
-            \"\"\"Safely convert value to float\"\"\"
             try:
                 return float(value)
             except (ValueError, TypeError):
                 return default
 
         def detect_data_type_and_parse(data, dataset_pattern):
-            \"\"\"Dynamically detect data type and parse accordingly\"\"\"
             if not data:
                 return pd.DataFrame()
             
@@ -96,7 +93,6 @@ implementation:
             return pd.DataFrame()
 
         def parse_server_data(data):
-            \"\"\"Parse server reachability data\"\"\"
             records = []
             for item in data:
                 if isinstance(item, dict):
@@ -113,7 +109,6 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_performance_data(data):
-            \"\"\"Parse performance/QPS data\"\"\"
             records = []
             for item in data:
                 if isinstance(item, dict):
@@ -133,7 +128,6 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_cluster_data(data):
-            \"\"\"Parse cluster health data\"\"\"
             records = []
             for item in data:
                 if isinstance(item, dict):
@@ -155,7 +149,6 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_dsml_data(data, pattern):
-            \"\"\"Parse DSML neuron data based on pattern\"\"\"
             records = []
             nodes = data.get('nodes', []) if isinstance(data, dict) else []
             
@@ -185,7 +178,6 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_generic_json(data):
-            \"\"\"Parse generic JSON data\"\"\"
             if isinstance(data, list):
                 return pd.DataFrame(data)
             elif isinstance(data, dict):
@@ -193,7 +185,6 @@ implementation:
             return pd.DataFrame()
 
         def find_matching_section(datasets, pattern):
-            \"\"\"Find the section that best matches the dataset pattern\"\"\"
             pattern_lower = pattern.lower()
             
             for section_name, section_data in datasets.items():
