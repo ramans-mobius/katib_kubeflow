@@ -1,4 +1,4 @@
-name: Update Schema Row
+name: Update Schema Row Own
 description: Updates a row in a schema based on a mapping between column names and a JSON object.
 
 inputs:
@@ -86,7 +86,7 @@ implementation:
                     with open(args.tenant_id, 'r') as f:
                         row['tenant_id'] = f.read().strip()
                 if args.project_id != '-1':
-                    row['project_id'] = args.project_id
+                    row['projectId'] = args.project_id
                 if args.architecture_type != '-1':
                     row['architecture_type'] = args.architecture_type
                 if 'execution_id' not in row and args.execution_id != '-1':
