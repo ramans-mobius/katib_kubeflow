@@ -1,4 +1,4 @@
-name: Load Dataset from Datatxt
+name: 1 Load Dataset from Data.txt
 description: Loads specific datasets from data.txt file based on dataset name, extracts relevant features, and splits into train/test datasets.
 
 inputs:
@@ -81,8 +81,15 @@ implementation:
             }
         }
 
+        def safe_float_conversion(value, default=0.0):
+          
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return default
+
         def parse_server_reachability(data):
-            \"\"\"Parse server reachability data\"\"\"
+
             records = []
             for item in data:
                 record = {
@@ -96,11 +103,14 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_chart_data(data):
-            \"\"\"Parse chart/QPS data\"\"\"
+       
             records = []
             for item in data:
                 try:
-                    value = float(item.get('value', 0))
+                    # Safely convert value to float
+                    value_str = item.get('value', '0')
+                    value = safe_float_conversion(value_str)
+                    
                     records.append({
                         'service': item.get('serviceName', ''),
                         'metric': item.get('metricsName', ''),
@@ -108,33 +118,44 @@ implementation:
                         'timestamp': item.get('timestamp', ''),
                         'test_suite': item.get('testSuiteId', '')
                     })
-                except (ValueError, TypeError):
+                except Exception as e:
+                    print(f'Warning: Skipping record due to error: {e}')
                     continue
             return pd.DataFrame(records)
 
         def parse_dsml_neuron(data):
-            \"\"\"Parse DSML neuron data\"\"\"
+   
             records = []
             for node in data.get('nodes', []):
                 props = node.get('properties', {})
+                try:
+                    inputs_list = json.loads(props.get('inputs', '[]')) if props.get('inputs') else []
+                    outputs_list = json.loads(props.get('outputs', '[]')) if props.get('outputs') else []
+                except:
+                    inputs_list = []
+                    outputs_list = []
+                
                 records.append({
                     'name': props.get('name', ''),
                     'description': props.get('description', ''),
                     'neuron_type': props.get('neuronType', ''),
-                    'inputs': len(json.loads(props.get('inputs', '[]'))),
-                    'outputs': len(json.loads(props.get('outputs', '[]')))
+                    'inputs_count': len(inputs_list),
+                    'outputs_count': len(outputs_list)
                 })
             return pd.DataFrame(records)
 
         def parse_mig_setup(data):
-            \"\"\"Parse MIG setup data\"\"\"
+    
             records = []
             for node in data.get('nodes', []):
                 props = node.get('properties', {})
                 metadata = props.get('playbookNodeActivateMetadata', '{}')
                 try:
-                    metadata_dict = json.loads(metadata.replace('\\n', '')) if metadata else {}
+                    # Clean and parse metadata
+                    cleaned_metadata = metadata.replace('\\\\n', '').replace('\\\\t', '')
+                    metadata_dict = json.loads(cleaned_metadata) if cleaned_metadata else {}
                     body = metadata_dict.get('body', {})
+                    
                     records.append({
                         'name': props.get('name', ''),
                         'description': props.get('description', ''),
@@ -142,7 +163,8 @@ implementation:
                         'mig_profile': '1g.10gb' if '1g.10gb' in str(body) else 'other',
                         'batch_size': body.get('batch', 8) if isinstance(body, dict) else 8
                     })
-                except:
+                except Exception as e:
+                    print(f'Warning: Error parsing MIG setup: {e}')
                     records.append({
                         'name': props.get('name', ''),
                         'description': props.get('description', ''),
@@ -153,17 +175,22 @@ implementation:
             return pd.DataFrame(records)
 
         def parse_cluster_health(data):
-            \"\"\"Parse cluster health data\"\"\"
+       
             records = []
             for item in data:
                 used = item.get('used', {})
                 capacity = item.get('capacity', {})
+                
+                # Safely parse CPU values
+                cpu_used_str = used.get('cpu', '0')
+                cpu_capacity_str = capacity.get('cpu', '0')
+                
                 records.append({
                     'node': item.get('node', ''),
-                    'cpu_used': int(used.get('cpu', '0').replace('c', '') or 0),
+                    'cpu_used': safe_float_conversion(cpu_used_str.replace('c', '')),
                     'memory_used': used.get('memory', '0B'),
                     'pods_used': used.get('pods', 0),
-                    'cpu_capacity': int(capacity.get('cpu', '0').replace('c', '') or 0),
+                    'cpu_capacity': safe_float_conversion(cpu_capacity_str.replace('c', '')),
                     'memory_capacity': capacity.get('memory', '0B'),
                     'uptime': item.get('uptime', '0d')
                 })
@@ -176,52 +203,81 @@ implementation:
             response = requests.get(decoded_url, timeout=30)
             response.raise_for_status()
             content = response.text
+            print(f'Downloaded {len(content)} characters')
         except Exception as e:
             print(f'Failed to download data.txt: {e}')
-            raise
+            sys.exit(1)
 
         # Parse the structured data from data.txt
         datasets = {}
         current_section = None
         current_data = []
         
-        for line in content.split('\\n'):
+        lines = content.split('\\n')
+        print(f'Processing {len(lines)} lines')
+        
+        for line in lines:
             line = line.strip()
             if line.endswith('Data:'):
                 if current_section and current_data:
                     datasets[current_section] = current_data
+                    print(f'Stored section: {current_section} with {len(current_data)} items')
                 current_section = line.replace(' Data:', '').strip()
                 current_data = []
+                print(f'Found section: {current_section}')
             elif line.startswith('[') or line.startswith('{'):
                 try:
-                    if line.startswith('['):
-                        data = json.loads(line)
+                    # Clean the line for JSON parsing
+                    clean_line = line.strip()
+                    if clean_line.startswith('[') and not clean_line.endswith(']'):
+                        continue
+                    if clean_line.startswith('{') and not clean_line.endswith('}'):
+                        continue
+                        
+                    data = json.loads(clean_line)
+                    if isinstance(data, list):
+                        current_data.extend(data)
                     else:
-                        data = json.loads(line)
-                    current_data.extend(data if isinstance(data, list) else [data])
-                except:
+                        current_data.append(data)
+                except json.JSONDecodeError as e:
+                    print(f'Warning: Could not parse line: {line[:100]}...')
+                    continue
+                except Exception as e:
+                    print(f'Warning: Unexpected error parsing line: {e}')
                     continue
         
         if current_section and current_data:
             datasets[current_section] = current_data
+            print(f'Stored final section: {current_section} with {len(current_data)} items')
 
         print(f'Found sections: {list(datasets.keys())}')
 
         # Get dataset config
         config = DATASET_CONFIGS.get(dataset_name)
         if not config:
-            raise ValueError(f'Dataset {dataset_name} not found in configuration')
+            raise ValueError(f'Dataset {dataset_name} not found in configuration. Available: {list(DATASET_CONFIGS.keys())}')
 
         section_data = datasets.get(config['section'], [])
         if not section_data:
-            raise ValueError(f'Section {config[\\\"section\\\"]} not found in data.txt')
+            raise ValueError(f'Section {config[\\\"section\\\"]} not found in data.txt. Available sections: {list(datasets.keys())}')
+
+        print(f'Processing {len(section_data)} items from section {config[\\\"section\\\"]}')
 
         # Parse the specific dataset
         parser_func = globals()[f'parse_{config[\\\"parser\\\"]}']
         df = parser_func(section_data)
 
+        if df.empty:
+            raise ValueError(f'No data could be parsed for dataset {dataset_name}')
+
         print(f'Parsed dataset shape: {df.shape}')
         print(f'Columns: {list(df.columns)}')
+        print(f'First few rows:')
+        print(df.head())
+
+        # Check if target column exists
+        if target_column not in df.columns:
+            raise ValueError(f'Target column {target_column} not found in dataset. Available columns: {list(df.columns)}')
 
         # Split data
         train_df, test_df = train_test_split(
@@ -261,8 +317,9 @@ implementation:
             pickle.dump(dataset_info, f)
 
         print('Dataset loading complete!')
-        print(f'Train data: {train_data_path}')
-        print(f'Test data: {test_data_path}')
+        print(f'Train data saved to: {train_data_path}')
+        print(f'Test data saved to: {test_data_path}')
+        print(f'Dataset info saved to: {dataset_info_path}')
         " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
     args:
       - {inputValue: cdn_url}
