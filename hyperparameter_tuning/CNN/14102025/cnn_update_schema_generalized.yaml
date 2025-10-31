@@ -212,7 +212,7 @@ implementation:
                     if args.tenant_id != '-1':
                         creation_data['tenant_id'] = tenant_id
                     if args.project_id != '-1':
-                        creation_data['project_id'] = args.project_id
+                        creation_data['projectid'] = args.project_id
                     if args.architecture_type != '-1':
                         creation_data['architecture_type'] = args.architecture_type
 
