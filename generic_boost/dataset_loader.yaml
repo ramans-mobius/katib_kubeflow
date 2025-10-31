@@ -1,11 +1,11 @@
-name: A Load Dataset from Data.txt
-description: Dynamically loads datasets from data.txt file by auto-detecting sections and datasets.
+name: Generic Boosting Data Loader
+description: Downloads data from CDN and prepares for boosting algorithms
 
 inputs:
-  - {name: cdn_url, type: String, description: 'CDN URL to download data.txt file'}
-  - {name: dataset_name, type: String, description: 'Dataset name pattern to extract (e.g., reachable, chart, neuron, mig, health)'}
+  - {name: cdn_url, type: String, description: 'CDN URL to download data file'}
+  - {name: dataset_name, type: String, description: 'Dataset name to extract'}
   - {name: target_column, type: String, description: 'Target column name for prediction'}
-  - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
+  - {name: train_split, type: Float, description: 'Train split ratio'}
   - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
 
 outputs:
@@ -20,22 +20,18 @@ implementation:
       - sh
       - -c
       - |
-        pip install pandas numpy requests scikit-learn >/dev/null 2>&1
+        pip install pandas numpy requests >/dev/null 2>&1
         python -c "
         import os
         import sys
-        import io
-        import json
         import pandas as pd
-        import numpy as np
         import requests
         import pickle
-        import re
-        from urllib.parse import unquote, urlparse
-        from sklearn.model_selection import train_test_split
+        import json
+        from urllib.parse import unquote
 
         cdn_url = sys.argv[1]
-        dataset_pattern = sys.argv[2]
+        dataset_name = sys.argv[2]
         target_column = sys.argv[3]
         train_split = float(sys.argv[4])
         shuffle_seed = int(sys.argv[5])
@@ -43,300 +39,76 @@ implementation:
         test_data_path = sys.argv[7]
         dataset_info_path = sys.argv[8]
 
-        print('Dynamic Dataset Loader from data.txt')
-        print(f'Dataset pattern: {dataset_pattern}')
-        print(f'Target column: {target_column}')
-        print(f'Train split: {train_split}')
+        print('Generic Boosting Data Loader Started')
+        print(f'Dataset: {dataset_name}')
 
-        def fix_url(url):
-            parsed = urlparse(url)
-            if not parsed.scheme:
-                fixed_url = 'https://' + url.lstrip('/')
-                print(f'Fixed URL: {fixed_url}')
-                return fixed_url
-            return url
+        decoded_url = unquote(cdn_url)
+        response = requests.get(decoded_url, timeout=30)
+        response.raise_for_status()
+        content = response.text
 
-        def safe_float_conversion(value, default=0.0):
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return default
-
-        def detect_data_type_and_parse(data, dataset_pattern):
-            if not data:
-                return pd.DataFrame()
-            
-            first_item = data[0] if isinstance(data, list) and data else data
-            
-            # Detect data type based on content
-            if isinstance(first_item, dict):
-                # Server reachability detection
-                if any(key in first_item for key in ['reachable', 'nodeip', 'nodename']):
-                    return parse_server_data(data)
-                
-                # API Performance/QPS data
-                elif any(key in first_item for key in ['value', 'serviceName', 'metricsName']):
-                    return parse_performance_data(data)
-                
-                # Cluster health data
-                elif any(key in first_item for key in ['used', 'capacity', 'conditions']):
-                    return parse_cluster_data(data)
-                
-                # DSML/Neuron data (nested structure)
-                elif any(key in first_item for key in ['nodes', 'properties']):
-                    return parse_dsml_data(data, dataset_pattern)
-                
-                # Generic JSON data
-                else:
-                    return parse_generic_json(data)
-            
-            return pd.DataFrame()
-
-        def parse_server_data(data):
-            records = []
-            for item in data:
-                if isinstance(item, dict):
-                    record = {
-                        'node': item.get('nodename', ''),
-                        'nodeip': item.get('nodeip', ''),
-                        'nodeType': item.get('nodeType', ''),
-                        'reachable': 1 if str(item.get('reachable', 'False')).lower() == 'true' else 0,
-                        'timestamp': item.get('timestamp', ''),
-                        'tenantid': item.get('tenantid', ''),
-                        'projectid': item.get('projectid', '')
-                    }
-                    records.append(record)
-            return pd.DataFrame(records)
-
-        def parse_performance_data(data):
-            records = []
-            for item in data:
-                if isinstance(item, dict):
-                    try:
-                        value = safe_float_conversion(item.get('value', 0))
-                        records.append({
-                            'service': item.get('serviceName', ''),
-                            'metric': item.get('metricsName', ''),
-                            'value': value,
-                            'timestamp': item.get('timestamp', ''),
-                            'test_suite': item.get('testSuiteId', ''),
-                            'component': item.get('component', ''),
-                            'profile': item.get('profile', '')
-                        })
-                    except Exception as e:
-                        continue
-            return pd.DataFrame(records)
-
-        def parse_cluster_data(data):
-            records = []
-            for item in data:
-                if isinstance(item, dict):
-                    used = item.get('used', {})
-                    capacity = item.get('capacity', {})
-                    
-                    records.append({
-                        'node': item.get('node', ''),
-                        'cpu_used': safe_float_conversion(used.get('cpu', '0').replace('c', '')),
-                        'memory_used': used.get('memory', '0B'),
-                        'pods_used': used.get('pods', 0),
-                        'storage_used': used.get('storage', '0B'),
-                        'cpu_capacity': safe_float_conversion(capacity.get('cpu', '0').replace('c', '')),
-                        'memory_capacity': capacity.get('memory', '0B'),
-                        'pods_capacity': capacity.get('pods', 0),
-                        'uptime': item.get('uptime', '0d'),
-                        'conditions': json.dumps(item.get('conditions', {}))
-                    })
-            return pd.DataFrame(records)
-
-        def parse_dsml_data(data, pattern):
-            records = []
-            nodes = data.get('nodes', []) if isinstance(data, dict) else []
-            
-            for node in nodes:
-                props = node.get('properties', {})
-                name = props.get('name', '').lower()
-                description = props.get('description', '').lower()
-                
-                # Filter based on dataset pattern
-                if pattern.lower() in name or pattern.lower() in description:
-                    try:
-                        inputs_list = json.loads(props.get('inputs', '[]')) if props.get('inputs') else []
-                        outputs_list = json.loads(props.get('outputs', '[]')) if props.get('outputs') else []
-                    except:
-                        inputs_list = []
-                        outputs_list = []
-                    
-                    records.append({
-                        'name': props.get('name', ''),
-                        'description': props.get('description', ''),
-                        'neuron_type': props.get('neuronType', ''),
-                        'label': props.get('label', ''),
-                        'inputs_count': len(inputs_list),
-                        'outputs_count': len(outputs_list),
-                        'content_ref': props.get('contentRef', '')
-                    })
-            return pd.DataFrame(records)
-
-        def parse_generic_json(data):
-            if isinstance(data, list):
-                return pd.DataFrame(data)
-            elif isinstance(data, dict):
-                return pd.DataFrame([data])
-            return pd.DataFrame()
-
-        def find_matching_section(datasets, pattern):
-            pattern_lower = pattern.lower()
-            
-            for section_name, section_data in datasets.items():
-                section_lower = section_name.lower()
-                
-                # Direct match
-                if pattern_lower in section_lower:
-                    return section_name, section_data
-                
-                # Check section content
-                if section_data:
-                    first_item = section_data[0] if isinstance(section_data, list) else section_data
-                    if isinstance(first_item, dict):
-                        # Check if section contains relevant data
-                        if pattern_lower in ['reachable', 'server'] and any('reachable' in str(item) for item in section_data[:3]):
-                            return section_name, section_data
-                        elif pattern_lower in ['chart', 'value', 'qps'] and any('value' in str(item) for item in section_data[:3]):
-                            return section_name, section_data
-                        elif pattern_lower in ['health', 'cluster'] and any('used' in str(item) for item in section_data[:3]):
-                            return section_name, section_data
-                        elif pattern_lower in ['neuron', 'dsml'] and any('nodes' in str(item) for item in section_data[:3]):
-                            return section_name, section_data
-            
-            # Return first available section if no match found
-            if datasets:
-                first_section = list(datasets.keys())[0]
-                return first_section, datasets[first_section]
-            
-            return None, None
-
-        # Fix the URL first
-        print(f'Original URL: {cdn_url}')
-        fixed_cdn_url = fix_url(cdn_url)
-        decoded_url = unquote(fixed_cdn_url)
-        print(f'Decoded URL: {decoded_url}')
-
-        # Download and parse data.txt
-        try:
-            print('Downloading data.txt...')
-            response = requests.get(decoded_url, timeout=30)
-            response.raise_for_status()
-            content = response.text
-            print(f'✓ Downloaded {len(content)} characters')
-        except Exception as e:
-            print(f'✗ Failed to download data.txt: {e}')
-            sys.exit(1)
-
-        # Parse the structured data from data.txt
-        datasets = {}
+        lines = content.strip().split('
+')
         current_section = None
-        current_data = []
+        json_buffer = []
+        in_target_section = False
+        in_json_array = False
         
-        lines = content.split('\\n')
-        print(f'Processing {len(lines)} lines')
-        
-        for i, line in enumerate(lines):
+        for line in lines:
             line = line.strip()
+            if not line:
+                continue
             if line.endswith('Data:'):
-                # Store previous section data
-                if current_section and current_data:
-                    datasets[current_section] = current_data
-                    print(f'✓ Stored section: {current_section} with {len(current_data)} items')
-                
-                # Start new section
-                current_section = line.replace(' Data:', '').strip()
-                current_data = []
-                print(f'Found section: {current_section}')
-                
-            elif line.startswith('[') or line.startswith('{'):
-                try:
-                    clean_line = line.strip()
-                    data = json.loads(clean_line)
-                    if isinstance(data, list):
-                        current_data.extend(data)
-                    else:
-                        current_data.append(data)
-                except json.JSONDecodeError:
+                current_section = line.replace('Data:', '').strip()
+                if dataset_name in current_section:
+                    in_target_section = True
                     continue
-                except Exception as e:
+                else:
+                    in_target_section = False
                     continue
-        
-        # Store the last section
-        if current_section and current_data:
-            datasets[current_section] = current_data
-            print(f'✓ Stored final section: {current_section} with {len(current_data)} items')
+            if in_target_section:
+                if line == '[':
+                    in_json_array = True
+                    continue
+                if in_json_array:
+                    if line == ']':
+                        in_json_array = False
+                        break
+                    json_buffer.append(line)
 
-        print(f'Found sections: {list(datasets.keys())}')
-        print(f'Section sizes: {{ {", ".join([f"{k}: {len(v)}" for k, v in datasets.items()])} }}')
+        if not json_buffer:
+            raise ValueError(f'No data found for dataset: {dataset_name}')
 
-        # Dynamically find matching section
-        section_name, section_data = find_matching_section(datasets, dataset_pattern)
-        
-        if not section_data:
-            raise ValueError(f'No matching data found for pattern: {dataset_pattern}. Available sections: {list(datasets.keys())}')
-
-        print(f'Using section: {section_name} with {len(section_data)} items')
-
-        # Parse data based on detected type
-        df = detect_data_type_and_parse(section_data, dataset_pattern)
-
-        if df.empty:
-            raise ValueError(f'No data could be parsed for pattern: {dataset_pattern}')
-
-        print(f'✓ Parsed dataset shape: {df.shape}')
-        print(f'Columns: {list(df.columns)}')
-        print(f'First 3 rows:')
-        print(df.head(3))
-
-        # Auto-detect target column if not specified
-        if not target_column:
-            # Look for common target columns
-            possible_targets = ['reachable', 'value', 'description', 'cpu_used', 'memory_used']
-            for col in possible_targets:
-                if col in df.columns:
-                    target_column = col
-                    break
-            if not target_column and len(df.columns) > 0:
-                target_column = df.columns[-1]  # Use last column as fallback
-        
-        print(f'Using target column: {target_column}')
+        json_str = '[' + ','.join(json_buffer) + ']'
+        data = json.loads(json_str)
+        df = pd.json_normalize(data)
 
         if target_column not in df.columns:
-            raise ValueError(f'Target column {target_column} not found. Available columns: {list(df.columns)}')
+            available_targets = [col for col in df.columns if col not in ['id', 'timestamp', 'tenantid']]
+            if available_targets:
+                target_column = available_targets[0]
+            else:
+                target_column = df.columns[0]
 
-        # Split data
-        train_df, test_df = train_test_split(
-            df, 
-            train_size=train_split, 
-            random_state=shuffle_seed,
-            shuffle=True
-        )
+        df = df.sample(frac=1, random_state=shuffle_seed).reset_index(drop=True)
+        train_size = int(len(df) * train_split)
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
 
-        print(f'Train shape: {train_df.shape}, Test shape: {test_df.shape}')
-
-        # Create dataset info
         feature_columns = [col for col in df.columns if col != target_column]
+        
         dataset_info = {
-            'dataset_name': dataset_pattern,
-            'section_used': section_name,
+            'dataset_name': dataset_name,
             'total_samples': len(df),
             'train_samples': len(train_df),
             'test_samples': len(test_df),
             'target_column': target_column,
             'feature_columns': feature_columns,
+            'all_columns': list(df.columns),
             'train_split_ratio': train_split,
-            'shuffle_seed': shuffle_seed,
-            'columns': list(df.columns),
-            'dtypes': {col: str(df[col].dtype) for col in df.columns},
-            'detection_method': 'dynamic'
+            'shuffle_seed': shuffle_seed
         }
 
-        # Save outputs
         os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
         train_df.to_csv(train_data_path, index=False)
 
@@ -347,10 +119,7 @@ implementation:
         with open(dataset_info_path, 'wb') as f:
             pickle.dump(dataset_info, f)
 
-        print('✓ Dynamic dataset loading complete!')
-        print(f'Train data: {train_data_path}')
-        print(f'Test data: {test_data_path}')
-        print(f'Dataset info: {dataset_info_path}')
+        print('Data Loading Complete')
         " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
     args:
       - {inputValue: cdn_url}
