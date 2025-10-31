@@ -1,17 +1,31 @@
-name: Generic Boosting Data Loader
-description: Downloads data from CDN and prepares for boosting algorithms
-
+name: A Generic Boosting Data Loader
+description: Downloads data from CDN and prepares train/test datasets for boosting algorithms
 inputs:
-  - {name: cdn_url, type: String, description: 'CDN URL to download data file'}
-  - {name: dataset_name, type: String, description: 'Dataset name to extract'}
-  - {name: target_column, type: String, description: 'Target column name for prediction'}
-  - {name: train_split, type: Float, description: 'Train split ratio'}
-  - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
-
+  - name: cdn_url
+    type: String
+    description: CDN URL to download data file (use %24%24 for $$)
+  - name: dataset_name
+    type: String
+    description: Dataset name to extract from data file
+  - name: target_column
+    type: String
+    description: Target column name for prediction
+  - name: train_split
+    type: Float
+    description: Train split ratio (default 0.7)
+  - name: shuffle_seed
+    type: Integer
+    description: Random seed for shuffling
 outputs:
-  - {name: train_data, type: Dataset}
-  - {name: test_data, type: Dataset}
-  - {name: dataset_info, type: DatasetInfo}
+  - name: train_data
+    type: Dataset
+    description: Training dataset
+  - name: test_data
+    type: Dataset
+    description: Testing dataset
+  - name: dataset_info
+    type: DatasetInfo
+    description: Dataset metadata and information
 
 implementation:
   container:
@@ -20,16 +34,15 @@ implementation:
       - sh
       - -c
       - |
-        pip install pandas numpy requests >/dev/null 2>&1
-        python -c "
-        import os
-        import sys
-        import pandas as pd
-        import requests
-        import pickle
-        import json
-        from urllib.parse import unquote
-
+        set -e
+        python3 -m pip install --quiet requests pandas numpy
+        python3 -c "
+        import sys, os, requests, json, pickle, urllib.parse, pandas as pd
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        # Get args directly from command line
         cdn_url = sys.argv[1]
         dataset_name = sys.argv[2]
         target_column = sys.argv[3]
@@ -38,12 +51,19 @@ implementation:
         train_data_path = sys.argv[6]
         test_data_path = sys.argv[7]
         dataset_info_path = sys.argv[8]
-
-        print('Generic Boosting Data Loader Started')
-        print(f'Dataset: {dataset_name}')
-
-        decoded_url = unquote(cdn_url)
-        response = requests.get(decoded_url, timeout=30)
+        
+        print('Starting dataset download...')
+        print(f'cdn_url: {cdn_url}')
+        print(f'dataset_name: {dataset_name}')
+        print(f'target_column: {target_column}')
+        print(f'train_split: {train_split}')
+        print(f'shuffle_seed: {shuffle_seed}')
+        
+        # Handle URL encoding
+        decoded_url = urllib.parse.unquote(cdn_url)
+        print(f'Fetching data from: {decoded_url}')
+        
+        response = requests.get(decoded_url)
         response.raise_for_status()
         content = response.text
 
@@ -119,8 +139,10 @@ implementation:
         with open(dataset_info_path, 'wb') as f:
             pickle.dump(dataset_info, f)
 
-        print('Data Loading Complete')
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+        print('Dataset loading complete!')
+        print(f'Train samples: {len(train_df)}')
+        print(f'Test samples: {len(test_df)}')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
     args:
       - {inputValue: cdn_url}
       - {inputValue: dataset_name}
