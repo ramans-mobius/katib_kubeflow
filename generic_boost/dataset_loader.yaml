@@ -1,9 +1,9 @@
-name: 1 Load Dataset from Data.txt
-description: Loads specific datasets from data.txt file based on dataset name, extracts relevant features, and splits into train/test datasets.
+name: Load Dataset from Datatxt
+description: Dynamically loads datasets from data.txt file by auto-detecting sections and datasets.
 
 inputs:
   - {name: cdn_url, type: String, description: 'CDN URL to download data.txt file'}
-  - {name: dataset_name, type: String, description: 'Dataset name to extract (e.g., GRM_SERVER_REACHABLE, LineChart-Generation-Dbaas, etc.)'}
+  - {name: dataset_name, type: String, description: 'Dataset name pattern to extract (e.g., reachable, chart, neuron, mig, health)'}
   - {name: target_column, type: String, description: 'Target column name for prediction'}
   - {name: train_split, type: Float, description: 'Train split ratio (default 0.7)'}
   - {name: shuffle_seed, type: Integer, description: 'Random seed for shuffling'}
@@ -30,11 +30,12 @@ implementation:
         import numpy as np
         import requests
         import pickle
-        from urllib.parse import unquote
+        import re
+        from urllib.parse import unquote, urlparse
         from sklearn.model_selection import train_test_split
 
         cdn_url = sys.argv[1]
-        dataset_name = sys.argv[2]
+        dataset_pattern = sys.argv[2]
         target_column = sys.argv[3]
         train_split = float(sys.argv[4])
         shuffle_seed = int(sys.argv[5])
@@ -42,170 +43,202 @@ implementation:
         test_data_path = sys.argv[7]
         dataset_info_path = sys.argv[8]
 
-        print('Generic Dataset Loader from data.txt')
-        print(f'Dataset: {dataset_name}')
+        print('Dynamic Dataset Loader from data.txt')
+        print(f'Dataset pattern: {dataset_pattern}')
         print(f'Target column: {target_column}')
         print(f'Train split: {train_split}')
 
-        # Dataset configuration mapping
-        DATASET_CONFIGS = {
-            'GRM_SERVER_REACHABLE': {
-                'section': 'Server Reach-ability Data',
-                'features': ['nodeip', 'nodeType', 'reachable', 'nodename', 'timestamp'],
-                'target': 'reachable',
-                'parser': 'server_reachability'
-            },
-            'LineChart-Generation-Dbaas': {
-                'section': 'API Performance QPS Data', 
-                'features': ['value', 'timestamp', 'serviceName', 'metricsName'],
-                'target': 'value',
-                'parser': 'chart_data'
-            },
-            'LLM-MODEL-BUILDING-TRAINING': {
-                'section': 'DSML data',
-                'features': ['name', 'description', 'neuronType', 'inputs', 'outputs'],
-                'target': 'description',
-                'parser': 'dsml_neuron'
-            },
-            'Mig-Setup-Single-Playbook': {
-                'section': 'DSML data',
-                'features': ['name', 'description', 'playbookNodeActivateMetadata'],
-                'target': 'description',
-                'parser': 'mig_setup'
-            },
-            'GNN-STGNN': {
-                'section': 'Cluster Health Data',
-                'features': ['node', 'used', 'capacity', 'uptime', 'conditions'],
-                'target': 'used',
-                'parser': 'cluster_health'
-            }
-        }
+        def fix_url(url):
+            \"\"\"Ensure URL has proper protocol\"\"\"
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                fixed_url = 'https://' + url.lstrip('/')
+                print(f'Fixed URL: {fixed_url}')
+                return fixed_url
+            return url
 
         def safe_float_conversion(value, default=0.0):
-          
+            \"\"\"Safely convert value to float\"\"\"
             try:
                 return float(value)
             except (ValueError, TypeError):
                 return default
 
-        def parse_server_reachability(data):
+        def detect_data_type_and_parse(data, dataset_pattern):
+            \"\"\"Dynamically detect data type and parse accordingly\"\"\"
+            if not data:
+                return pd.DataFrame()
+            
+            first_item = data[0] if isinstance(data, list) and data else data
+            
+            # Detect data type based on content
+            if isinstance(first_item, dict):
+                # Server reachability detection
+                if any(key in first_item for key in ['reachable', 'nodeip', 'nodename']):
+                    return parse_server_data(data)
+                
+                # API Performance/QPS data
+                elif any(key in first_item for key in ['value', 'serviceName', 'metricsName']):
+                    return parse_performance_data(data)
+                
+                # Cluster health data
+                elif any(key in first_item for key in ['used', 'capacity', 'conditions']):
+                    return parse_cluster_data(data)
+                
+                # DSML/Neuron data (nested structure)
+                elif any(key in first_item for key in ['nodes', 'properties']):
+                    return parse_dsml_data(data, dataset_pattern)
+                
+                # Generic JSON data
+                else:
+                    return parse_generic_json(data)
+            
+            return pd.DataFrame()
 
+        def parse_server_data(data):
+            \"\"\"Parse server reachability data\"\"\"
             records = []
             for item in data:
-                record = {
-                    'node': item.get('nodename', ''),
-                    'nodeip': item.get('nodeip', ''),
-                    'nodeType': item.get('nodeType', ''),
-                    'reachable': 1 if str(item.get('reachable', 'False')).lower() == 'true' else 0,
-                    'timestamp': item.get('timestamp', '')
-                }
-                records.append(record)
-            return pd.DataFrame(records)
-
-        def parse_chart_data(data):
-       
-            records = []
-            for item in data:
-                try:
-                    # Safely convert value to float
-                    value_str = item.get('value', '0')
-                    value = safe_float_conversion(value_str)
-                    
-                    records.append({
-                        'service': item.get('serviceName', ''),
-                        'metric': item.get('metricsName', ''),
-                        'value': value,
+                if isinstance(item, dict):
+                    record = {
+                        'node': item.get('nodename', ''),
+                        'nodeip': item.get('nodeip', ''),
+                        'nodeType': item.get('nodeType', ''),
+                        'reachable': 1 if str(item.get('reachable', 'False')).lower() == 'true' else 0,
                         'timestamp': item.get('timestamp', ''),
-                        'test_suite': item.get('testSuiteId', '')
+                        'tenantid': item.get('tenantid', ''),
+                        'projectid': item.get('projectid', '')
+                    }
+                    records.append(record)
+            return pd.DataFrame(records)
+
+        def parse_performance_data(data):
+            \"\"\"Parse performance/QPS data\"\"\"
+            records = []
+            for item in data:
+                if isinstance(item, dict):
+                    try:
+                        value = safe_float_conversion(item.get('value', 0))
+                        records.append({
+                            'service': item.get('serviceName', ''),
+                            'metric': item.get('metricsName', ''),
+                            'value': value,
+                            'timestamp': item.get('timestamp', ''),
+                            'test_suite': item.get('testSuiteId', ''),
+                            'component': item.get('component', ''),
+                            'profile': item.get('profile', '')
+                        })
+                    except Exception as e:
+                        continue
+            return pd.DataFrame(records)
+
+        def parse_cluster_data(data):
+            \"\"\"Parse cluster health data\"\"\"
+            records = []
+            for item in data:
+                if isinstance(item, dict):
+                    used = item.get('used', {})
+                    capacity = item.get('capacity', {})
+                    
+                    records.append({
+                        'node': item.get('node', ''),
+                        'cpu_used': safe_float_conversion(used.get('cpu', '0').replace('c', '')),
+                        'memory_used': used.get('memory', '0B'),
+                        'pods_used': used.get('pods', 0),
+                        'storage_used': used.get('storage', '0B'),
+                        'cpu_capacity': safe_float_conversion(capacity.get('cpu', '0').replace('c', '')),
+                        'memory_capacity': capacity.get('memory', '0B'),
+                        'pods_capacity': capacity.get('pods', 0),
+                        'uptime': item.get('uptime', '0d'),
+                        'conditions': json.dumps(item.get('conditions', {}))
                     })
-                except Exception as e:
-                    print(f'Warning: Skipping record due to error: {e}')
-                    continue
             return pd.DataFrame(records)
 
-        def parse_dsml_neuron(data):
-   
+        def parse_dsml_data(data, pattern):
+            \"\"\"Parse DSML neuron data based on pattern\"\"\"
             records = []
-            for node in data.get('nodes', []):
+            nodes = data.get('nodes', []) if isinstance(data, dict) else []
+            
+            for node in nodes:
                 props = node.get('properties', {})
-                try:
-                    inputs_list = json.loads(props.get('inputs', '[]')) if props.get('inputs') else []
-                    outputs_list = json.loads(props.get('outputs', '[]')) if props.get('outputs') else []
-                except:
-                    inputs_list = []
-                    outputs_list = []
+                name = props.get('name', '').lower()
+                description = props.get('description', '').lower()
                 
-                records.append({
-                    'name': props.get('name', ''),
-                    'description': props.get('description', ''),
-                    'neuron_type': props.get('neuronType', ''),
-                    'inputs_count': len(inputs_list),
-                    'outputs_count': len(outputs_list)
-                })
-            return pd.DataFrame(records)
-
-        def parse_mig_setup(data):
-    
-            records = []
-            for node in data.get('nodes', []):
-                props = node.get('properties', {})
-                metadata = props.get('playbookNodeActivateMetadata', '{}')
-                try:
-                    # Clean and parse metadata
-                    cleaned_metadata = metadata.replace('\\\\n', '').replace('\\\\t', '')
-                    metadata_dict = json.loads(cleaned_metadata) if cleaned_metadata else {}
-                    body = metadata_dict.get('body', {})
+                # Filter based on dataset pattern
+                if pattern.lower() in name or pattern.lower() in description:
+                    try:
+                        inputs_list = json.loads(props.get('inputs', '[]')) if props.get('inputs') else []
+                        outputs_list = json.loads(props.get('outputs', '[]')) if props.get('outputs') else []
+                    except:
+                        inputs_list = []
+                        outputs_list = []
                     
                     records.append({
                         'name': props.get('name', ''),
                         'description': props.get('description', ''),
-                        'gpu_type': 'A100' if 'A100' in str(body) else 'H100' if 'H100' in str(body) else 'Unknown',
-                        'mig_profile': '1g.10gb' if '1g.10gb' in str(body) else 'other',
-                        'batch_size': body.get('batch', 8) if isinstance(body, dict) else 8
-                    })
-                except Exception as e:
-                    print(f'Warning: Error parsing MIG setup: {e}')
-                    records.append({
-                        'name': props.get('name', ''),
-                        'description': props.get('description', ''),
-                        'gpu_type': 'Unknown',
-                        'mig_profile': 'unknown',
-                        'batch_size': 8
+                        'neuron_type': props.get('neuronType', ''),
+                        'label': props.get('label', ''),
+                        'inputs_count': len(inputs_list),
+                        'outputs_count': len(outputs_list),
+                        'content_ref': props.get('contentRef', '')
                     })
             return pd.DataFrame(records)
 
-        def parse_cluster_health(data):
-       
-            records = []
-            for item in data:
-                used = item.get('used', {})
-                capacity = item.get('capacity', {})
+        def parse_generic_json(data):
+            \"\"\"Parse generic JSON data\"\"\"
+            if isinstance(data, list):
+                return pd.DataFrame(data)
+            elif isinstance(data, dict):
+                return pd.DataFrame([data])
+            return pd.DataFrame()
+
+        def find_matching_section(datasets, pattern):
+            \"\"\"Find the section that best matches the dataset pattern\"\"\"
+            pattern_lower = pattern.lower()
+            
+            for section_name, section_data in datasets.items():
+                section_lower = section_name.lower()
                 
-                # Safely parse CPU values
-                cpu_used_str = used.get('cpu', '0')
-                cpu_capacity_str = capacity.get('cpu', '0')
+                # Direct match
+                if pattern_lower in section_lower:
+                    return section_name, section_data
                 
-                records.append({
-                    'node': item.get('node', ''),
-                    'cpu_used': safe_float_conversion(cpu_used_str.replace('c', '')),
-                    'memory_used': used.get('memory', '0B'),
-                    'pods_used': used.get('pods', 0),
-                    'cpu_capacity': safe_float_conversion(cpu_capacity_str.replace('c', '')),
-                    'memory_capacity': capacity.get('memory', '0B'),
-                    'uptime': item.get('uptime', '0d')
-                })
-            return pd.DataFrame(records)
+                # Check section content
+                if section_data:
+                    first_item = section_data[0] if isinstance(section_data, list) else section_data
+                    if isinstance(first_item, dict):
+                        # Check if section contains relevant data
+                        if pattern_lower in ['reachable', 'server'] and any('reachable' in str(item) for item in section_data[:3]):
+                            return section_name, section_data
+                        elif pattern_lower in ['chart', 'value', 'qps'] and any('value' in str(item) for item in section_data[:3]):
+                            return section_name, section_data
+                        elif pattern_lower in ['health', 'cluster'] and any('used' in str(item) for item in section_data[:3]):
+                            return section_name, section_data
+                        elif pattern_lower in ['neuron', 'dsml'] and any('nodes' in str(item) for item in section_data[:3]):
+                            return section_name, section_data
+            
+            # Return first available section if no match found
+            if datasets:
+                first_section = list(datasets.keys())[0]
+                return first_section, datasets[first_section]
+            
+            return None, None
+
+        # Fix the URL first
+        print(f'Original URL: {cdn_url}')
+        fixed_cdn_url = fix_url(cdn_url)
+        decoded_url = unquote(fixed_cdn_url)
+        print(f'Decoded URL: {decoded_url}')
 
         # Download and parse data.txt
-        decoded_url = unquote(cdn_url)
         try:
-            print('Downloading data.txt')
+            print('Downloading data.txt...')
             response = requests.get(decoded_url, timeout=30)
             response.raise_for_status()
             content = response.text
-            print(f'Downloaded {len(content)} characters')
+            print(f'✓ Downloaded {len(content)} characters')
         except Exception as e:
-            print(f'Failed to download data.txt: {e}')
+            print(f'✗ Failed to download data.txt: {e}')
             sys.exit(1)
 
         # Parse the structured data from data.txt
@@ -216,68 +249,74 @@ implementation:
         lines = content.split('\\n')
         print(f'Processing {len(lines)} lines')
         
-        for line in lines:
+        for i, line in enumerate(lines):
             line = line.strip()
             if line.endswith('Data:'):
+                # Store previous section data
                 if current_section and current_data:
                     datasets[current_section] = current_data
-                    print(f'Stored section: {current_section} with {len(current_data)} items')
+                    print(f'✓ Stored section: {current_section} with {len(current_data)} items')
+                
+                # Start new section
                 current_section = line.replace(' Data:', '').strip()
                 current_data = []
                 print(f'Found section: {current_section}')
+                
             elif line.startswith('[') or line.startswith('{'):
                 try:
-                    # Clean the line for JSON parsing
                     clean_line = line.strip()
-                    if clean_line.startswith('[') and not clean_line.endswith(']'):
-                        continue
-                    if clean_line.startswith('{') and not clean_line.endswith('}'):
-                        continue
-                        
                     data = json.loads(clean_line)
                     if isinstance(data, list):
                         current_data.extend(data)
                     else:
                         current_data.append(data)
-                except json.JSONDecodeError as e:
-                    print(f'Warning: Could not parse line: {line[:100]}...')
+                except json.JSONDecodeError:
                     continue
                 except Exception as e:
-                    print(f'Warning: Unexpected error parsing line: {e}')
                     continue
         
+        # Store the last section
         if current_section and current_data:
             datasets[current_section] = current_data
-            print(f'Stored final section: {current_section} with {len(current_data)} items')
+            print(f'✓ Stored final section: {current_section} with {len(current_data)} items')
 
         print(f'Found sections: {list(datasets.keys())}')
+        print(f'Section sizes: {{ {", ".join([f"{k}: {len(v)}" for k, v in datasets.items()])} }}')
 
-        # Get dataset config
-        config = DATASET_CONFIGS.get(dataset_name)
-        if not config:
-            raise ValueError(f'Dataset {dataset_name} not found in configuration. Available: {list(DATASET_CONFIGS.keys())}')
-
-        section_data = datasets.get(config['section'], [])
+        # Dynamically find matching section
+        section_name, section_data = find_matching_section(datasets, dataset_pattern)
+        
         if not section_data:
-            raise ValueError(f'Section {config[\\\"section\\\"]} not found in data.txt. Available sections: {list(datasets.keys())}')
+            raise ValueError(f'No matching data found for pattern: {dataset_pattern}. Available sections: {list(datasets.keys())}')
 
-        print(f'Processing {len(section_data)} items from section {config[\\\"section\\\"]}')
+        print(f'Using section: {section_name} with {len(section_data)} items')
 
-        # Parse the specific dataset
-        parser_func = globals()[f'parse_{config[\\\"parser\\\"]}']
-        df = parser_func(section_data)
+        # Parse data based on detected type
+        df = detect_data_type_and_parse(section_data, dataset_pattern)
 
         if df.empty:
-            raise ValueError(f'No data could be parsed for dataset {dataset_name}')
+            raise ValueError(f'No data could be parsed for pattern: {dataset_pattern}')
 
-        print(f'Parsed dataset shape: {df.shape}')
+        print(f'✓ Parsed dataset shape: {df.shape}')
         print(f'Columns: {list(df.columns)}')
-        print(f'First few rows:')
-        print(df.head())
+        print(f'First 3 rows:')
+        print(df.head(3))
 
-        # Check if target column exists
+        # Auto-detect target column if not specified
+        if not target_column:
+            # Look for common target columns
+            possible_targets = ['reachable', 'value', 'description', 'cpu_used', 'memory_used']
+            for col in possible_targets:
+                if col in df.columns:
+                    target_column = col
+                    break
+            if not target_column and len(df.columns) > 0:
+                target_column = df.columns[-1]  # Use last column as fallback
+        
+        print(f'Using target column: {target_column}')
+
         if target_column not in df.columns:
-            raise ValueError(f'Target column {target_column} not found in dataset. Available columns: {list(df.columns)}')
+            raise ValueError(f'Target column {target_column} not found. Available columns: {list(df.columns)}')
 
         # Split data
         train_df, test_df = train_test_split(
@@ -292,7 +331,8 @@ implementation:
         # Create dataset info
         feature_columns = [col for col in df.columns if col != target_column]
         dataset_info = {
-            'dataset_name': dataset_name,
+            'dataset_name': dataset_pattern,
+            'section_used': section_name,
             'total_samples': len(df),
             'train_samples': len(train_df),
             'test_samples': len(test_df),
@@ -302,7 +342,7 @@ implementation:
             'shuffle_seed': shuffle_seed,
             'columns': list(df.columns),
             'dtypes': {col: str(df[col].dtype) for col in df.columns},
-            'config_used': config
+            'detection_method': 'dynamic'
         }
 
         # Save outputs
@@ -316,10 +356,10 @@ implementation:
         with open(dataset_info_path, 'wb') as f:
             pickle.dump(dataset_info, f)
 
-        print('Dataset loading complete!')
-        print(f'Train data saved to: {train_data_path}')
-        print(f'Test data saved to: {test_data_path}')
-        print(f'Dataset info saved to: {dataset_info_path}')
+        print('✓ Dynamic dataset loading complete!')
+        print(f'Train data: {train_data_path}')
+        print(f'Test data: {test_data_path}')
+        print(f'Dataset info: {dataset_info_path}')
         " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
     args:
       - {inputValue: cdn_url}
