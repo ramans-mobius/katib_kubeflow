@@ -1,4 +1,4 @@
-name: MAR File Creator from Downloads Re
+name: MAR File Creator from Downloads 
 description: Creates a torch-model-archiver MAR file using downloaded handler.py and trained_resnet_model.pth files along with the ResNet model from nesy_factory.CNNs.
 inputs:
   - {name: handler_file, type: String, description: "Directory containing downloaded handler.py file"}
@@ -32,15 +32,15 @@ implementation:
         import glob
 
         def find_resnet_module():
-            # Try nesy_factory.CNN.resnet module first (correct path)
+            # Try nesy_factory.CNNs.resnet module first (correct path)
             try:
-                from nesy_factory.CNN.resnet import ResNet
-                import nesy_factory.CNN.resnet as resnet_module
+                from nesy_factory.CNNs.resnet import ResNet
+                import nesy_factory.CNNs.resnet as resnet_module
                 resnet_file = resnet_module.__file__
                 print("Found nesy_factory.CNNs.resnet module at: " + resnet_file)
                 
                 # Create a model file for torch-model-archiver using nesy_factory ResNet class
-                resnet_model_content = "# ResNet model file for torch-model-archiver\\nfrom nesy_factory.CNN.resnet import ResNet\\n\\n# Export the ResNet class that can be used\\n__all__ = ['ResNet']\\n"
+                resnet_model_content = "# ResNet model file for torch-model-archiver\\nfrom nesy_factory.CNNs.resnet import ResNet\\n\\n# Export the ResNet class that can be used\\n__all__ = ['ResNet']\\n"
                 
                 local_resnet = os.path.join(os.getcwd(), 'resnet_model.py')
                 with open(local_resnet, 'w') as f:
