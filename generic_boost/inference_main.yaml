@@ -1,4 +1,4 @@
-name: Boosting Inference Predictor
+name: 2 Boosting Inference Predictor
 description: Makes predictions using loaded model and data
 inputs:
   - name: loaded_model
@@ -27,6 +27,14 @@ implementation:
         import argparse
 
         print("STARTING BOOSTING INFERENCE PREDICTOR")
+
+        # Define the same class used in the loader
+        class InferenceDataWrapper:
+            def __init__(self, X_data, original_data, source):
+                self.X_inference = X_data
+                self.original_data = original_data
+                self.feature_columns = list(X_data.columns)
+                self.data_source = source
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--loaded_model', type=str, required=True)
