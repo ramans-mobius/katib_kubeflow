@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Trainer
+name: Generic Boosting Trainer
 description: Trains boosting algorithms based on configuration with algorithm-specific metrics
 inputs:
   - name: data_path
@@ -25,24 +25,44 @@ implementation:
   container:
     image: nikhilv215/nesy-factory:v22
     command:
-      - sh
+      - python3
+      - -u
       - -c
       - |
-        set -e
-        echo "Installing required packages..."
-        python3 -m pip install --quiet --no-warn-script-location pandas numpy scikit-learn xgboost catboost lightgbm
-        echo "Packages installed successfully"
-        
-        python3 -u -c "
         import sys, os, pickle, json, pandas as pd, numpy as np
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
         from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor
-        from xgboost import XGBRegressor
-        from catboost import CatBoostRegressor
-        from lightgbm import LGBMRegressor
         import argparse
+        import subprocess
 
-        print('STARTING BOOSTING TRAINER')
+        print("STARTING BOOSTING TRAINER")
+
+        # Install required packages first
+        print("Installing required packages...")
+        packages = ['xgboost', 'catboost', 'lightgbm']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+        
+        # Now import the packages that were just installed
+        try:
+            from xgboost import XGBRegressor
+        except ImportError:
+            print("Warning: xgboost not available")
+            XGBRegressor = None
+        try:
+            from catboost import CatBoostRegressor
+        except ImportError:
+            print("Warning: catboost not available")
+            CatBoostRegressor = None
+        try:
+            from lightgbm import LGBMRegressor
+        except ImportError:
+            print("Warning: lightgbm not available")
+            LGBMRegressor = None
 
         class DataWrapper:
             def __init__(self, data_dict=None):
@@ -58,32 +78,31 @@ implementation:
         parser.add_argument('--model_coefficients', type=str, required=True)
         args = parser.parse_args()
 
-        print('Arguments loaded')
+        print("Arguments loaded")
 
-        # Check if input paths exist
         if not os.path.exists(args.data_path):
-            print('ERROR: data_path does not exist!')
+            print("ERROR: data_path does not exist!")
             sys.exit(1)
         if not os.path.exists(args.preprocessing_pipeline):
-            print('ERROR: preprocessing_pipeline path does not exist!')
+            print("ERROR: preprocessing_pipeline path does not exist!")
             sys.exit(1)
 
         # Load data
         try:
             with open(args.data_path, 'rb') as f:
                 data_wrapper = pickle.load(f)
-            print('Data loaded successfully')
+            print("Data loaded successfully")
         except Exception as e:
-            print('ERROR loading data: ' + str(e))
+            print("ERROR loading data: " + str(e))
             sys.exit(1)
 
         # Load preprocessor
         try:
             with open(args.preprocessing_pipeline, 'rb') as f:
                 preprocessor = pickle.load(f)
-            print('Preprocessing pipeline loaded successfully')
+            print("Preprocessing pipeline loaded successfully")
         except Exception as e:
-            print('ERROR loading preprocessor: ' + str(e))
+            print("ERROR loading preprocessor: " + str(e))
             sys.exit(1)
 
         # Load config
@@ -91,9 +110,9 @@ implementation:
             config = json.loads(args.config)
             algorithm = config.get('algorithm', 'GradientBoosting')
             parameters = config.get('parameters', {})
-            print(f'Config loaded: algorithm={algorithm}')
+            print("Config loaded: " + algorithm)
         except Exception as e:
-            print('ERROR loading config: ' + str(e))
+            print("ERROR loading config: " + str(e))
             sys.exit(1)
 
         # Extract data from wrapper
@@ -104,19 +123,25 @@ implementation:
         dataset_info = getattr(data_wrapper, 'dataset_info', {})
 
         print(f'Training {algorithm} on {X_train.shape[0]} samples')
-        print(f'Dataset: {dataset_info.get(\"dataset_name\", \"Unknown\")}')
+        print(f'Dataset: {dataset_info.get("dataset_name", "Unknown")}')
 
-        # Algorithm mapping
+        # Algorithm mapping with fallbacks
         algorithm_map = {
             'GradientBoosting': GradientBoostingRegressor,
             'AdaBoost': AdaBoostRegressor,
-            'XGBoost': XGBRegressor,
-            'CatBoost': CatBoostRegressor,
-            'LightGBM': LGBMRegressor
         }
+        
+        # Add optional algorithms if available
+        if XGBRegressor:
+            algorithm_map['XGBoost'] = XGBRegressor
+        if CatBoostRegressor:
+            algorithm_map['CatBoost'] = CatBoostRegressor
+        if LGBMRegressor:
+            algorithm_map['LightGBM'] = LGBMRegressor
 
         if algorithm not in algorithm_map:
-            raise ValueError(f'Algorithm {algorithm} not supported. Available: {list(algorithm_map.keys())}')
+            available = list(algorithm_map.keys())
+            raise ValueError(f'Algorithm {algorithm} not supported. Available: {available}')
 
         model_class = algorithm_map[algorithm]
 
@@ -136,9 +161,9 @@ implementation:
         try:
             model = model_class(**final_params)
             model.fit(X_train, y_train)
-            print('Model training completed successfully')
+            print("Model training completed successfully")
         except Exception as e:
-            print('ERROR during model training: ' + str(e))
+            print("ERROR during model training: " + str(e))
             sys.exit(1)
 
         # Predictions
@@ -204,13 +229,12 @@ implementation:
             with open(args.model_coefficients, 'w') as f:
                 f.write(coefficients_csv)
             
-            print('Training completed successfully')
+            print("Training completed successfully")
             print(f'Test R²: {test_r2:.4f}')
             print(f'Test RMSE: {test_rmse:.4f}')
         except Exception as e:
-            print('ERROR saving results: ' + str(e))
+            print("ERROR saving results: " + str(e))
             sys.exit(1)
-        "
     args:
       - --data_path
       - {inputPath: data_path}
