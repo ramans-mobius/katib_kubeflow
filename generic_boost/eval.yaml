@@ -1,0 +1,184 @@
+name: Generic Boosting Evaluator
+description: Evaluates trained boosting model with algorithm-specific evaluation metrics
+inputs:
+  - name: trained_model
+    type: Model
+    description: Trained model from trainer
+  - name: data_path
+    type: Dataset
+    description: Preprocessed data from preprocessor
+  - name: model_coefficients
+    type: String
+    description: Feature importances from trainer
+outputs:
+  - name: metrics
+    type: Metrics
+    description: Evaluation metrics
+  - name: metrics_json
+    type: String
+    description: Metrics as JSON string
+  - name: evaluation_report
+    type: String
+    description: Comprehensive evaluation report
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas numpy scikit-learn
+        python3 -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        trained_model_path = sys.argv[1]
+        data_path = sys.argv[2]
+        model_coefficients_path = sys.argv[3]
+        metrics_path = sys.argv[4]
+        metrics_json_path = sys.argv[5]
+        evaluation_report_path = sys.argv[6]
+        
+        print('Starting model evaluation...')
+        
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+        
+        with open(trained_model_path, 'rb') as f:
+            model = pickle.load(f)
+        
+        with open(data_path, 'rb') as f:
+            data_wrapper = pickle.load(f)
+        
+        with open(model_coefficients_path, 'r') as f:
+            coefficients_csv = f.read()
+        
+        X_test = data_wrapper.X_test
+        y_test = data_wrapper.y_test
+        dataset_info = data_wrapper.dataset_info
+        algorithm = getattr(data_wrapper, 'algorithm', 'Unknown')
+        
+        print(f'Evaluating {algorithm} on {len(y_test)} test samples')
+        
+        y_pred = model.predict(X_test)
+        
+        # Algorithm-specific evaluation metrics
+        dataset_name = dataset_info.get('dataset_name', '')
+        if 'Graph' in dataset_name:
+            # Graph evaluation metrics
+            r2 = r2_score(y_test, y_pred)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
+            metrics_description = 'Graph link prediction accuracy and anomaly detection'
+            
+        elif 'LLM' in dataset_name:
+            # LLM evaluation metrics
+            r2 = r2_score(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            accuracy = accuracy_score(y_test, (y_pred > 0.5).astype(int))
+            mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
+            metrics_description = 'NLP model performance and text coherence'
+            
+        elif 'LineChart' in dataset_name:
+            # Timeseries evaluation metrics
+            r2 = r2_score(y_test, y_pred)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
+            metrics_description = 'Timeseries forecasting accuracy'
+            
+        elif 'GPU' in dataset_name:
+            # GPU optimization metrics
+            r2 = r2_score(y_test, y_pred)
+            mse = mean_squared_error(y_test, y_pred)
+            mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
+            metrics_description = 'GPU throughput and latency optimization'
+            
+        else:
+            # Default regression metrics
+            r2 = r2_score(y_test, y_pred)
+            mae = mean_absolute_error(y_test, y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
+            metrics_description = 'General regression performance'
+        
+        # Comprehensive metrics
+        metrics = {
+            'algorithm': algorithm,
+            'dataset': dataset_name,
+            'metrics_description': metrics_description,
+            'test_metrics': {
+                'r2_score': float(r2),
+                'mae': float(mae) if 'mae' in locals() else None,
+                'rmse': float(rmse) if 'rmse' in locals() else None,
+                'mse': float(mse) if 'mse' in locals() else None,
+                'mape': float(mape),
+                'accuracy': float(accuracy) if 'accuracy' in locals() else None
+            },
+            'target_statistics': {
+                'actual_mean': float(np.mean(y_test)),
+                'actual_std': float(np.std(y_test)),
+                'predicted_mean': float(np.mean(y_pred)),
+                'predicted_std': float(np.std(y_pred)),
+                'actual_min': float(np.min(y_test)),
+                'actual_max': float(np.max(y_test)),
+                'predicted_min': float(np.min(y_pred)),
+                'predicted_max': float(np.max(y_pred))
+            },
+            'model_info': {
+                'test_samples': len(y_test),
+                'features_used': X_test.shape[1],
+                'algorithm_type': algorithm
+            }
+        }
+        
+        # Evaluation report
+        evaluation_report = f'BOOSTING ALGORITHM EVALUATION REPORT'
+        evaluation_report += f'========================================='
+        evaluation_report += f'Algorithm: {algorithm}'
+        evaluation_report += f'Dataset: {dataset_name}'
+        evaluation_report += f'Description: {metrics_description}'
+        evaluation_report += f''
+        evaluation_report += f'PERFORMANCE METRICS:'
+        evaluation_report += f'R² Score: {r2:.3f}'
+        if 'mae' in locals(): evaluation_report += f'MAE: {mae:.3f}'
+        if 'rmse' in locals(): evaluation_report += f'RMSE: {rmse:.3f}'
+        if 'mse' in locals(): evaluation_report += f'MSE: {mse:.3f}'
+        evaluation_report += f'MAPE: {mape:.1f}%'
+        if 'accuracy' in locals(): evaluation_report += f'Accuracy: {accuracy:.3f}'
+        evaluation_report += f''
+        evaluation_report += f'TARGET STATISTICS:'
+        evaluation_report += f'Actual - Mean: {np.mean(y_test):.3f}, Std: {np.std(y_test):.3f}'
+        evaluation_report += f'Predicted - Mean: {np.mean(y_pred):.3f}, Std: {np.std(y_pred):.3f}'
+        evaluation_report += f''
+        evaluation_report += f'TEST SAMPLES: {len(y_test)}'
+        evaluation_report += f'FEATURES USED: {X_test.shape[1]}'
+        
+        os.makedirs(os.path.dirname(metrics_path) or '.', exist_ok=True)
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        
+        with open(metrics_json_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        
+        with open(evaluation_report_path, 'w') as f:
+            f.write(evaluation_report)
+        
+        print('Evaluation complete!')
+        print(f'Final R²: {r2:.3f}')
+        " -- "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+    args:
+      - {inputPath: trained_model}
+      - {inputPath: data_path}
+      - {inputPath: model_coefficients}
+      - {outputPath: metrics}
+      - {outputPath: metrics_json}
+      - {outputPath: evaluation_report}
