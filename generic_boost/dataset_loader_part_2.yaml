@@ -1,0 +1,193 @@
+name: Generic Data Extractor
+description: Extracts specific dataset from raw data file and prepares train/test splits
+inputs:
+  - name: raw_data_file
+    type: Dataset
+    description: Raw data file from downloader
+  - name: dataset_name
+    type: String
+    description: Dataset name to extract (Total Metrics, Server Reach-ability, Cluster Health, API Performance QPS, Knowledge Graph)
+  - name: target_column
+    type: String
+    description: Target column name for prediction
+  - name: train_split
+    type: Float
+    description: Train split ratio (default 0.7)
+  - name: shuffle_seed
+    type: Integer
+    description: Random seed for shuffling
+outputs:
+  - name: train_data
+    type: Dataset
+    description: Training dataset
+  - name: test_data
+    type: Dataset
+    description: Testing dataset
+  - name: dataset_info
+    type: DatasetInfo
+    description: Dataset metadata and information
+
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas numpy
+        python3 -c "
+        import sys, os, json, pickle, pandas as pd
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        raw_data_path = sys.argv[1]
+        dataset_name = sys.argv[2]
+        target_column = sys.argv[3]
+        train_split = float(sys.argv[4])
+        shuffle_seed = int(sys.argv[5])
+        train_data_path = sys.argv[6]
+        test_data_path = sys.argv[7]
+        dataset_info_path = sys.argv[8]
+        
+        print('Starting data extraction...')
+        print(f'dataset_name: {dataset_name}')
+        print(f'target_column: {target_column}')
+        print(f'train_split: {train_split}')
+        print(f'shuffle_seed: {shuffle_seed}')
+        
+        with open(raw_data_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        print(f'Raw data file size: {len(content)} characters')
+        
+        lines = content.splitlines()
+        current_section = None
+        json_buffer = []
+        in_target_section = False
+        in_json_array = False
+        
+        # Available datasets from the debug output
+        available_datasets = {
+            'Total Metrics': 'Total Metrics',
+            'Server Reach-ability': 'Server Reach-ability', 
+            'Cluster Health': 'Cluster Health',
+            'API Performance QPS': 'API Performance QPS',
+            'Knowledge Graph': 'Knowledge Graph'
+        }
+        
+        if dataset_name not in available_datasets:
+            raise ValueError(f'Dataset {dataset_name} not found. Available: {list(available_datasets.keys())}')
+        
+        print(f'Looking for dataset: {dataset_name}')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check for section headers (they end with 'Data:')
+            if line.endswith('Data:'):
+                current_section = line.replace('Data:', '').strip()
+                print(f'Found section: {current_section}')
+                
+                if current_section == dataset_name:
+                    in_target_section = True
+                    print(f'MATCH FOUND! Entering target section: {dataset_name}')
+                    continue
+                else:
+                    in_target_section = False
+                    continue
+                    
+            if in_target_section:
+                if line == '[':
+                    in_json_array = True
+                    json_buffer = []  # Start fresh JSON array
+                    continue
+                    
+                if in_json_array:
+                    if line == ']':
+                        in_json_array = False
+                        print(f'Found end of JSON array. Collected {len(json_buffer)} lines')
+                        break
+                    json_buffer.append(line)
+        
+        if not json_buffer:
+            raise ValueError(f'No JSON data found for dataset: {dataset_name}')
+        
+        print(f'Attempting to parse {len(json_buffer)} JSON lines...')
+        
+        # Try to parse the JSON
+        try:
+            json_str = '[' + ','.join(json_buffer) + ']'
+            data = json.loads(json_str)
+            print(f'SUCCESS: Parsed {len(data)} JSON objects')
+        except json.JSONDecodeError as e:
+            print(f'JSON parsing failed: {e}')
+            print(f'First 200 chars of JSON: {json_str[:200]}...')
+            raise
+        
+        df = pd.json_normalize(data)
+        
+        print(f'Extracted dataset shape: {df.shape}')
+        print(f'Dataset columns: {list(df.columns)}')
+        
+        # Auto-detect target column if not provided or not found
+        if target_column not in df.columns:
+            print(f'Target column {target_column} not found. Available columns: {list(df.columns)}')
+            # Try to find a suitable target column
+            possible_targets = [col for col in df.columns if any(keyword in col.lower() for keyword in ['value', 'reachable', 'used', 'cpu', 'memory', 'status'])]
+            if possible_targets:
+                target_column = possible_targets[0]
+                print(f'Auto-selected target column: {target_column}')
+            else:
+                target_column = df.columns[0]
+                print(f'Using first column as target: {target_column}')
+        
+        print(f'Using target column: {target_column}')
+        
+        # Prepare data
+        df = df.sample(frac=1, random_state=shuffle_seed).reset_index(drop=True)
+        train_size = int(len(df) * train_split)
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
+        
+        feature_columns = [col for col in df.columns if col != target_column]
+        
+        dataset_info = {
+            'dataset_name': dataset_name,
+            'total_samples': len(df),
+            'train_samples': len(train_df),
+            'test_samples': len(test_df),
+            'target_column': target_column,
+            'feature_columns': feature_columns,
+            'all_columns': list(df.columns),
+            'train_split_ratio': train_split,
+            'shuffle_seed': shuffle_seed
+        }
+        
+        os.makedirs(os.path.dirname(train_data_path) or '.', exist_ok=True)
+        train_df.to_csv(train_data_path, index=False)
+        
+        os.makedirs(os.path.dirname(test_data_path) or '.', exist_ok=True)
+        test_df.to_csv(test_data_path, index=False)
+        
+        os.makedirs(os.path.dirname(dataset_info_path) or '.', exist_ok=True)
+        with open(dataset_info_path, 'wb') as f:
+            pickle.dump(dataset_info, f)
+        
+        print('Data extraction complete!')
+        print(f'Train samples: {len(train_df)}')
+        print(f'Test samples: {len(test_df)}')
+        print(f'Features: {len(feature_columns)}')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+    args:
+      - {inputPath: raw_data_file}
+      - {inputValue: dataset_name}
+      - {inputValue: target_column}
+      - {inputValue: train_split}
+      - {inputValue: shuffle_seed}
+      - {outputPath: train_data}
+      - {outputPath: test_data}
+      - {outputPath: dataset_info}
