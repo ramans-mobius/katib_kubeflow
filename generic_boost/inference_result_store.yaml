@@ -1,9 +1,13 @@
-name: Boosting Store Inference Results
-description: Stores boosting inference results in database schema
+name: Inference Results Storage
+description: Stores inference prediction results in database
 inputs:
-  - name: schema_id
-    type: String
   - name: prediction_results
+    type: String
+    description: Detailed prediction results
+  - name: data_source_info
+    type: String
+    description: Information about data source
+  - name: schema_id
     type: String
   - name: model_id
     type: String
@@ -19,8 +23,10 @@ inputs:
     type: String
   - name: domain
     type: String
-  - name: data_source
+outputs:
+  - name: storage_confirmation
     type: String
+    description: Confirmation of successful storage
 
 implementation:
   container:
@@ -29,7 +35,7 @@ implementation:
       - sh
       - -c
       - |
-        pip install requests
+        pip install requests numpy
         exec "$0" "$@"
       - python3
       - -u
@@ -41,8 +47,9 @@ implementation:
         import numpy as np
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('--schema_id', type=str, required=True)
         parser.add_argument('--prediction_results', type=str, required=True)
+        parser.add_argument('--data_source_info', type=str, required=True)
+        parser.add_argument('--schema_id', type=str, required=True)
         parser.add_argument('--model_id', type=str, required=True)
         parser.add_argument('--execution_id', type=str, required=True)
         parser.add_argument('--tenant_id', type=str, required=True)
@@ -50,7 +57,7 @@ implementation:
         parser.add_argument('--algorithm_type', type=str, required=True)
         parser.add_argument('--bearer_auth_token', type=str, required=True)
         parser.add_argument('--domain', type=str, required=True)
-        parser.add_argument('--data_source', type=str, required=True)
+        parser.add_argument('--storage_confirmation', type=str, required=True)
         args = parser.parse_args()
 
         # Read auth token and tenant_id
@@ -59,51 +66,48 @@ implementation:
         with open(args.tenant_id, 'r') as f:
             tenant_id = f.read().strip()
 
-        # Load data source info
-        with open(args.data_source, 'r') as f:
+        # Load prediction results and data source info
+        with open(args.prediction_results, 'r') as f:
+            prediction_results = json.load(f)
+        with open(args.data_source_info, 'r') as f:
             data_source_info = json.load(f)
 
-        # Load boosting inference results
-        with open(args.prediction_results, 'r') as f:
-            boosting_results = json.load(f)
+        print("=== Storing Inference Results ===")
 
-        print("=== Processing Boosting Inference Results ===")
-        
-        # Calculate statistics from predictions
-        predictions = [result['predicted_value'] for result in boosting_results]
-        confidence_scores = [result['confidence_score'] for result in boosting_results]
-        
-        total_samples = len(predictions)
-        mean_prediction = float(np.mean(predictions))
-        mean_confidence = float(np.mean(confidence_scores))
+        # Calculate statistics
+        predictions = [result['predicted_value'] for result in prediction_results]
+        confidence_scores = [result['confidence_score'] for result in prediction_results]
         
         # Get node distribution
         node_types = {}
-        for result in boosting_results:
+        for result in prediction_results:
             node_type = result.get('node_type', 'unknown')
             node_types[node_type] = node_types.get(node_type, 0) + 1
 
-        # Prepare data for schema - adapted for boosting regression
+        # Prepare schema data
         schema_data = {
-            # Required fields from original SLM schema
+            # Required SLM schema fields
             "tenant_id": tenant_id,
             "projectId": args.project_id,
             "execution_id": args.execution_id,
             "infernce_input": "spatio_temporal_forecasting",
-            "infernce_output": f"mean_prediction_{mean_prediction:.4f}",
+            "infernce_output": f"predictions_completed",
             "infernce_score_blue": 0.0,
             "inference_score_rouge": 0.0,
             
-            # Boosting-specific columns
+            # Inference-specific data
             "model_id": args.model_id,
             "algorithm_type": args.algorithm_type,
             "data_source": data_source_info.get('data_source', 'unknown'),
-            "total_predictions": total_samples,
-            "mean_prediction": mean_prediction,
-            "mean_confidence": mean_confidence,
-            "prediction_range": [float(min(predictions)), float(max(predictions))],
+            "total_predictions": len(predictions),
+            "mean_prediction": float(np.mean(predictions)),
+            "mean_confidence": float(np.mean(confidence_scores)),
+            "prediction_min": float(min(predictions)),
+            "prediction_max": float(max(predictions)),
             "node_type_distribution": node_types,
-            "features_used": boosting_results[0].get('features_used', 0) if boosting_results else 0
+            "model_type": data_source_info.get('model_type', 'unknown'),
+            "features_used": prediction_results[0].get('features_used', 0) if prediction_results else 0,
+            "storage_status": "success"
         }
 
         print("=== Prepared Schema Data ===")
@@ -123,20 +127,39 @@ implementation:
         try:
             response = requests.post(create_url, headers=headers, json=create_payload, timeout=60)
             response.raise_for_status()
-            print("Successfully stored boosting inference results")
-            print(f"Response: {response.json()}")
+            
+            # Save confirmation
+            os.makedirs(os.path.dirname(args.storage_confirmation), exist_ok=True)
+            with open(args.storage_confirmation, 'w') as f:
+                json.dump({
+                    "status": "success",
+                    "message": f"Stored {len(predictions)} predictions successfully",
+                    "response": response.json(),
+                    "execution_id": args.execution_id
+                }, f, indent=2)
+                
+            print("Successfully stored inference results")
+            print(f"Stored {len(predictions)} predictions")
             
         except requests.exceptions.RequestException as e:
-            print(f"Error storing results: {e}")
-            if e.response is not None:
-                print(f"Status Code: {e.response.status_code}")
-                print(f"Response: {e.response.text}")
+            error_msg = f"Error storing results: {e}"
+            print(error_msg)
+            # Save error confirmation
+            os.makedirs(os.path.dirname(args.storage_confirmation), exist_ok=True)
+            with open(args.storage_confirmation, 'w') as f:
+                json.dump({
+                    "status": "error",
+                    "message": error_msg,
+                    "execution_id": args.execution_id
+                }, f, indent=2)
             exit(1)
     args:
-      - --schema_id
-      - {inputValue: schema_id}
       - --prediction_results
       - {inputPath: prediction_results}
+      - --data_source_info
+      - {inputPath: data_source_info}
+      - --schema_id
+      - {inputValue: schema_id}
       - --model_id
       - {inputValue: model_id}
       - --execution_id
@@ -151,5 +174,5 @@ implementation:
       - {inputPath: bearer_auth_token}
       - --domain
       - {inputValue: domain}
-      - --data_source
-      - {inputPath: data_source}
+      - --storage_confirmation
+      - {outputPath: storage_confirmation}
