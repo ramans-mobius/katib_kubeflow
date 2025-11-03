@@ -1,1 +1,202 @@
 
+name: Generic Boosting Trainer
+description: Trains boosting algorithms based on configuration with algorithm-specific metrics
+inputs:
+  - name: data_path
+    type: Dataset
+    description: Preprocessed data from preprocessor
+  - name: preprocessing_pipeline
+    type: Model
+    description: Preprocessing pipeline from preprocessor
+  - name: config
+    type: String
+    description: Algorithm configuration as JSON string
+outputs:
+  - name: trained_model
+    type: Model
+    description: Trained boosting model
+  - name: training_history
+    type: String
+    description: Training metrics and history
+  - name: model_coefficients
+    type: String
+    description: Feature importances and coefficients
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas numpy scikit-learn xgboost catboost lightgbm
+        python3 -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+        from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor
+        from xgboost import XGBRegressor
+        from catboost import CatBoostRegressor
+        from lightgbm import LGBMRegressor
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        data_path = sys.argv[1]
+        preprocessing_path = sys.argv[2]
+        config_str = sys.argv[3]
+        trained_model_path = sys.argv[4]
+        training_history_path = sys.argv[5]
+        model_coefficients_path = sys.argv[6]
+        
+        print('Starting model training...')
+        
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+        
+        with open(data_path, 'rb') as f:
+            data_wrapper = pickle.load(f)
+        
+        with open(preprocessing_path, 'rb') as f:
+            preprocessor = pickle.load(f)
+        
+        config = json.loads(config_str)
+        algorithm = config.get('algorithm', 'GradientBoosting')
+        parameters = config.get('parameters', {})
+        
+        X_train = data_wrapper.X_train
+        y_train = data_wrapper.y_train
+        X_test = data_wrapper.X_test
+        y_test = data_wrapper.y_test
+        dataset_info = data_wrapper.dataset_info
+        
+        print(f'Training {algorithm} on {X_train.shape[0]} samples')
+        
+        # Algorithm mapping
+        algorithm_map = {
+            'GradientBoosting': GradientBoostingRegressor,
+            'AdaBoost': AdaBoostRegressor,
+            'XGBoost': XGBRegressor,
+            'CatBoost': CatBoostRegressor,
+            'LightGBM': LGBMRegressor
+        }
+        
+        if algorithm not in algorithm_map:
+            raise ValueError(f'Algorithm {algorithm} not supported. Available: {list(algorithm_map.keys())}')
+        
+        model_class = algorithm_map[algorithm]
+        
+        # Set default parameters if not provided
+        default_params = {
+            'GradientBoosting': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 3, 'random_state': 42},
+            'AdaBoost': {'n_estimators': 50, 'learning_rate': 1.0, 'random_state': 42},
+            'XGBoost': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 6, 'random_state': 42},
+            'CatBoost': {'iterations': 100, 'learning_rate': 0.1, 'depth': 6, 'random_state': 42, 'verbose': False},
+            'LightGBM': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': -1, 'random_state': 42}
+        }
+        
+        final_params = {**default_params.get(algorithm, {}), **parameters}
+        print(f'Using parameters: {final_params}')
+        
+        model = model_class(**final_params)
+        model.fit(X_train, y_train)
+        
+        # Predictions
+        y_pred_train = model.predict(X_train)
+        y_pred_test = model.predict(X_test)
+        
+        # Algorithm-specific metrics
+        if 'Graph' in dataset_info.get('dataset_name', ''):
+            # Graph-specific metrics
+            train_r2 = r2_score(y_train, y_pred_train)
+            test_r2 = r2_score(y_test, y_pred_test)
+            train_mae = mean_absolute_error(y_train, y_pred_train)
+            test_mae = mean_absolute_error(y_test, y_pred_test)
+            train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
+            test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+            mape_train = np.mean(np.abs((y_train - y_pred_train) / np.where(y_train != 0, y_train, 1))) * 100
+            mape_test = np.mean(np.abs((y_test - y_pred_test) / np.where(y_test != 0, y_test, 1))) * 100
+            
+        elif 'LLM' in dataset_info.get('dataset_name', ''):
+            # LLM-specific metrics
+            from sklearn.metrics import accuracy_score
+            train_r2 = r2_score(y_train, y_pred_train)
+            test_r2 = r2_score(y_test, y_pred_test)
+            train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
+            test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+            # For classification tasks in LLM
+            train_acc = accuracy_score(y_train, (y_pred_train > 0.5).astype(int))
+            test_acc = accuracy_score(y_test, (y_pred_test > 0.5).astype(int))
+        else:
+            # Standard regression metrics
+            train_r2 = r2_score(y_train, y_pred_train)
+            test_r2 = r2_score(y_test, y_pred_test)
+            train_mae = mean_absolute_error(y_train, y_pred_train)
+            test_mae = mean_absolute_error(y_test, y_pred_test)
+            train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
+            test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
+        
+        # Feature importances
+        feature_names = list(X_train.columns)
+        if hasattr(model, 'feature_importances_'):
+            importances = model.feature_importances_
+            coefficients_data = []
+            for name, importance in zip(feature_names, importances):
+                coefficients_data.append({
+                    'feature': name,
+                    'importance': float(importance),
+                    'importance_percent': float(importance * 100)
+                })
+        else:
+            coefficients_data = [{'feature': name, 'importance': 0, 'importance_percent': 0} for name in feature_names]
+        
+        # Training history
+        history = {
+            'algorithm': algorithm,
+            'parameters': final_params,
+            'train_metrics': {
+                'r2_score': float(train_r2),
+                'mae': float(train_mae) if 'train_mae' in locals() else None,
+                'rmse': float(train_rmse),
+                'accuracy': float(train_acc) if 'train_acc' in locals() else None,
+                'mape': float(mape_train) if 'mape_train' in locals() else None
+            },
+            'test_metrics': {
+                'r2_score': float(test_r2),
+                'mae': float(test_mae) if 'test_mae' in locals() else None,
+                'rmse': float(test_rmse),
+                'accuracy': float(test_acc) if 'test_acc' in locals() else None,
+                'mape': float(mape_test) if 'mape_test' in locals() else None
+            },
+            'feature_importances': coefficients_data,
+            'training_samples': len(X_train),
+            'test_samples': len(X_test),
+            'dataset_name': dataset_info.get('dataset_name', '')
+        }
+        
+        os.makedirs(os.path.dirname(trained_model_path) or '.', exist_ok=True)
+        with open(trained_model_path, 'wb') as f:
+            pickle.dump(model, f)
+        
+        os.makedirs(os.path.dirname(training_history_path) or '.', exist_ok=True)
+        with open(training_history_path, 'w') as f:
+            json.dump(history, f, indent=2)
+        
+        coefficients_df = pd.DataFrame(coefficients_data)
+        coefficients_csv = coefficients_df.to_csv(index=False)
+        with open(model_coefficients_path, 'w') as f:
+            f.write(coefficients_csv)
+        
+        print('Training complete!')
+        print(f'Test R²: {test_r2:.3f}')
+        print(f'Test RMSE: {test_rmse:.3f}')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+    args:
+      - {inputPath: data_path}
+      - {inputPath: preprocessing_pipeline}
+      - {inputValue: config}
+      - {outputPath: trained_model}
+      - {outputPath: training_history}
+      - {outputPath: model_coefficients}
