@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Trainer
+name: 3 Generic Boosting Trainer
 description: Trains boosting algorithms based on configuration with algorithm-specific metrics
 inputs:
   - name: data_path
@@ -25,69 +25,82 @@ implementation:
   container:
     image: nikhilv215/nesy-factory:v22
     command:
-      - sh
+      - python3
+      - -u
       - -c
       - |
-        set -e
-        python3 -m pip install --quiet pandas numpy scikit-learn xgboost catboost lightgbm
-        
-        # Create output directories
-        mkdir -p /tmp/outputs/trained_model
-        mkdir -p /tmp/outputs/training_history
-        mkdir -p /tmp/outputs/model_coefficients
-        
-        python3 -c "
         import sys, os, pickle, json, pandas as pd, numpy as np
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
         from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor
         from xgboost import XGBRegressor
         from catboost import CatBoostRegressor
         from lightgbm import LGBMRegressor
-        
-        print('Number of arguments:', len(sys.argv))
-        print('Arguments:', sys.argv)
-        
-        # Check if we have enough arguments
-        if len(sys.argv) < 7:
-            print('Error: Not enough arguments provided')
-            print('Expected: data_path preprocessing_path config_str trained_model_path training_history_path model_coefficients_path')
-            sys.exit(1)
-        
-        data_path = sys.argv[1]
-        preprocessing_path = sys.argv[2]
-        config_str = sys.argv[3]
-        trained_model_path = sys.argv[4]
-        training_history_path = sys.argv[5]
-        model_coefficients_path = sys.argv[6]
-        
-        print('Starting model training...')
-        
-        # Define DataWrapper class
+        import argparse
+
+        print("STARTING BOOSTING TRAINER")
+
         class DataWrapper:
             def __init__(self, data_dict=None):
                 if data_dict:
                     self.__dict__.update(data_dict)
-        
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--data_path', type=str, required=True)
+        parser.add_argument('--preprocessing_pipeline', type=str, required=True)
+        parser.add_argument('--config', type=str, required=True)
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--training_history', type=str, required=True)
+        parser.add_argument('--model_coefficients', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Arguments loaded")
+
+        # Check if input paths exist
+        if not os.path.exists(args.data_path):
+            print("ERROR: data_path does not exist!")
+            sys.exit(1)
+        if not os.path.exists(args.preprocessing_pipeline):
+            print("ERROR: preprocessing_pipeline path does not exist!")
+            sys.exit(1)
+
         # Load data
-        with open(data_path, 'rb') as f:
-            data_wrapper = pickle.load(f)
-        
-        with open(preprocessing_path, 'rb') as f:
-            preprocessor = pickle.load(f)
-        
-        config = json.loads(config_str)
-        algorithm = config.get('algorithm', 'GradientBoosting')
-        parameters = config.get('parameters', {})
-        
+        try:
+            with open(args.data_path, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            print("Data loaded successfully")
+        except Exception as e:
+            print("ERROR loading data: " + str(e))
+            sys.exit(1)
+
+        # Load preprocessor
+        try:
+            with open(args.preprocessing_pipeline, 'rb') as f:
+                preprocessor = pickle.load(f)
+            print("Preprocessing pipeline loaded successfully")
+        except Exception as e:
+            print("ERROR loading preprocessor: " + str(e))
+            sys.exit(1)
+
+        # Load config
+        try:
+            config = json.loads(args.config)
+            algorithm = config.get('algorithm', 'GradientBoosting')
+            parameters = config.get('parameters', {})
+            print(f"Config loaded: algorithm={algorithm}")
+        except Exception as e:
+            print("ERROR loading config: " + str(e))
+            sys.exit(1)
+
+        # Extract data from wrapper
         X_train = data_wrapper.X_train
         y_train = data_wrapper.y_train
         X_test = data_wrapper.X_test
         y_test = data_wrapper.y_test
         dataset_info = getattr(data_wrapper, 'dataset_info', {})
-        
+
         print(f'Training {algorithm} on {X_train.shape[0]} samples')
-        print(f'Dataset: {dataset_info.get(\\\"dataset_name\\\", \\\"Unknown\\\")}')
-        
+        print(f'Dataset: {dataset_info.get("dataset_name", "Unknown")}')
+
         # Algorithm mapping
         algorithm_map = {
             'GradientBoosting': GradientBoostingRegressor,
@@ -96,12 +109,12 @@ implementation:
             'CatBoost': CatBoostRegressor,
             'LightGBM': LGBMRegressor
         }
-        
+
         if algorithm not in algorithm_map:
             raise ValueError(f'Algorithm {algorithm} not supported. Available: {list(algorithm_map.keys())}')
-        
+
         model_class = algorithm_map[algorithm]
-        
+
         # Set default parameters if not provided
         default_params = {
             'GradientBoosting': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 3, 'random_state': 42},
@@ -110,18 +123,23 @@ implementation:
             'CatBoost': {'iterations': 100, 'learning_rate': 0.1, 'depth': 6, 'random_state': 42, 'verbose': False},
             'LightGBM': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': -1, 'random_state': 42}
         }
-        
+
         final_params = {**default_params.get(algorithm, {}), **parameters}
         print(f'Using parameters: {final_params}')
-        
+
         # Train model
-        model = model_class(**final_params)
-        model.fit(X_train, y_train)
-        
+        try:
+            model = model_class(**final_params)
+            model.fit(X_train, y_train)
+            print("Model training completed successfully")
+        except Exception as e:
+            print("ERROR during model training: " + str(e))
+            sys.exit(1)
+
         # Predictions
         y_pred_train = model.predict(X_train)
         y_pred_test = model.predict(X_test)
-        
+
         # Calculate metrics
         train_r2 = r2_score(y_train, y_pred_train)
         test_r2 = r2_score(y_test, y_pred_test)
@@ -129,7 +147,7 @@ implementation:
         test_mae = mean_absolute_error(y_test, y_pred_test)
         train_rmse = np.sqrt(mean_squared_error(y_train, y_pred_train))
         test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
-        
+
         # Feature importances
         feature_names = list(X_train.columns) if hasattr(X_train, 'columns') else [f'feature_{i}' for i in range(X_train.shape[1])]
         if hasattr(model, 'feature_importances_'):
@@ -143,7 +161,7 @@ implementation:
                 })
         else:
             coefficients_data = [{'feature': name, 'importance': 0, 'importance_percent': 0} for name in feature_names]
-        
+
         # Training history
         history = {
             'algorithm': algorithm,
@@ -163,27 +181,40 @@ implementation:
             'test_samples': len(X_test),
             'dataset_name': dataset_info.get('dataset_name', 'Unknown')
         }
-        
+
         # Save outputs
-        with open(trained_model_path, 'wb') as f:
-            pickle.dump(model, f)
-        
-        with open(training_history_path, 'w') as f:
-            json.dump(history, f, indent=2)
-        
-        coefficients_df = pd.DataFrame(coefficients_data)
-        coefficients_csv = coefficients_df.to_csv(index=False)
-        with open(model_coefficients_path, 'w') as f:
-            f.write(coefficients_csv)
-        
-        print('Training complete!')
-        print(f'Test R²: {test_r2:.4f}')
-        print(f'Test RMSE: {test_rmse:.4f}')
-        " "$(inputs.parameters.data_path)" "$(inputs.parameters.preprocessing_pipeline)" "$(inputs.parameters.config)" "/tmp/outputs/trained_model/data" "/tmp/outputs/training_history/data" "/tmp/outputs/model_coefficients/data"
+        try:
+            os.makedirs(os.path.dirname(args.trained_model), exist_ok=True)
+            os.makedirs(os.path.dirname(args.training_history), exist_ok=True)
+            os.makedirs(os.path.dirname(args.model_coefficients), exist_ok=True)
+            
+            with open(args.trained_model, 'wb') as f:
+                pickle.dump(model, f)
+            
+            with open(args.training_history, 'w') as f:
+                json.dump(history, f, indent=2)
+            
+            coefficients_df = pd.DataFrame(coefficients_data)
+            coefficients_csv = coefficients_df.to_csv(index=False)
+            with open(args.model_coefficients, 'w') as f:
+                f.write(coefficients_csv)
+            
+            print("Training completed successfully")
+            print(f'Test R²: {test_r2:.4f}')
+            print(f'Test RMSE: {test_rmse:.4f}')
+        except Exception as e:
+            print("ERROR saving results: " + str(e))
+            sys.exit(1)
     args:
+      - --data_path
       - {inputPath: data_path}
+      - --preprocessing_pipeline
       - {inputPath: preprocessing_pipeline}
+      - --config
       - {inputValue: config}
+      - --trained_model
       - {outputPath: trained_model}
+      - --training_history
       - {outputPath: training_history}
+      - --model_coefficients
       - {outputPath: model_coefficients}
