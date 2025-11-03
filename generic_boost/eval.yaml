@@ -1,4 +1,4 @@
-name: A Generic Boosting Evaluator
+name: Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
@@ -18,7 +18,7 @@ outputs:
     type: String
     description: Metrics as JSON string
   - name: evaluation_report
-  type: String
+    type: String
     description: Comprehensive evaluation report
 
 implementation:
@@ -57,7 +57,7 @@ implementation:
         
         print('Starting model evaluation...')
         
-        # Define DataWrapper class here to match the trainer
+        # Define DataWrapper class (must match trainer)
         class DataWrapper:
             def __init__(self, data_dict=None):
                 if data_dict:
@@ -77,7 +77,7 @@ implementation:
         # Get dataset info safely
         dataset_info = getattr(data_wrapper, 'dataset_info', {})
         algorithm = type(model).__name__
-        dataset_name = dataset_info.get('dataset_name', 'Unknown') if dataset_info else 'Unknown'
+        dataset_name = dataset_info.get('dataset_name', 'Unknown') if hasattr(dataset_info, 'get') else 'Unknown'
         
         print(f'Evaluating {algorithm} on {len(y_test)} test samples')
         print(f'Dataset: {dataset_name}')
