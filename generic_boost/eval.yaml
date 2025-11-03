@@ -18,7 +18,7 @@ outputs:
     type: String
     description: Metrics as JSON string
   - name: evaluation_report
-    type: String
+  type: String
     description: Comprehensive evaluation report
 
 implementation:
@@ -43,10 +43,9 @@ implementation:
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
         
-        # Proper argument parsing - FIXED
+        # Proper argument parsing
         if len(sys.argv) < 7:
             print('Error: Not enough arguments provided')
-            print('Expected: trained_model_path data_path model_coefficients_path metrics_path metrics_json_path evaluation_report_path')
             sys.exit(1)
             
         trained_model_path = sys.argv[1]
@@ -58,6 +57,12 @@ implementation:
         
         print('Starting model evaluation...')
         
+        # Define DataWrapper class here to match the trainer
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+        
         # Load model and data
         with open(trained_model_path, 'rb') as f:
             model = pickle.load(f)
@@ -65,12 +70,14 @@ implementation:
         with open(data_path, 'rb') as f:
             data_wrapper = pickle.load(f)
         
+        # Extract data from wrapper
         X_test = data_wrapper.X_test
         y_test = data_wrapper.y_test
-        dataset_info = getattr(data_wrapper, 'dataset_info', {})
         
+        # Get dataset info safely
+        dataset_info = getattr(data_wrapper, 'dataset_info', {})
         algorithm = type(model).__name__
-        dataset_name = dataset_info.get('dataset_name', 'Unknown')
+        dataset_name = dataset_info.get('dataset_name', 'Unknown') if dataset_info else 'Unknown'
         
         print(f'Evaluating {algorithm} on {len(y_test)} test samples')
         print(f'Dataset: {dataset_name}')
@@ -83,7 +90,7 @@ implementation:
         mae = mean_absolute_error(y_test, y_pred)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         
-        # Avoid division by zero in MAPE
+        # Safe MAPE calculation
         if np.any(y_test == 0):
             mape = np.mean(np.abs((y_test - y_pred) / (np.where(y_test != 0, y_test, 1)))) * 100
         else:
@@ -103,11 +110,16 @@ implementation:
                 'actual_mean': float(np.mean(y_test)),
                 'actual_std': float(np.std(y_test)),
                 'predicted_mean': float(np.mean(y_pred)),
-                'predicted_std': float(np.std(y_pred))
+                'predicted_std': float(np.std(y_pred)),
+                'actual_min': float(np.min(y_test)),
+                'actual_max': float(np.max(y_test)),
+                'predicted_min': float(np.min(y_pred)),
+                'predicted_max': float(np.max(y_pred))
             },
             'model_info': {
                 'test_samples': len(y_test),
-                'features_used': X_test.shape[1]
+                'features_used': X_test.shape[1] if hasattr(X_test, 'shape') else 'unknown',
+                'algorithm_type': algorithm
             }
         }
         
@@ -126,9 +138,11 @@ implementation:
         TARGET STATISTICS:
         Actual - Mean: {np.mean(y_test):.4f}, Std: {np.std(y_test):.4f}
         Predicted - Mean: {np.mean(y_pred):.4f}, Std: {np.std(y_pred):.4f}
+        Actual Range: [{np.min(y_test):.4f}, {np.max(y_test):.4f}]
+        Predicted Range: [{np.min(y_pred):.4f}, {np.max(y_pred):.4f}]
         
         TEST SAMPLES: {len(y_test)}
-        FEATURES USED: {X_test.shape[1]}
+        FEATURES USED: {X_test.shape[1] if hasattr(X_test, 'shape') else 'unknown'}
         '''
         
         # Save outputs
@@ -143,7 +157,8 @@ implementation:
         
         print('Evaluation complete!')
         print(f'Final R²: {r2:.4f}')
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+        print(f'Final RMSE: {rmse:.4f}')
+        " \"\$@\"
     args:
       - {inputPath: trained_model}
       - {inputPath: data_path}
