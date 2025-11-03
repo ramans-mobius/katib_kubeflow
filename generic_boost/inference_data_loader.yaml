@@ -1,22 +1,28 @@
-name: Inference Data Loader
-description: Loads inference data - uses new data if provided, otherwise test data
+name: Inference Data & Model Loader
+description: Loads trained model and inference data for prediction
 inputs:
-  - name: inference_data_url
-    type: String
-    description: URL to new inference data file (optional)
+  - name: trained_model
+    type: Model
+    description: Trained model from training pipeline
   - name: preprocessing_pipeline
     type: Model
     description: Preprocessing pipeline from training
   - name: test_data
     type: Dataset
     description: Test data from training (fallback)
+  - name: inference_data_url
+    type: String
+    description: URL to new inference data (optional)
 outputs:
+  - name: loaded_model
+    type: Model
+    description: Loaded trained model
   - name: processed_inference_data
     type: Dataset
     description: Preprocessed data ready for inference
-  - name: data_source
+  - name: data_source_info
     type: String
-    description: Source of data used (new_data or test_data)
+    description: Information about data source used
 
 implementation:
   container:
@@ -28,18 +34,40 @@ implementation:
       - |
         import sys, os, pickle, json, pandas as pd, numpy as np, requests
         import argparse
+        import subprocess
 
-        print("STARTING INFERENCE DATA LOADER")
+        print("STARTING INFERENCE DATA & MODEL LOADER")
+
+        # Install required packages for model loading
+        print("Installing required packages...")
+        packages = ['lightgbm', 'xgboost', 'catboost']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
 
         parser = argparse.ArgumentParser()
-        parser.add_argument('--inference_data_url', type=str, required=True)
+        parser.add_argument('--trained_model', type=str, required=True)
         parser.add_argument('--preprocessing_pipeline', type=str, required=True)
         parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--inference_data_url', type=str, required=True)
+        parser.add_argument('--loaded_model', type=str, required=True)
         parser.add_argument('--processed_inference_data', type=str, required=True)
-        parser.add_argument('--data_source', type=str, required=True)
+        parser.add_argument('--data_source_info', type=str, required=True)
         args = parser.parse_args()
 
         print("Arguments loaded")
+
+        # Load trained model
+        try:
+            with open(args.trained_model, 'rb') as f:
+                model = pickle.load(f)
+            print(f"Model loaded successfully: {type(model).__name__}")
+        except Exception as e:
+            print("ERROR loading model: " + str(e))
+            sys.exit(1)
 
         # Load preprocessing pipeline
         try:
@@ -50,10 +78,10 @@ implementation:
             print("ERROR loading preprocessor: " + str(e))
             sys.exit(1)
 
+        # Load inference data (new data or test data fallback)
         inference_data = []
         data_source = "test_data"
 
-        # Try to load new inference data first
         if args.inference_data_url and args.inference_data_url != "none":
             try:
                 response = requests.get(args.inference_data_url)
@@ -61,7 +89,7 @@ implementation:
                 content = response.text
                 print(f"Downloaded new inference data: {len(content)} characters")
                 
-                # Parse JSON data from the content
+                # Parse JSON data
                 lines = content.splitlines()
                 json_buffer = []
                 in_json_section = False
@@ -78,7 +106,6 @@ implementation:
                     if in_json_section and line:
                         json_buffer.append(line)
                 
-                # Parse JSON data
                 if json_buffer:
                     json_str = '[' + ','.join(json_buffer) + ']'
                     inference_data = json.loads(json_str)
@@ -94,7 +121,6 @@ implementation:
         if not inference_data:
             try:
                 test_df = pd.read_csv(args.test_data)
-                # Convert test data back to original format
                 inference_data = test_df.to_dict('records')
                 print(f"Using test data: {len(inference_data)} samples")
             except Exception as e:
@@ -117,32 +143,44 @@ implementation:
             
             data_wrapper = InferenceDataWrapper(X_inference, inference_data, data_source)
             
-            # Save processed data
+            # Save outputs
+            os.makedirs(os.path.dirname(args.loaded_model), exist_ok=True)
+            with open(args.loaded_model, 'wb') as f:
+                pickle.dump(model, f)
+            
             os.makedirs(os.path.dirname(args.processed_inference_data), exist_ok=True)
             with open(args.processed_inference_data, 'wb') as f:
                 pickle.dump(data_wrapper, f)
             
-            # Save data source info
-            os.makedirs(os.path.dirname(args.data_source), exist_ok=True)
-            with open(args.data_source, 'w') as f:
-                json.dump({"data_source": data_source, "samples": len(inference_data)}, f)
+            os.makedirs(os.path.dirname(args.data_source_info), exist_ok=True)
+            with open(args.data_source_info, 'w') as f:
+                json.dump({
+                    "data_source": data_source,
+                    "samples": len(inference_data),
+                    "features": len(X_inference.columns),
+                    "model_type": type(model).__name__
+                }, f, indent=2)
                 
-            print(f"Inference data processed successfully")
+            print("Inference data & model loading completed successfully")
             print(f"Data source: {data_source}")
             print(f"Samples: {len(inference_data)}")
-            print(f"Features: {len(X_inference.columns)}")
+            print(f"Model: {type(model).__name__}")
             
         except Exception as e:
             print("ERROR processing inference data: " + str(e))
             sys.exit(1)
     args:
-      - --inference_data_url
-      - {inputValue: inference_data_url}
+      - --trained_model
+      - {inputPath: trained_model}
       - --preprocessing_pipeline
       - {inputPath: preprocessing_pipeline}
       - --test_data
       - {inputPath: test_data}
+      - --inference_data_url
+      - {inputValue: inference_data_url}
+      - --loaded_model
+      - {outputPath: loaded_model}
       - --processed_inference_data
       - {outputPath: processed_inference_data}
-      - --data_source
-      - {outputPath: data_source}
+      - --data_source_info
+      - {outputPath: data_source_info}
