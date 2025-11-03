@@ -1,4 +1,4 @@
-name: Generic Data Extractor
+name: 2 Generic Data Extractor
 description: Extracts specific dataset from raw data file and prepares train/test splits
 inputs:
   - name: raw_data_file
@@ -37,7 +37,7 @@ implementation:
         set -e
         python3 -m pip install --quiet pandas numpy
         python3 -c "
-        import sys, os, json, pickle, pandas as pd
+        import sys, os, json, pickle, pandas as pd, re
         
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
@@ -67,18 +67,6 @@ implementation:
         json_buffer = []
         in_target_section = False
         in_json_array = False
-        
-        # Available datasets from the debug output
-        available_datasets = {
-            'Total Metrics': 'Total Metrics',
-            'Server Reach-ability': 'Server Reach-ability', 
-            'Cluster Health': 'Cluster Health',
-            'API Performance QPS': 'API Performance QPS',
-            'Knowledge Graph': 'Knowledge Graph'
-        }
-        
-        if dataset_name not in available_datasets:
-            raise ValueError(f'Dataset {dataset_name} not found. Available: {list(available_datasets.keys())}')
         
         print(f'Looking for dataset: {dataset_name}')
         
@@ -118,15 +106,46 @@ implementation:
         
         print(f'Attempting to parse {len(json_buffer)} JSON lines...')
         
+        # Clean and fix the JSON data
+        print('Cleaning JSON data...')
+        json_str = '[' + ','.join(json_buffer) + ']'
+        
+        # Fix common JSON issues
+        json_str = re.sub(r',\s*,', ',', json_str)  # Remove extra commas
+        json_str = re.sub(r',\s*]', ']', json_str)  # Remove trailing commas before ]
+        json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas before }
+        json_str = re.sub(r'{\s*,', '{', json_str)  # Remove leading commas after {
+        
+        print(f'Cleaned JSON length: {len(json_str)} characters')
+        print(f'First 300 chars of cleaned JSON: {json_str[:300]}...')
+        
         # Try to parse the JSON
         try:
-            json_str = '[' + ','.join(json_buffer) + ']'
             data = json.loads(json_str)
             print(f'SUCCESS: Parsed {len(data)} JSON objects')
         except json.JSONDecodeError as e:
             print(f'JSON parsing failed: {e}')
-            print(f'First 200 chars of JSON: {json_str[:200]}...')
-            raise
+            print('Trying alternative parsing method...')
+            
+            # Try parsing each object individually
+            data = []
+            for i, line in enumerate(json_buffer):
+                line = line.strip()
+                if line and line not in ['{', '}', '[', ']']:
+                    # Clean the line
+                    line = re.sub(r',\s*$', '', line)  # Remove trailing comma
+                    if line.startswith('{') and line.endswith('}'):
+                        try:
+                            obj = json.loads(line)
+                            data.append(obj)
+                        except json.JSONDecodeError:
+                            print(f'Failed to parse line {i}: {line[:100]}...')
+                            continue
+            
+            print(f'Alternative parsing: Found {len(data)} valid objects')
+        
+        if not data:
+            raise ValueError('No valid JSON data could be parsed')
         
         df = pd.json_normalize(data)
         
