@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Evaluator
+name: Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
@@ -124,38 +124,38 @@ implementation:
         
         # Evaluation report
         evaluation_report = '''BOOSTING ALGORITHM EVALUATION REPORT
-=========================================
-Algorithm: {algorithm}
-Dataset: {dataset_name}
-Description: {metrics_description}
-
-PERFORMANCE METRICS:
-R² Score: {r2:.3f}
-MAE: {mae:.3f}
-RMSE: {rmse:.3f}
-MAPE: {mape:.1f}%
-
-TARGET STATISTICS:
-Actual - Mean: {actual_mean:.3f}, Std: {actual_std:.3f}
-Predicted - Mean: {predicted_mean:.3f}, Std: {predicted_std:.3f}
-
-TEST SAMPLES: {test_samples}
-FEATURES USED: {features_used}
-'''.format(
-            algorithm=algorithm,
-            dataset_name=dataset_name,
-            metrics_description=metrics_description,
-            r2=r2,
-            mae=mae,
-            rmse=rmse,
-            mape=mape,
-            actual_mean=np.mean(y_test),
-            actual_std=np.std(y_test),
-            predicted_mean=np.mean(y_pred),
-            predicted_std=np.std(y_pred),
-            test_samples=len(y_test),
-            features_used=X_test.shape[1]
-        )
+        =========================================
+        Algorithm: {algorithm}
+        Dataset: {dataset_name}
+        Description: {metrics_description}
+        
+        PERFORMANCE METRICS:
+        R² Score: {r2:.3f}
+        MAE: {mae:.3f}
+        RMSE: {rmse:.3f}
+        MAPE: {mape:.1f}%
+        
+        TARGET STATISTICS:
+        Actual - Mean: {actual_mean:.3f}, Std: {actual_std:.3f}
+        Predicted - Mean: {predicted_mean:.3f}, Std: {predicted_std:.3f}
+        
+        TEST SAMPLES: {test_samples}
+        FEATURES USED: {features_used}
+        '''.format(
+                    algorithm=algorithm,
+                    dataset_name=dataset_name,
+                    metrics_description=metrics_description,
+                    r2=r2,
+                    mae=mae,
+                    rmse=rmse,
+                    mape=mape,
+                    actual_mean=np.mean(y_test),
+                    actual_std=np.std(y_test),
+                    predicted_mean=np.mean(y_pred),
+                    predicted_std=np.std(y_pred),
+                    test_samples=len(y_test),
+                    features_used=X_test.shape[1]
+                )
         
         # Save outputs
         with open(metrics_path, 'w') as f:
