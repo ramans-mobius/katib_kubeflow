@@ -1,0 +1,155 @@
+name: Boosting Store Inference Results
+description: Stores boosting inference results in database schema
+inputs:
+  - name: schema_id
+    type: String
+  - name: prediction_results
+    type: String
+  - name: model_id
+    type: String
+  - name: execution_id
+    type: String
+  - name: tenant_id
+    type: String
+  - name: project_id
+    type: String
+  - name: algorithm_type
+    type: String
+  - name: bearer_auth_token
+    type: String
+  - name: domain
+    type: String
+  - name: data_source
+    type: String
+
+implementation:
+  container:
+    image: python:3.9-slim
+    command:
+      - sh
+      - -c
+      - |
+        pip install requests
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import json
+        import argparse
+        import requests
+        import numpy as np
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--schema_id', type=str, required=True)
+        parser.add_argument('--prediction_results', type=str, required=True)
+        parser.add_argument('--model_id', type=str, required=True)
+        parser.add_argument('--execution_id', type=str, required=True)
+        parser.add_argument('--tenant_id', type=str, required=True)
+        parser.add_argument('--project_id', type=str, required=True)
+        parser.add_argument('--algorithm_type', type=str, required=True)
+        parser.add_argument('--bearer_auth_token', type=str, required=True)
+        parser.add_argument('--domain', type=str, required=True)
+        parser.add_argument('--data_source', type=str, required=True)
+        args = parser.parse_args()
+
+        # Read auth token and tenant_id
+        with open(args.bearer_auth_token, 'r') as f:
+            bearer_auth_token = f.read().strip()
+        with open(args.tenant_id, 'r') as f:
+            tenant_id = f.read().strip()
+
+        # Load data source info
+        with open(args.data_source, 'r') as f:
+            data_source_info = json.load(f)
+
+        # Load boosting inference results
+        with open(args.prediction_results, 'r') as f:
+            boosting_results = json.load(f)
+
+        print("=== Processing Boosting Inference Results ===")
+        
+        # Calculate statistics from predictions
+        predictions = [result['predicted_value'] for result in boosting_results]
+        confidence_scores = [result['confidence_score'] for result in boosting_results]
+        
+        total_samples = len(predictions)
+        mean_prediction = float(np.mean(predictions))
+        mean_confidence = float(np.mean(confidence_scores))
+        
+        # Get node distribution
+        node_types = {}
+        for result in boosting_results:
+            node_type = result.get('node_type', 'unknown')
+            node_types[node_type] = node_types.get(node_type, 0) + 1
+
+        # Prepare data for schema - adapted for boosting regression
+        schema_data = {
+            # Required fields from original SLM schema
+            "tenant_id": tenant_id,
+            "projectId": args.project_id,
+            "execution_id": args.execution_id,
+            "infernce_input": "spatio_temporal_forecasting",
+            "infernce_output": f"mean_prediction_{mean_prediction:.4f}",
+            "infernce_score_blue": 0.0,
+            "inference_score_rouge": 0.0,
+            
+            # Boosting-specific columns
+            "model_id": args.model_id,
+            "algorithm_type": args.algorithm_type,
+            "data_source": data_source_info.get('data_source', 'unknown'),
+            "total_predictions": total_samples,
+            "mean_prediction": mean_prediction,
+            "mean_confidence": mean_confidence,
+            "prediction_range": [float(min(predictions)), float(max(predictions))],
+            "node_type_distribution": node_types,
+            "features_used": boosting_results[0].get('features_used', 0) if boosting_results else 0
+        }
+
+        print("=== Prepared Schema Data ===")
+        print(json.dumps(schema_data, indent=2))
+
+        # API call to store data
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {bearer_auth_token}'
+        }
+
+        create_url = f"{args.domain}/pi-entity-instances-service/v2.0/schemas/{args.schema_id}/instances"
+        create_payload = {
+            "data": [schema_data]
+        }
+
+        try:
+            response = requests.post(create_url, headers=headers, json=create_payload, timeout=60)
+            response.raise_for_status()
+            print("Successfully stored boosting inference results")
+            print(f"Response: {response.json()}")
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Error storing results: {e}")
+            if e.response is not None:
+                print(f"Status Code: {e.response.status_code}")
+                print(f"Response: {e.response.text}")
+            exit(1)
+    args:
+      - --schema_id
+      - {inputValue: schema_id}
+      - --prediction_results
+      - {inputPath: prediction_results}
+      - --model_id
+      - {inputValue: model_id}
+      - --execution_id
+      - {inputValue: execution_id}
+      - --tenant_id
+      - {inputPath: tenant_id}
+      - --project_id
+      - {inputValue: project_id}
+      - --algorithm_type
+      - {inputValue: algorithm_type}
+      - --bearer_auth_token
+      - {inputPath: bearer_auth_token}
+      - --domain
+      - {inputValue: domain}
+      - --data_source
+      - {inputPath: data_source}
