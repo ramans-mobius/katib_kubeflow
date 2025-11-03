@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Evaluator
+name: Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
@@ -38,11 +38,17 @@ implementation:
         
         python3 -c "
         import sys, os, pickle, json, pandas as pd, numpy as np
-        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
         
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
         
+        # Proper argument parsing - FIXED
+        if len(sys.argv) < 7:
+            print('Error: Not enough arguments provided')
+            print('Expected: trained_model_path data_path model_coefficients_path metrics_path metrics_json_path evaluation_report_path')
+            sys.exit(1)
+            
         trained_model_path = sys.argv[1]
         data_path = sys.argv[2]
         model_coefficients_path = sys.argv[3]
@@ -52,53 +58,41 @@ implementation:
         
         print('Starting model evaluation...')
         
-        class DataWrapper:
-            def __init__(self, data_dict=None):
-                if data_dict:
-                    self.__dict__.update(data_dict)
-        
+        # Load model and data
         with open(trained_model_path, 'rb') as f:
             model = pickle.load(f)
         
         with open(data_path, 'rb') as f:
             data_wrapper = pickle.load(f)
         
-        with open(model_coefficients_path, 'r') as f:
-            coefficients_csv = f.read()
-        
         X_test = data_wrapper.X_test
         y_test = data_wrapper.y_test
-        dataset_info = data_wrapper.dataset_info
-        algorithm = getattr(data_wrapper, 'algorithm', 'Unknown')
+        dataset_info = getattr(data_wrapper, 'dataset_info', {})
+        
+        algorithm = type(model).__name__
+        dataset_name = dataset_info.get('dataset_name', 'Unknown')
         
         print(f'Evaluating {algorithm} on {len(y_test)} test samples')
+        print(f'Dataset: {dataset_name}')
         
+        # Make predictions
         y_pred = model.predict(X_test)
         
-        # Calculate standard regression metrics
+        # Calculate metrics
         r2 = r2_score(y_test, y_pred)
         mae = mean_absolute_error(y_test, y_pred)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        mape = np.mean(np.abs((y_test - y_pred) / np.where(y_test != 0, y_test, 1))) * 100
         
-        # Determine metrics description based on dataset
-        dataset_name = dataset_info.get('dataset_name', '')
-        if 'Graph' in dataset_name:
-            metrics_description = 'Graph link prediction accuracy and anomaly detection'
-        elif 'LLM' in dataset_name:
-            metrics_description = 'NLP model performance and text coherence'
-        elif 'LineChart' in dataset_name:
-            metrics_description = 'Timeseries forecasting accuracy'
-        elif 'GPU' in dataset_name:
-            metrics_description = 'GPU throughput and latency optimization'
+        # Avoid division by zero in MAPE
+        if np.any(y_test == 0):
+            mape = np.mean(np.abs((y_test - y_pred) / (np.where(y_test != 0, y_test, 1)))) * 100
         else:
-            metrics_description = 'General regression performance'
+            mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
         
-        # Comprehensive metrics
+        # Create metrics
         metrics = {
             'algorithm': algorithm,
             'dataset': dataset_name,
-            'metrics_description': metrics_description,
             'test_metrics': {
                 'r2_score': float(r2),
                 'mae': float(mae),
@@ -109,53 +103,33 @@ implementation:
                 'actual_mean': float(np.mean(y_test)),
                 'actual_std': float(np.std(y_test)),
                 'predicted_mean': float(np.mean(y_pred)),
-                'predicted_std': float(np.std(y_pred)),
-                'actual_min': float(np.min(y_test)),
-                'actual_max': float(np.max(y_test)),
-                'predicted_min': float(np.min(y_pred)),
-                'predicted_max': float(np.max(y_pred))
+                'predicted_std': float(np.std(y_pred))
             },
             'model_info': {
                 'test_samples': len(y_test),
-                'features_used': X_test.shape[1],
-                'algorithm_type': algorithm
+                'features_used': X_test.shape[1]
             }
         }
         
-        # Evaluation report
-        evaluation_report = '''BOOSTING ALGORITHM EVALUATION REPORT
+        # Create report
+        evaluation_report = f'''BOOSTING ALGORITHM EVALUATION REPORT
         =========================================
         Algorithm: {algorithm}
         Dataset: {dataset_name}
-        Description: {metrics_description}
         
         PERFORMANCE METRICS:
-        R² Score: {r2:.3f}
-        MAE: {mae:.3f}
-        RMSE: {rmse:.3f}
-        MAPE: {mape:.1f}%
+        R² Score: {r2:.4f}
+        MAE: {mae:.4f}
+        RMSE: {rmse:.4f}
+        MAPE: {mape:.2f}%
         
         TARGET STATISTICS:
-        Actual - Mean: {actual_mean:.3f}, Std: {actual_std:.3f}
-        Predicted - Mean: {predicted_mean:.3f}, Std: {predicted_std:.3f}
+        Actual - Mean: {np.mean(y_test):.4f}, Std: {np.std(y_test):.4f}
+        Predicted - Mean: {np.mean(y_pred):.4f}, Std: {np.std(y_pred):.4f}
         
-        TEST SAMPLES: {test_samples}
-        FEATURES USED: {features_used}
-        '''.format(
-                    algorithm=algorithm,
-                    dataset_name=dataset_name,
-                    metrics_description=metrics_description,
-                    r2=r2,
-                    mae=mae,
-                    rmse=rmse,
-                    mape=mape,
-                    actual_mean=np.mean(y_test),
-                    actual_std=np.std(y_test),
-                    predicted_mean=np.mean(y_pred),
-                    predicted_std=np.std(y_pred),
-                    test_samples=len(y_test),
-                    features_used=X_test.shape[1]
-                )
+        TEST SAMPLES: {len(y_test)}
+        FEATURES USED: {X_test.shape[1]}
+        '''
         
         # Save outputs
         with open(metrics_path, 'w') as f:
@@ -168,12 +142,8 @@ implementation:
             f.write(evaluation_report)
         
         print('Evaluation complete!')
-        print(f'Final R²: {r2:.3f}')
-        print(f'Output files created:')
-        print(f'  - Metrics: {metrics_path}')
-        print(f'  - Metrics JSON: {metrics_json_path}')
-        print(f'  - Report: {evaluation_report_path}')
-        " \"\$@\"
+        print(f'Final R²: {r2:.4f}')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
     args:
       - {inputPath: trained_model}
       - {inputPath: data_path}
