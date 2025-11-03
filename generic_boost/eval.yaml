@@ -1,4 +1,4 @@
-name: Generic Boosting Evaluator
+name: 2 Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
@@ -29,7 +29,7 @@ implementation:
       - -c
       - |
         set -e
-        python3 -m pip install --quiet pandas numpy scikit-learn
+        python3 -m pip install --quiet pandas numpy scikit-learn xgboost catboost lightgbm
         
         # Create output directories
         mkdir -p /tmp/outputs/metrics
@@ -173,7 +173,7 @@ implementation:
         print(f'  - Metrics: {metrics_path}')
         print(f'  - Metrics JSON: {metrics_json_path}')
         print(f'  - Report: {evaluation_report_path}')
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+        " \"\$@\"
     args:
       - {inputPath: trained_model}
       - {inputPath: data_path}
