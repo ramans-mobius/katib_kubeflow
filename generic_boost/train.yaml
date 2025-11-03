@@ -1,4 +1,4 @@
-name: Generic Boosting Trainer
+name: 2 Generic Boosting Trainer
 description: Trains boosting algorithms based on configuration with algorithm-specific metrics
 inputs:
   - name: data_path
@@ -104,7 +104,7 @@ implementation:
         dataset_info = getattr(data_wrapper, 'dataset_info', {})
 
         print(f'Training {algorithm} on {X_train.shape[0]} samples')
-        print(f'Dataset: {dataset_info.get(\\\"dataset_name\\\", \\\"Unknown\\\")}')
+        print(f'Dataset: {dataset_info.get(\"dataset_name\", \"Unknown\")}')
 
         # Algorithm mapping
         algorithm_map = {
@@ -211,16 +211,16 @@ implementation:
             print('ERROR saving results: ' + str(e))
             sys.exit(1)
         "
-        --data_path "$(inputs.parameters.data_path)"
-        --preprocessing_pipeline "$(inputs.parameters.preprocessing_pipeline)"
-        --config "$(inputs.parameters.config)"
-        --trained_model /tmp/outputs/trained_model/data
-        --training_history /tmp/outputs/training_history/data
-        --model_coefficients /tmp/outputs/model_coefficients/data
     args:
+      - --data_path
       - {inputPath: data_path}
+      - --preprocessing_pipeline
       - {inputPath: preprocessing_pipeline}
+      - --config
       - {inputValue: config}
+      - --trained_model
       - {outputPath: trained_model}
+      - --training_history
       - {outputPath: training_history}
+      - --model_coefficients
       - {outputPath: model_coefficients}
