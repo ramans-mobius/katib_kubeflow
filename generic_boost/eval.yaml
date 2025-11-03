@@ -1,4 +1,4 @@
-name: Generic Boosting Evaluator
+name: A Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
