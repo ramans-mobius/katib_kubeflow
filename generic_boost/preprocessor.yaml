@@ -1,0 +1,184 @@
+name: Generic Boosting Preprocessor
+description: Preprocesses data for boosting algorithms with algorithm-specific feature extraction
+inputs:
+  - name: train_data
+    type: Dataset
+    description: Training dataset from extractor
+  - name: test_data
+    type: Dataset
+    description: Testing dataset from extractor
+  - name: dataset_info
+    type: DatasetInfo
+    description: Dataset metadata from extractor
+  - name: model_config
+    type: String
+    description: Boosting algorithm configuration as JSON string
+outputs:
+  - name: processed_data_pickle
+    type: Dataset
+    description: Preprocessed data for training
+  - name: preprocessing_pipeline
+    type: Model
+    description: Fitted preprocessing pipeline
+  - name: weight_out
+    type: String
+    description: Preprocessing configuration
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        python3 -m pip install --quiet pandas numpy scikit-learn category_encoders networkx
+        python3 -c "
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+        from sklearn.compose import ColumnTransformer
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.pipeline import Pipeline
+        import networkx as nx
+        
+        print('Number of arguments:', len(sys.argv))
+        print('Arguments:', sys.argv)
+        
+        train_path = sys.argv[1]
+        test_path = sys.argv[2]
+        info_path = sys.argv[3]
+        config_str = sys.argv[4]
+        out_path = sys.argv[5]
+        pipeline_path = sys.argv[6]
+        weight_path = sys.argv[7]
+        
+        print('Starting preprocessing...')
+        
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+        with open(info_path, 'rb') as f:
+            dataset_info = pickle.load(f)
+        
+        config = json.loads(config_str)
+        algorithm = config.get('algorithm', 'GradientBoosting')
+        dataset_name = dataset_info.get('dataset_name', '')
+        target_col = dataset_info.get('target_column')
+        feature_columns = dataset_info.get('feature_columns', [])
+        
+        print(f'Algorithm: {algorithm}')
+        print(f'Dataset: {dataset_name}')
+        print(f'Target: {target_col}')
+        
+        class DataWrapper:
+            def __init__(self, data_dict): 
+                self.__dict__.update(data_dict)
+        
+        X_train = train_df[feature_columns] if feature_columns else train_df.drop(columns=[target_col])
+        y_train = train_df[target_col]
+        X_test = test_df[feature_columns] if feature_columns else test_df.drop(columns=[target_col])
+        y_test = test_df[target_col]
+        
+        print(f'Original shapes - Train: {X_train.shape}, Test: {X_test.shape}')
+        
+        # Algorithm-specific feature engineering
+        if 'GradientBoosting' in algorithm and 'Graph' in dataset_name:
+            print('Applying graph feature extraction...')
+            # Graph metrics extraction
+            for df in [X_train, X_test]:
+                if 'nodeip' in df.columns:
+                    df['node_degree'] = 1  # Placeholder - would compute actual graph metrics
+                    df['is_reachable'] = df.get('reachable', '').apply(lambda x: 1 if str(x).lower() == 'true' else 0)
+                
+        elif 'AdaBoost' in algorithm and 'LineChart' in dataset_name:
+            print('Applying timeseries feature extraction...')
+            for df in [X_train, X_test]:
+                if 'value' in df.columns:
+                    df['value_numeric'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
+                
+        elif 'XGBoost' in algorithm and 'LLM' in dataset_name:
+            print('Applying text feature extraction...')
+            if 'properties' in X_train.columns:
+                vectorizer = TfidfVectorizer(max_features=50)
+                X_train_tfidf = vectorizer.fit_transform(X_train['properties'].fillna(''))
+                X_test_tfidf = vectorizer.transform(X_test['properties'].fillna(''))
+                
+                tfidf_cols = [f'tfidf_{i}' for i in range(X_train_tfidf.shape[1])]
+                X_train_tfidf_df = pd.DataFrame(X_train_tfidf.toarray(), columns=tfidf_cols)
+                X_test_tfidf_df = pd.DataFrame(X_test_tfidf.toarray(), columns=tfidf_cols)
+                
+                X_train = pd.concat([X_train.reset_index(drop=True), X_train_tfidf_df], axis=1)
+                X_test = pd.concat([X_test.reset_index(drop=True), X_test_tfidf_df], axis=1)
+        
+        # Standard preprocessing
+        numeric_features = X_train.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
+        
+        print(f'Numeric features: {numeric_features}')
+        print(f'Categorical features: {categorical_features}')
+        
+        # Encode categorical features
+        for col in categorical_features:
+            le = LabelEncoder()
+            X_train[col] = le.fit_transform(X_train[col].astype(str))
+            X_test[col] = le.transform(X_test[col].astype(str))
+        
+        # Scale numeric features
+        if numeric_features:
+            scaler = StandardScaler()
+            X_train[numeric_features] = scaler.fit_transform(X_train[numeric_features])
+            X_test[numeric_features] = scaler.transform(X_test[numeric_features])
+        
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ('num', 'passthrough', numeric_features),
+                ('cat', 'passthrough', categorical_features)
+            ]
+        )
+        
+        data_wrapper = DataWrapper({
+            'X_train': X_train,
+            'y_train': y_train,
+            'X_test': X_test,
+            'y_test': y_test,
+            'preprocessor': preprocessor,
+            'numeric_features': numeric_features,
+            'categorical_features': categorical_features,
+            'dataset_info': dataset_info,
+            'algorithm': algorithm
+        })
+        
+        weight_config = {
+            'preprocessing_complete': True,
+            'algorithm': algorithm,
+            'dataset_name': dataset_name,
+            'numeric_features': numeric_features,
+            'categorical_features': categorical_features,
+            'target_column': target_col,
+            'train_samples': len(X_train),
+            'test_samples': len(X_test),
+            'feature_engineering': 'graph' if 'Graph' in dataset_name else 'text' if 'LLM' in dataset_name else 'standard'
+        }
+        
+        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        with open(out_path, 'wb') as f:
+            pickle.dump(data_wrapper, f)
+        
+        os.makedirs(os.path.dirname(pipeline_path) or '.', exist_ok=True)
+        with open(pipeline_path, 'wb') as f:
+            pickle.dump(preprocessor, f)
+        
+        os.makedirs(os.path.dirname(weight_path) or '.', exist_ok=True)
+        with open(weight_path, 'w') as f:
+            json.dump(weight_config, f, indent=2)
+        
+        print('Preprocessing complete!')
+        print(f'Final shapes - Train: {X_train.shape}, Test: {X_test.shape}')
+        " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+    args:
+      - {inputPath: train_data}
+      - {inputPath: test_data}
+      - {inputPath: dataset_info}
+      - {inputValue: model_config}
+      - {outputPath: processed_data_pickle}
+      - {outputPath: preprocessing_pipeline}
+      - {outputPath: weight_out}
