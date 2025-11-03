@@ -1,5 +1,5 @@
-name: Generic Boosting Preprocessor
-description: Preprocesses data for boosting algorithms with algorithm-specific feature extraction
+name: 2 Generic Boosting Preprocessor
+description: Preprocesses data for boosting algorithms with robust encoding
 inputs:
   - name: train_data
     type: Dataset
@@ -12,7 +12,7 @@ inputs:
     description: Dataset metadata from extractor
   - name: model_config
     type: String
-    description: Boosting algorithm configuration as JSON string
+    description: Boosting algorithm configuration
 outputs:
   - name: processed_data_pickle
     type: Dataset
@@ -32,14 +32,20 @@ implementation:
       - -c
       - |
         set -e
-        python3 -m pip install --quiet pandas numpy scikit-learn category_encoders networkx
+        python3 -m pip install --quiet pandas numpy scikit-learn category_encoders
+        
+        # Create output directories
+        mkdir -p /tmp/outputs/processed_data_pickle
+        mkdir -p /tmp/outputs/preprocessing_pipeline
+        mkdir -p /tmp/outputs/weight_out
+        
         python3 -c "
         import sys, os, pickle, json, pandas as pd, numpy as np
-        from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
+        from sklearn.preprocessing import LabelEncoder, StandardScaler
         from sklearn.compose import ColumnTransformer
-        from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.pipeline import Pipeline
-        import networkx as nx
+        import warnings
+        warnings.filterwarnings('ignore', category=UserWarning)
         
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
@@ -54,6 +60,7 @@ implementation:
         
         print('Starting preprocessing...')
         
+        # Load data
         train_df = pd.read_csv(train_path)
         test_df = pd.read_csv(test_path)
         with open(info_path, 'rb') as f:
@@ -61,118 +68,129 @@ implementation:
         
         config = json.loads(config_str)
         algorithm = config.get('algorithm', 'GradientBoosting')
-        dataset_name = dataset_info.get('dataset_name', '')
         target_col = dataset_info.get('target_column')
         feature_columns = dataset_info.get('feature_columns', [])
         
         print(f'Algorithm: {algorithm}')
-        print(f'Dataset: {dataset_name}')
+        print(f'Dataset: {dataset_info.get(\\\"dataset_name\\\", \\\"Unknown\\\")}')
         print(f'Target: {target_col}')
         
-        class DataWrapper:
-            def __init__(self, data_dict): 
-                self.__dict__.update(data_dict)
-        
-        X_train = train_df[feature_columns] if feature_columns else train_df.drop(columns=[target_col])
-        y_train = train_df[target_col]
-        X_test = test_df[feature_columns] if feature_columns else test_df.drop(columns=[target_col])
-        y_test = test_df[target_col]
+        # Prepare features and target
+        X_train = train_df[feature_columns].copy() if feature_columns else train_df.drop(columns=[target_col]).copy()
+        y_train = train_df[target_col].copy()
+        X_test = test_df[feature_columns].copy() if feature_columns else test_df.drop(columns=[target_col]).copy()
+        y_test = test_df[target_col].copy()
         
         print(f'Original shapes - Train: {X_train.shape}, Test: {X_test.shape}')
         
-        # Algorithm-specific feature engineering
-        if 'GradientBoosting' in algorithm and 'Graph' in dataset_name:
-            print('Applying graph feature extraction...')
-            # Graph metrics extraction
-            for df in [X_train, X_test]:
-                if 'nodeip' in df.columns:
-                    df['node_degree'] = 1  # Placeholder - would compute actual graph metrics
-                    df['is_reachable'] = df.get('reachable', '').apply(lambda x: 1 if str(x).lower() == 'true' else 0)
-                
-        elif 'AdaBoost' in algorithm and 'LineChart' in dataset_name:
-            print('Applying timeseries feature extraction...')
-            for df in [X_train, X_test]:
-                if 'value' in df.columns:
-                    df['value_numeric'] = pd.to_numeric(df['value'], errors='coerce').fillna(0)
-                
-        elif 'XGBoost' in algorithm and 'LLM' in dataset_name:
-            print('Applying text feature extraction...')
-            if 'properties' in X_train.columns:
-                vectorizer = TfidfVectorizer(max_features=50)
-                X_train_tfidf = vectorizer.fit_transform(X_train['properties'].fillna(''))
-                X_test_tfidf = vectorizer.transform(X_test['properties'].fillna(''))
-                
-                tfidf_cols = [f'tfidf_{i}' for i in range(X_train_tfidf.shape[1])]
-                X_train_tfidf_df = pd.DataFrame(X_train_tfidf.toarray(), columns=tfidf_cols)
-                X_test_tfidf_df = pd.DataFrame(X_test_tfidf.toarray(), columns=tfidf_cols)
-                
-                X_train = pd.concat([X_train.reset_index(drop=True), X_train_tfidf_df], axis=1)
-                X_test = pd.concat([X_test.reset_index(drop=True), X_test_tfidf_df], axis=1)
-        
-        # Standard preprocessing
+        # Identify column types
         numeric_features = X_train.select_dtypes(include=[np.number]).columns.tolist()
         categorical_features = X_train.select_dtypes(include=['object']).columns.tolist()
         
         print(f'Numeric features: {numeric_features}')
         print(f'Categorical features: {categorical_features}')
         
-        # Encode categorical features
-        for col in categorical_features:
-            le = LabelEncoder()
-            X_train[col] = le.fit_transform(X_train[col].astype(str))
-            X_test[col] = le.transform(X_test[col].astype(str))
+        # Handle timestamp columns specially
+        timestamp_features = [col for col in categorical_features if any(keyword in col.lower() for keyword in ['timestamp', 'time', 'date'])]
+        regular_categorical = [col for col in categorical_features if col not in timestamp_features]
+        
+        if timestamp_features:
+            print(f'Timestamp features detected: {timestamp_features}')
+            # Convert timestamps to numeric (Unix timestamp)
+            for col in timestamp_features:
+                try:
+                    X_train[col] = pd.to_datetime(X_train[col]).astype('int64') // 10**9
+                    X_test[col] = pd.to_datetime(X_test[col]).astype('int64') // 10**9
+                    # Move from categorical to numeric
+                    numeric_features.append(col)
+                    if col in regular_categorical:
+                        regular_categorical.remove(col)
+                except:
+                    # If conversion fails, keep as categorical but use robust encoding
+                    print(f'Could not convert {col} to timestamp, keeping as categorical')
+        
+        # Robust categorical encoding that handles unseen values
+        class RobustLabelEncoder:
+            def __init__(self):
+                self.encoder = LabelEncoder()
+                self.unknown_token = 'UNKNOWN'
+                
+            def fit(self, X):
+                # Add unknown token to handle unseen values
+                unique_vals = list(X.unique()) + [self.unknown_token]
+                self.encoder.fit(unique_vals)
+                return self
+                
+            def transform(self, X):
+                # Replace unseen values with unknown token
+                X_transformed = X.copy()
+                unseen_mask = ~X_transformed.isin(self.encoder.classes_[:-1])  # Exclude unknown token
+                X_transformed[unseen_mask] = self.unknown_token
+                return self.encoder.transform(X_transformed)
+                
+            def fit_transform(self, X):
+                return self.fit(X).transform(X)
+        
+        # Apply preprocessing
+        processed_X_train = X_train.copy()
+        processed_X_test = X_test.copy()
         
         # Scale numeric features
         if numeric_features:
             scaler = StandardScaler()
-            X_train[numeric_features] = scaler.fit_transform(X_train[numeric_features])
-            X_test[numeric_features] = scaler.transform(X_test[numeric_features])
+            processed_X_train[numeric_features] = scaler.fit_transform(processed_X_train[numeric_features])
+            processed_X_test[numeric_features] = scaler.transform(processed_X_test[numeric_features])
         
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', 'passthrough', numeric_features),
-                ('cat', 'passthrough', categorical_features)
-            ]
-        )
+        # Encode categorical features
+        categorical_encoders = {}
+        for col in regular_categorical:
+            encoder = RobustLabelEncoder()
+            processed_X_train[col] = encoder.fit_transform(processed_X_train[col])
+            processed_X_test[col] = encoder.transform(processed_X_test[col])
+            categorical_encoders[col] = encoder
+        
+        print(f'Processed shapes - Train: {processed_X_train.shape}, Test: {processed_X_test.shape}')
+        
+        # Create data wrapper
+        class DataWrapper:
+            def __init__(self, data_dict): 
+                self.__dict__.update(data_dict)
         
         data_wrapper = DataWrapper({
-            'X_train': X_train,
+            'X_train': processed_X_train,
             'y_train': y_train,
-            'X_test': X_test,
+            'X_test': processed_X_test,
             'y_test': y_test,
-            'preprocessor': preprocessor,
-            'numeric_features': numeric_features,
-            'categorical_features': categorical_features,
             'dataset_info': dataset_info,
-            'algorithm': algorithm
+            'algorithm': algorithm,
+            'preprocessing_info': {
+                'numeric_features': numeric_features,
+                'categorical_features': regular_categorical,
+                'timestamp_features': timestamp_features
+            }
         })
         
-        weight_config = {
-            'preprocessing_complete': True,
-            'algorithm': algorithm,
-            'dataset_name': dataset_name,
+        # Create preprocessing pipeline info
+        preprocessing_info = {
             'numeric_features': numeric_features,
-            'categorical_features': categorical_features,
+            'categorical_features': regular_categorical,
+            'timestamp_features': timestamp_features,
             'target_column': target_col,
-            'train_samples': len(X_train),
-            'test_samples': len(X_test),
-            'feature_engineering': 'graph' if 'Graph' in dataset_name else 'text' if 'LLM' in dataset_name else 'standard'
+            'algorithm': algorithm
         }
         
-        os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+        # Save outputs
         with open(out_path, 'wb') as f:
             pickle.dump(data_wrapper, f)
         
-        os.makedirs(os.path.dirname(pipeline_path) or '.', exist_ok=True)
         with open(pipeline_path, 'wb') as f:
-            pickle.dump(preprocessor, f)
+            pickle.dump(preprocessing_info, f)
         
-        os.makedirs(os.path.dirname(weight_path) or '.', exist_ok=True)
         with open(weight_path, 'w') as f:
-            json.dump(weight_config, f, indent=2)
+            json.dump(preprocessing_info, f, indent=2)
         
         print('Preprocessing complete!')
-        print(f'Final shapes - Train: {X_train.shape}, Test: {X_test.shape}')
+        print(f'Final shapes - Train: {processed_X_train.shape}, Test: {processed_X_test.shape}')
         " "$0" "$1" "$2" "$3" "$4" "$5" "$6" "$7"
     args:
       - {inputPath: train_data}
