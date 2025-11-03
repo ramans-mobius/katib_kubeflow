@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Trainer
+name: Generic Boosting Trainer
 description: Trains boosting algorithms based on configuration with algorithm-specific metrics
 inputs:
   - name: data_path
@@ -30,6 +30,12 @@ implementation:
       - |
         set -e
         python3 -m pip install --quiet pandas numpy scikit-learn xgboost catboost lightgbm
+        
+        # Create output directories
+        mkdir -p /tmp/outputs/trained_model
+        mkdir -p /tmp/outputs/training_history
+        mkdir -p /tmp/outputs/model_coefficients
+        
         python3 -c "
         import sys, os, pickle, json, pandas as pd, numpy as np
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
@@ -50,22 +56,13 @@ implementation:
         
         print('Starting model training...')
         
-        # Create output directories first - FIXED LOGIC
-        def ensure_dir(path):
-            dir_path = os.path.dirname(path)
-            if dir_path and not os.path.exists(dir_path):
-                os.makedirs(dir_path, exist_ok=True)
-                print(f'Created directory: {dir_path}')
-        
-        ensure_dir(trained_model_path)
-        ensure_dir(training_history_path)
-        ensure_dir(model_coefficients_path)
-        
+        # Define DataWrapper class
         class DataWrapper:
             def __init__(self, data_dict=None):
                 if data_dict:
                     self.__dict__.update(data_dict)
         
+        # Load data
         with open(data_path, 'rb') as f:
             data_wrapper = pickle.load(f)
         
@@ -80,9 +77,10 @@ implementation:
         y_train = data_wrapper.y_train
         X_test = data_wrapper.X_test
         y_test = data_wrapper.y_test
-        dataset_info = data_wrapper.dataset_info
+        dataset_info = getattr(data_wrapper, 'dataset_info', {})
         
         print(f'Training {algorithm} on {X_train.shape[0]} samples')
+        print(f'Dataset: {dataset_info.get(\\\"dataset_name\\\", \\\"Unknown\\\")}')
         
         # Algorithm mapping
         algorithm_map = {
@@ -110,6 +108,7 @@ implementation:
         final_params = {**default_params.get(algorithm, {}), **parameters}
         print(f'Using parameters: {final_params}')
         
+        # Train model
         model = model_class(**final_params)
         model.fit(X_train, y_train)
         
@@ -126,7 +125,7 @@ implementation:
         test_rmse = np.sqrt(mean_squared_error(y_test, y_pred_test))
         
         # Feature importances
-        feature_names = list(X_train.columns)
+        feature_names = list(X_train.columns) if hasattr(X_train, 'columns') else [f'feature_{i}' for i in range(X_train.shape[1])]
         if hasattr(model, 'feature_importances_'):
             importances = model.feature_importances_
             coefficients_data = []
@@ -156,7 +155,7 @@ implementation:
             'feature_importances': coefficients_data,
             'training_samples': len(X_train),
             'test_samples': len(X_test),
-            'dataset_name': dataset_info.get('dataset_name', '')
+            'dataset_name': dataset_info.get('dataset_name', 'Unknown')
         }
         
         # Save outputs
@@ -172,13 +171,9 @@ implementation:
             f.write(coefficients_csv)
         
         print('Training complete!')
-        print(f'Test R²: {test_r2:.3f}')
-        print(f'Test RMSE: {test_rmse:.3f}')
-        print(f'Output files created:')
-        print(f'  - Model: {trained_model_path}')
-        print(f'  - History: {training_history_path}')
-        print(f'  - Coefficients: {model_coefficients_path}')
-        " "$0" "$1" "$2" "$3" "$4" "$5" "$6"
+        print(f'Test R²: {test_r2:.4f}')
+        print(f'Test RMSE: {test_rmse:.4f}')
+        " \"\$@\"
     args:
       - {inputPath: data_path}
       - {inputPath: preprocessing_pipeline}
