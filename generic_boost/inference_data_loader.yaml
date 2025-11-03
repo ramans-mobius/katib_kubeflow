@@ -1,0 +1,148 @@
+name: Inference Data Loader
+description: Loads inference data - uses new data if provided, otherwise test data
+inputs:
+  - name: inference_data_url
+    type: String
+    description: URL to new inference data file (optional)
+  - name: preprocessing_pipeline
+    type: Model
+    description: Preprocessing pipeline from training
+  - name: test_data
+    type: Dataset
+    description: Test data from training (fallback)
+outputs:
+  - name: processed_inference_data
+    type: Dataset
+    description: Preprocessed data ready for inference
+  - name: data_source
+    type: String
+    description: Source of data used (new_data or test_data)
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np, requests
+        import argparse
+
+        print("STARTING INFERENCE DATA LOADER")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--inference_data_url', type=str, required=True)
+        parser.add_argument('--preprocessing_pipeline', type=str, required=True)
+        parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--processed_inference_data', type=str, required=True)
+        parser.add_argument('--data_source', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Arguments loaded")
+
+        # Load preprocessing pipeline
+        try:
+            with open(args.preprocessing_pipeline, 'rb') as f:
+                preprocessor = pickle.load(f)
+            print("Preprocessing pipeline loaded successfully")
+        except Exception as e:
+            print("ERROR loading preprocessor: " + str(e))
+            sys.exit(1)
+
+        inference_data = []
+        data_source = "test_data"
+
+        # Try to load new inference data first
+        if args.inference_data_url and args.inference_data_url != "none":
+            try:
+                response = requests.get(args.inference_data_url)
+                response.raise_for_status()
+                content = response.text
+                print(f"Downloaded new inference data: {len(content)} characters")
+                
+                # Parse JSON data from the content
+                lines = content.splitlines()
+                json_buffer = []
+                in_json_section = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if "GNN-STGNN Spatio-Temporal Data:" in line:
+                        in_json_section = True
+                        continue
+                    if in_json_section and line == '[':
+                        continue
+                    if in_json_section and line == ']':
+                        break
+                    if in_json_section and line:
+                        json_buffer.append(line)
+                
+                # Parse JSON data
+                if json_buffer:
+                    json_str = '[' + ','.join(json_buffer) + ']'
+                    inference_data = json.loads(json_str)
+                    data_source = "new_data"
+                    print(f"Successfully loaded {len(inference_data)} new inference samples")
+                else:
+                    print("No new inference data found, falling back to test data")
+                    
+            except Exception as e:
+                print(f"Failed to load new data: {e}, falling back to test data")
+
+        # If no new data, use test data
+        if not inference_data:
+            try:
+                test_df = pd.read_csv(args.test_data)
+                # Convert test data back to original format
+                inference_data = test_df.to_dict('records')
+                print(f"Using test data: {len(inference_data)} samples")
+            except Exception as e:
+                print("ERROR loading test data: " + str(e))
+                sys.exit(1)
+
+        # Process data
+        try:
+            df = pd.DataFrame(inference_data)
+            target_column = preprocessor.get('target_column', 'temporal_signal')
+            feature_columns = [col for col in df.columns if col != target_column]
+            X_inference = df[feature_columns].copy()
+            
+            class InferenceDataWrapper:
+                def __init__(self, X_data, original_data, source):
+                    self.X_inference = X_data
+                    self.original_data = original_data
+                    self.feature_columns = list(X_data.columns)
+                    self.data_source = source
+            
+            data_wrapper = InferenceDataWrapper(X_inference, inference_data, data_source)
+            
+            # Save processed data
+            os.makedirs(os.path.dirname(args.processed_inference_data), exist_ok=True)
+            with open(args.processed_inference_data, 'wb') as f:
+                pickle.dump(data_wrapper, f)
+            
+            # Save data source info
+            os.makedirs(os.path.dirname(args.data_source), exist_ok=True)
+            with open(args.data_source, 'w') as f:
+                json.dump({"data_source": data_source, "samples": len(inference_data)}, f)
+                
+            print(f"Inference data processed successfully")
+            print(f"Data source: {data_source}")
+            print(f"Samples: {len(inference_data)}")
+            print(f"Features: {len(X_inference.columns)}")
+            
+        except Exception as e:
+            print("ERROR processing inference data: " + str(e))
+            sys.exit(1)
+    args:
+      - --inference_data_url
+      - {inputValue: inference_data_url}
+      - --preprocessing_pipeline
+      - {inputPath: preprocessing_pipeline}
+      - --test_data
+      - {inputPath: test_data}
+      - --processed_inference_data
+      - {outputPath: processed_inference_data}
+      - --data_source
+      - {outputPath: data_source}
