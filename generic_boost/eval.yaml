@@ -1,4 +1,4 @@
-name: 2 Generic Boosting Evaluator
+name: Generic Boosting Evaluator
 description: Evaluates trained boosting model with algorithm-specific evaluation metrics
 inputs:
   - name: trained_model
@@ -32,8 +32,33 @@ implementation:
         import sys, os, pickle, json, pandas as pd, numpy as np
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
         import argparse
+        import subprocess
 
         print("STARTING BOOSTING EVALUATOR")
+
+        # Install required packages first (SAME AS TRAINER)
+        print("Installing required packages...")
+        packages = ['lightgbm', 'xgboost', 'catboost']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+
+        # Now import the packages that were just installed
+        try:
+            import lightgbm
+        except ImportError:
+            print("Warning: lightgbm not available")
+        try:
+            import xgboost
+        except ImportError:
+            print("Warning: xgboost not available")
+        try:
+            import catboost
+        except ImportError:
+            print("Warning: catboost not available")
 
         class DataWrapper:
             def __init__(self, data_dict=None):
@@ -56,9 +81,6 @@ implementation:
             sys.exit(1)
         if not os.path.exists(args.data_path):
             print("ERROR: data_path does not exist!")
-            sys.exit(1)
-        if not os.path.exists(args.model_coefficients):
-            print("ERROR: model_coefficients path does not exist!")
             sys.exit(1)
 
         # Load model and data
