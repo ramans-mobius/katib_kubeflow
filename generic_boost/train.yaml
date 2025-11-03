@@ -1,4 +1,4 @@
-name: Generic Boosting Trainer
+name: 2 Generic Boosting Trainer
 description: Trains boosting algorithms based on configuration with algorithm-specific metrics
 inputs:
   - name: data_path
@@ -46,6 +46,12 @@ implementation:
         
         print('Number of arguments:', len(sys.argv))
         print('Arguments:', sys.argv)
+        
+        # Check if we have enough arguments
+        if len(sys.argv) < 7:
+            print('Error: Not enough arguments provided')
+            print('Expected: data_path preprocessing_path config_str trained_model_path training_history_path model_coefficients_path')
+            sys.exit(1)
         
         data_path = sys.argv[1]
         preprocessing_path = sys.argv[2]
@@ -173,7 +179,7 @@ implementation:
         print('Training complete!')
         print(f'Test R²: {test_r2:.4f}')
         print(f'Test RMSE: {test_rmse:.4f}')
-        " \"\$@\"
+        " "$(inputs.parameters.data_path)" "$(inputs.parameters.preprocessing_pipeline)" "$(inputs.parameters.config)" "/tmp/outputs/trained_model/data" "/tmp/outputs/training_history/data" "/tmp/outputs/model_coefficients/data"
     args:
       - {inputPath: data_path}
       - {inputPath: preprocessing_pipeline}
