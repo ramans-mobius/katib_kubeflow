@@ -1,0 +1,119 @@
+name: Boosting Inference Predictor
+description: Makes predictions using loaded model and data
+inputs:
+  - name: loaded_model
+    type: Model
+    description: Loaded trained model
+  - name: processed_inference_data
+    type: Dataset
+    description: Preprocessed inference data
+outputs:
+  - name: predictions
+    type: Dataset
+    description: Raw prediction values
+  - name: prediction_results
+    type: String
+    description: Detailed prediction results with metadata
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        import argparse
+
+        print("STARTING BOOSTING INFERENCE PREDICTOR")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--loaded_model', type=str, required=True)
+        parser.add_argument('--processed_inference_data', type=str, required=True)
+        parser.add_argument('--predictions', type=str, required=True)
+        parser.add_argument('--prediction_results', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Arguments loaded")
+
+        # Load model and data
+        try:
+            with open(args.loaded_model, 'rb') as f:
+                model = pickle.load(f)
+            print("Model loaded successfully")
+        except Exception as e:
+            print("ERROR loading model: " + str(e))
+            sys.exit(1)
+
+        try:
+            with open(args.processed_inference_data, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            print("Inference data loaded successfully")
+        except Exception as e:
+            print("ERROR loading inference data: " + str(e))
+            sys.exit(1)
+
+        # Make predictions
+        try:
+            X_inference = data_wrapper.X_inference
+            original_data = data_wrapper.original_data
+            
+            print(f"Making predictions on {len(X_inference)} samples...")
+            predictions = model.predict(X_inference)
+            
+            # Create detailed prediction results
+            results = []
+            for i, (pred, original_record) in enumerate(zip(predictions, original_data)):
+                result = {
+                    'prediction_id': f"pred_{i:04d}",
+                    'predicted_value': float(pred),
+                    'confidence_score': float(1.0 - abs(pred - 0.5) * 2),  # Simple confidence
+                    'timestamp': original_record.get('timestamp', ''),
+                    'node_id': original_record.get('node_id', ''),
+                    'node_type': original_record.get('node_type', ''),
+                    'region': original_record.get('region', ''),
+                    'features_used': len(data_wrapper.feature_columns),
+                    'model_type': type(model).__name__
+                }
+                # Add key original features for context
+                for feature in ['cpu_usage_percent', 'memory_usage_percent', 'network_latency_ms', 'request_rate_rps']:
+                    if feature in original_record:
+                        result[feature] = original_record[feature]
+                results.append(result)
+            
+            # Save raw predictions
+            predictions_df = pd.DataFrame({
+                'prediction_id': [f"pred_{i:04d}" for i in range(len(predictions))],
+                'predicted_temporal_signal': predictions,
+                'confidence': [1.0 - abs(pred - 0.5) * 2 for pred in predictions]
+            })
+            
+            os.makedirs(os.path.dirname(args.predictions), exist_ok=True)
+            predictions_df.to_csv(args.predictions, index=False)
+            
+            # Save detailed results
+            os.makedirs(os.path.dirname(args.prediction_results), exist_ok=True)
+            with open(args.prediction_results, 'w') as f:
+                json.dump(results, f, indent=2)
+                
+            # Print summary
+            pred_values = [r['predicted_value'] for r in results]
+            print("Predictions completed successfully")
+            print(f"Total predictions: {len(predictions)}")
+            print(f"Prediction range: [{min(pred_values):.4f}, {max(pred_values):.4f}]")
+            print(f"Mean prediction: {np.mean(pred_values):.4f}")
+            print(f"Model used: {type(model).__name__}")
+            
+        except Exception as e:
+            print("ERROR making predictions: " + str(e))
+            sys.exit(1)
+    args:
+      - --loaded_model
+      - {inputPath: loaded_model}
+      - --processed_inference_data
+      - {inputPath: processed_inference_data}
+      - --predictions
+      - {outputPath: predictions}
+      - --prediction_results
+      - {outputPath: prediction_results}
