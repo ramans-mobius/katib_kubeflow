@@ -1,4 +1,4 @@
-name: 2 Unified Boosting Trainer
+name: 3 Unified Boosting Trainer
 description: Trains boosting model using unified configuration
 inputs:
   - name: processed_data
@@ -25,6 +25,7 @@ implementation:
       - sh
       - -c
       - |
+        python3 -m pip install --quiet xgboost catboost lightgbm
         exec "$0" "$@"
       - python3
       - -u
@@ -34,31 +35,33 @@ implementation:
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
         from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
         import argparse
-        import subprocess
+
+        # Define DataWrapper class FIRST before unpickling
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
 
         print("STARTING UNIFIED BOOSTING TRAINER")
 
-        # Install packages
-        packages = ['xgboost', 'catboost', 'lightgbm']
-        for package in packages:
-            try:
-                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
-            except:
-                pass
-
-        # Import after installation
+        # Import optional packages
         try:
             from xgboost import XGBRegressor, XGBClassifier
-        except:
+            print("XGBoost available")
+        except ImportError:
             XGBRegressor, XGBClassifier = None, None
+            print("XGBoost not available")
         try:
             from catboost import CatBoostRegressor, CatBoostClassifier
-        except:
+            print("CatBoost available")
+        except ImportError:
             CatBoostRegressor, CatBoostClassifier = None, None
+            print("CatBoost not available")
         try:
             from lightgbm import LGBMRegressor, LGBMClassifier
-        except:
+            print("LightGBM available")
+        except ImportError:
             LGBMRegressor, LGBMClassifier = None, None
+            print("LightGBM not available")
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--processed_data', type=str, required=True)
