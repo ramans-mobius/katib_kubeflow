@@ -1,4 +1,4 @@
-name: Unified Data Loader
+name: 2 Unified Data Loader
 description: Loads data from API using unified configuration
 inputs:
   - name: api_url
@@ -62,7 +62,7 @@ implementation:
         test_size = training_config.get('test_size', 0.2)
         random_state = training_config.get('random_state', 42)
 
-        print(f"Loading data with config: task={task_type}, target={target_column}")
+        print(f"DEBUG: Loading data with config: task={task_type}, target={target_column}")
 
         # Fetch data
         headers = {"Authorization": f"Bearer {access_token}"}
@@ -84,56 +84,90 @@ implementation:
             df_data = raw_data
 
         df = pd.DataFrame(df_data)
-        print(f"Loaded {len(df)} records with {len(df.columns)} columns")
+        print(f"DEBUG: Loaded {len(df)} records with {len(df.columns)} columns")
+        print(f"DEBUG: All columns: {list(df.columns)}")
+        print(f"DEBUG: First row sample: {df.iloc[0].to_dict() if len(df) > 0 else 'No data'}")
 
         # Flatten nested structures
         def flatten_nested_columns(df):
             flattened_df = df.copy()
             for col in df.columns:
-                if isinstance(df[col].iloc[0], dict):
+                print(f"DEBUG: Processing column: {col}, type: {type(df[col].iloc[0]) if len(df) > 0 else 'empty'}")
+                if len(df) > 0 and isinstance(df[col].iloc[0], dict):
+                    print(f"DEBUG: Flattening nested column: {col}")
                     nested_df = pd.json_normalize(df[col])
                     nested_df.columns = [f"{col}_{subcol}" for subcol in nested_df.columns]
                     flattened_df = pd.concat([flattened_df.drop(columns=[col]), nested_df], axis=1)
+                    print(f"DEBUG: Created new columns: {list(nested_df.columns)}")
             return flattened_df
 
         df_flat = flatten_nested_columns(df)
+        print(f"DEBUG: After flattening - columns: {list(df_flat.columns)}")
         
         # Convert to numeric
         def auto_convert_to_numeric(df):
             converted_df = df.copy()
             for col in converted_df.columns:
+                print(f"DEBUG: Converting column: {col}")
                 if pd.api.types.is_numeric_dtype(converted_df[col]):
+                    print(f"DEBUG: Column {col} is already numeric")
                     continue
                 converted_col = pd.to_numeric(converted_df[col], errors='coerce')
                 if not converted_col.isna().all():
                     converted_df[col] = converted_col
+                    print(f"DEBUG: Successfully converted {col} to numeric")
                 else:
                     if converted_df[col].nunique() < 50:
                         le = LabelEncoder()
                         converted_df[col] = le.fit_transform(converted_df[col].astype(str))
+                        print(f"DEBUG: Encoded categorical column: {col} with {converted_df[col].nunique()} categories")
                     else:
                         converted_df = converted_df.drop(columns=[col])
+                        print(f"DEBUG: Dropped high-cardinality column: {col}")
             return converted_df
 
         df_numeric = auto_convert_to_numeric(df_flat)
+        print(f"DEBUG: After numeric conversion - columns: {list(df_numeric.columns)}")
+        print(f"DEBUG: Final dataframe shape: {df_numeric.shape}")
         
-        # Auto-detect target if not specified
-        if not target_column:
-            common_targets = ['target', 'label', 'class', 'score', 'value', 'output', 'reachable', 'memory_pressure', 'anomaly']
+        # Auto-detect target if not specified or not found
+        if not target_column or target_column not in df_numeric.columns:
+            print(f"DEBUG: Target column '{target_column}' not found, auto-detecting...")
+            common_targets = ['target', 'label', 'class', 'score', 'value', 'output', 'reachable', 'memory_pressure', 'anomaly', 'failure', 'status']
+            
+            # Look for exact matches first
             for col in df_numeric.columns:
-                if any(target in col.lower() for target in common_targets):
+                if col.lower() in [t.lower() for t in common_targets]:
                     target_column = col
+                    print(f"DEBUG: Found target by exact match: {target_column}")
                     break
+            
+            # If still not found, look for partial matches
+            if not target_column:
+                for col in df_numeric.columns:
+                    if any(target in col.lower() for target in common_targets):
+                        target_column = col
+                        print(f"DEBUG: Found target by partial match: {target_column}")
+                        break
+            
+            # If still not found, use last column
             if not target_column and len(df_numeric.columns) > 0:
                 target_column = df_numeric.columns[-1]
-            print(f"Auto-selected target column: {target_column}")
+                print(f"DEBUG: Using last column as target: {target_column}")
+            
+            print(f"DEBUG: Final target column: {target_column}")
 
         if target_column not in df_numeric.columns:
-            raise ValueError(f"Target column '{target_column}' not found")
+            print(f"ERROR: Target column '{target_column}' not found in available columns: {list(df_numeric.columns)}")
+            raise ValueError(f"Target column '{target_column}' not found. Available columns: {list(df_numeric.columns)}")
 
         # Separate features and target
         X = df_numeric.drop(columns=[target_column])
         y = df_numeric[target_column]
+        
+        print(f"DEBUG: Target column '{target_column}' stats:")
+        print(f"DEBUG: - Unique values: {y.nunique()}")
+        print(f"DEBUG: - Value counts: {y.value_counts().to_dict()}")
         
         # Auto-detect task type
         if task_type == "auto":
@@ -144,7 +178,7 @@ implementation:
                 task_type = "classification"
             else:
                 task_type = "regression"
-            print(f"Auto-detected task type: {task_type}")
+            print(f"DEBUG: Auto-detected task type: {task_type} (unique values: {unique_values})")
 
         # Handle missing values
         X = X.fillna(0)
@@ -155,6 +189,9 @@ implementation:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state, stratify=stratify
         )
+        
+        print(f"DEBUG: Final dataset - X_train: {X_train.shape}, X_test: {X_test.shape}")
+        print(f"DEBUG: Feature names: {X.columns.tolist()}")
         
         # Prepare output data
         train_dict = {
@@ -187,11 +224,17 @@ implementation:
                 'class_distribution': y.value_counts().to_dict()
             },
             'train_samples': len(X_train),
-            'test_samples': len(X_test)
+            'test_samples': len(X_test),
+            'all_columns_original': list(df.columns),
+            'all_columns_final': list(df_numeric.columns)
         }
 
         # Save datasets
         os.makedirs(os.path.dirname(args.train_data) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.test_data) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.target_data) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.data_info) or ".", exist_ok=True)
+        
         with open(args.train_data, "wb") as f:
             pickle.dump(train_dict, f)
         with open(args.test_data, "wb") as f:
@@ -202,6 +245,8 @@ implementation:
             json.dump(data_info, f, indent=2)
         
         print(f"Data loading complete: {len(X_train)} train, {len(X_test)} test samples")
+        print(f"Target: {target_column}, Task: {task_type}")
+        print(f"Features: {len(X.columns)}")
             
     args:
       - --api_url
