@@ -29,13 +29,13 @@ implementation:
         import sys
 
         # Install packages
-        print(\"Installing boosting packages...\")
+        print("Installing boosting packages...")
         packages = ['xgboost', 'catboost', 'lightgbm', 'scikit-learn']
         for package in packages:
             try:
                 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
             except:
-                print(f\"Warning: Could not install {package}\")
+                print(f"Warning: Could not install {package}")
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--config_str', type=str, required=True)
@@ -53,7 +53,7 @@ implementation:
         task = pipeline_config.get('task', 'classification')
         parameters = model_config.get('parameters', {})
         
-        print(f\"Building {algorithm} model for {task} task\")
+        print(f"Building {algorithm} model for {task} task")
 
         # Model class definition
         class BoostingModel:
@@ -104,8 +104,8 @@ implementation:
         with open(args.model_info_out, 'w') as f:
             json.dump(model_info, f, indent=2)
 
-        print(f\"Model builder completed: {algorithm} for {task}\")
-        print(f\"Parameters: {parameters}\")
+        print(f"Model builder completed: {algorithm} for {task}")
+        print(f"Parameters: {parameters}")
     args:
       - --config_str
       - {inputValue: config_str}
