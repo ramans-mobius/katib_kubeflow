@@ -1,4 +1,4 @@
-name: 2 Unified Preprocessor
+name: 3 Unified Preprocessor
 description: Preprocesses data using unified configuration
 inputs:
   - name: train_data
@@ -20,7 +20,7 @@ outputs:
 
 implementation:
   container:
-    image: python:3.9
+    image: nikhilv215/nesy-factory:v22
     command:
       - sh
       - -c
