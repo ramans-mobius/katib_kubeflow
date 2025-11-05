@@ -42,6 +42,24 @@ implementation:
             def __init__(self, data_dict):
                 self.__dict__.update(data_dict)
 
+        # Define common sklearn model classes that might be pickled
+        # This helps with unpickling trained models from Trainer
+        from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
+        
+        # Import optional packages for their model classes
+        try:
+            from xgboost import XGBRegressor, XGBClassifier
+        except ImportError:
+            XGBRegressor, XGBClassifier = None, None
+        try:
+            from catboost import CatBoostRegressor, CatBoostClassifier
+        except ImportError:
+            CatBoostRegressor, CatBoostClassifier = None, None
+        try:
+            from lightgbm import LGBMRegressor, LGBMClassifier
+        except ImportError:
+            LGBMRegressor, LGBMClassifier = None, None
+
         print("STARTING UNIFIED BOOSTING EVALUATOR")
 
         parser = argparse.ArgumentParser()
