@@ -153,7 +153,7 @@ implementation:
         with open('$6', 'w') as f:
             json.dump(feature_info, f, indent=2)
         
-        print('✅ Preprocessing complete')
+        print('Preprocessing complete')
         print(f'Final features: {len(current_feature_names)}')
         "
     args:
