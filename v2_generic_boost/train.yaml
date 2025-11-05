@@ -1,4 +1,4 @@
-name: Unified Boosting Trainer
+name: 2 Unified Boosting Trainer
 description: Trains boosting model using unified configuration
 inputs:
   - name: processed_data
@@ -196,7 +196,10 @@ implementation:
         }
 
         # Save outputs
-        os.makedirs(os.path.dirname(args.trained_model), exist_ok=True)
+        os.makedirs(os.path.dirname(args.trained_model) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.training_history) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.model_coefficients) or ".", exist_ok=True)
+        
         with open(args.trained_model, 'wb') as f:
             pickle.dump(model, f)
         with open(args.training_history, 'w') as f:
