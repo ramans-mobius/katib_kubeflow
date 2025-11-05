@@ -62,7 +62,7 @@ implementation:
                 self.task = task
                 self.parameters = parameters
                 self.is_fitted = False
-                self.model_type = f\"{algorithm} for {task}\"
+                self.model_type = f"{algorithm} for {task}"
                 
             def get_info(self):
                 return {
@@ -74,7 +74,7 @@ implementation:
                 }
                 
             def __str__(self):
-                return f\"BoostingModel({self.algorithm}, {self.task}, fitted={self.is_fitted})\"
+                return f"BoostingModel({self.algorithm}, {self.task}, fitted={self.is_fitted})"
 
         # Create model instance
         model = BoostingModel(algorithm, task, parameters)
@@ -85,7 +85,7 @@ implementation:
             'task': task,
             'parameters': parameters,
             'status': 'initialized',
-            'model_type': f\"{algorithm} for {task}\",
+            'model_type': f"{algorithm} for {task}",
             'is_fitted': False
         }
 
