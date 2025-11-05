@@ -1,4 +1,4 @@
-name: 2 Unified Boosting Evaluator
+name: Unified Boosting Evaluator
 description: Evaluates trained boosting model using unified configuration
 inputs:
   - name: trained_model
@@ -36,6 +36,11 @@ implementation:
         import sys, os, pickle, json, pandas as pd, numpy as np
         from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
         import argparse
+
+        # Define DataWrapper class FIRST before unpickling
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
 
         print("STARTING UNIFIED BOOSTING EVALUATOR")
 
