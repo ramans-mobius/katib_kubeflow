@@ -1,4 +1,4 @@
-name: Unified Boosting Model Builder
+name: 2 Unified Boosting Model Builder
 description: Builds boosting model using unified configuration
 inputs:
   - name: config_str
@@ -93,8 +93,12 @@ implementation:
         config['model']['built'] = True
         config['model']['fitted'] = False
 
+        # Create parent directories for outputs
+        os.makedirs(os.path.dirname(args.model_out) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.config_updated) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.model_info_out) or ".", exist_ok=True)
+
         # Save outputs
-        os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
         with open(args.model_out, 'wb') as f:
             pickle.dump(model, f)
             
