@@ -1,0 +1,182 @@
+name: Generic Boosting Evaluator
+description: Evaluates trained boosting model for regression or classification based on task
+inputs:
+  - name: trained_model
+    type: Model
+    description: Trained model from trainer
+  - name: data_path
+    type: Dataset
+    description: Preprocessed data from preprocessor
+  - name: training_history
+    type: String
+    description: Training history with task information
+outputs:
+  - name: metrics
+    type: Metrics
+    description: Evaluation metrics
+  - name: metrics_json
+    type: String
+    description: Metrics as JSON string
+  - name: evaluation_report
+    type: String
+    description: Comprehensive evaluation report
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+        import argparse
+
+        print("STARTING GENERIC BOOSTING EVALUATOR")
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--data_path', type=str, required=True)
+        parser.add_argument('--training_history', type=str, required=True)
+        parser.add_argument('--metrics', type=str, required=True)
+        parser.add_argument('--metrics_json', type=str, required=True)
+        parser.add_argument('--evaluation_report', type=str, required=True)
+        args = parser.parse_args()
+
+        # Load model, data, and training history
+        with open(args.trained_model, 'rb') as f:
+            model = pickle.load(f)
+        with open(args.data_path, 'rb') as f:
+            data_wrapper = pickle.load(f)
+        with open(args.training_history, 'r') as f:
+            training_history = json.load(f)
+
+        # Extract information
+        X_test = data_wrapper.X_test
+        y_test = data_wrapper.y_test
+        task = training_history.get('task', 'classification')
+        algorithm = training_history.get('algorithm', 'Unknown')
+        dataset_info = getattr(data_wrapper, 'dataset_info', {})
+
+        print(f'Evaluating {algorithm} for {task} on {X_test.shape[0]} test samples')
+
+        # Make predictions
+        y_pred = model.predict(X_test)
+        
+        # Calculate metrics based on task
+        if task == 'regression':
+            metrics_dict = {
+                'r2_score': float(r2_score(y_test, y_pred)),
+                'mae': float(mean_absolute_error(y_test, y_pred)),
+                'rmse': float(np.sqrt(mean_squared_error(y_test, y_pred)))
+            }
+            
+            # Safe MAPE calculation
+            if np.any(y_test == 0):
+                mape = np.mean(np.abs((y_test - y_pred) / (np.where(y_test != 0, y_test, 1)))) * 100
+            else:
+                mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
+            metrics_dict['mape'] = float(mape)
+            
+        else:  # classification
+            metrics_dict = {
+                'accuracy': float(accuracy_score(y_test, y_pred)),
+                'precision': float(precision_score(y_test, y_pred, zero_division=0)),
+                'recall': float(recall_score(y_test, y_pred, zero_division=0)),
+                'f1_score': float(f1_score(y_test, y_pred, zero_division=0))
+            }
+            
+            # Add AUC if probability predictions available
+            if hasattr(model, 'predict_proba'):
+                y_pred_proba = model.predict_proba(X_test)[:, 1]
+                metrics_dict['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba))
+            
+            # Add confusion matrix
+            cm = confusion_matrix(y_test, y_pred)
+            metrics_dict['confusion_matrix'] = cm.tolist()
+
+        # Create comprehensive metrics
+        metrics = {
+            'algorithm': algorithm,
+            'task': task,
+            'dataset': dataset_info.get('dataset_name', 'Unknown'),
+            'test_metrics': metrics_dict,
+            'target_statistics': {
+                'actual_mean': float(np.mean(y_test)),
+                'actual_std': float(np.std(y_test)),
+                'predicted_mean': float(np.mean(y_pred)),
+                'predicted_std': float(np.std(y_pred))
+            },
+            'model_info': {
+                'test_samples': len(y_test),
+                'features_used': X_test.shape[1] if hasattr(X_test, 'shape') else 'unknown'
+            }
+        }
+
+        # Create task-specific report
+        if task == 'regression':
+            evaluation_report = f'''
+            REGRESSION EVALUATION REPORT
+            ============================
+            Algorithm: {algorithm}
+            Dataset: {metrics["dataset"]}
+            
+            PERFORMANCE METRICS:
+            R² Score: {metrics_dict['r2_score']:.4f}
+            MAE: {metrics_dict['mae']:.4f}
+            RMSE: {metrics_dict['rmse']:.4f}
+            MAPE: {metrics_dict.get('mape', 0):.2f}%
+            
+            TARGET STATISTICS:
+            Actual - Mean: {np.mean(y_test):.4f}, Std: {np.std(y_test):.4f}
+            Predicted - Mean: {np.mean(y_pred):.4f}, Std: {np.std(y_pred):.4f}
+            '''
+        else:
+            evaluation_report = f'''
+            CLASSIFICATION EVALUATION REPORT
+            ===============================
+            Algorithm: {algorithm}
+            Dataset: {metrics["dataset"]}
+            
+            PERFORMANCE METRICS:
+            Accuracy: {metrics_dict['accuracy']:.4f}
+            Precision: {metrics_dict['precision']:.4f}
+            Recall: {metrics_dict['recall']:.4f}
+            F1-Score: {metrics_dict['f1_score']:.4f}
+            {f\"AUC-ROC: {metrics_dict.get('roc_auc', 0):.4f}\" if 'roc_auc' in metrics_dict else ''}
+            
+            TARGET DISTRIBUTION:
+            Class 0: {np.sum(y_test == 0)} samples
+            Class 1: {np.sum(y_test == 1)} samples
+            '''
+
+        # Save outputs
+        os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
+        with open(args.metrics, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        with open(args.metrics_json, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        with open(args.evaluation_report, 'w') as f:
+            f.write(evaluation_report)
+        
+        print(f"Evaluation completed successfully for {task}")
+        print(f"Test metrics: {metrics_dict}")
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --data_path
+      - {inputPath: data_path}
+      - --training_history
+      - {inputPath: training_history}
+      - --metrics
+      - {outputPath: metrics}
+      - --metrics_json
+      - {outputPath: metrics_json}
+      - --evaluation_report
+      - {outputPath: evaluation_report}
