@@ -1,4 +1,4 @@
-name: 3 Unified Boosting Trainer
+name: Unified Boosting Trainer
 description: Trains boosting model using unified configuration
 inputs:
   - name: processed_data
@@ -41,6 +41,24 @@ implementation:
             def __init__(self, data_dict):
                 self.__dict__.update(data_dict)
 
+        # Define BoostingModel class for unpickling from Model Builder
+        class BoostingModel:
+            def __init__(self, algorithm, task, parameters):
+                self.algorithm = algorithm
+                self.task = task
+                self.parameters = parameters
+                self.is_fitted = False
+                self.model_type = f"{algorithm} for {task}"
+                
+            def get_info(self):
+                return {
+                    'algorithm': self.algorithm,
+                    'task': self.task,
+                    'parameters': self.parameters,
+                    'is_fitted': self.is_fitted,
+                    'model_type': self.model_type
+                }
+
         print("STARTING UNIFIED BOOSTING TRAINER")
 
         # Import optional packages
@@ -75,8 +93,17 @@ implementation:
         # Load data, model, and config
         with open(args.processed_data, 'rb') as f:
             data_wrapper = pickle.load(f)
-        with open(args.model_in, 'rb') as f:
-            model_obj = pickle.load(f)
+        
+        # We don't actually need the model from model builder for training
+        # Since we're creating the real model below
+        # Just load it to get the config if needed, but ignore the object
+        try:
+            with open(args.model_in, 'rb') as f:
+                model_obj = pickle.load(f)
+            print(f"Loaded model config: {model_obj.algorithm} for {model_obj.task}")
+        except:
+            print("Could not load model object, using config directly")
+        
         config = json.loads(args.config_str)
 
         # Extract data and config
