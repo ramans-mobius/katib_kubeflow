@@ -1,4 +1,4 @@
-name: Unified Boosting Evaluator
+name: 2 Unified Boosting Evaluator
 description: Evaluates trained boosting model using unified configuration
 inputs:
   - name: trained_model
@@ -162,7 +162,10 @@ implementation:
             '''
 
         # Save outputs
-        os.makedirs(os.path.dirname(args.metrics), exist_ok=True)
+        os.makedirs(os.path.dirname(args.metrics) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.metrics_json) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.evaluation_report) or ".", exist_ok=True)
+        
         with open(args.metrics, 'w') as f:
             json.dump(metrics, f, indent=2)
         with open(args.metrics_json, 'w') as f:
