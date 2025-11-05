@@ -28,6 +28,7 @@ implementation:
       - sh
       - -c
       - |
+        python3 -m pip install --quiet xgboost catboost lightgbm
         exec "$0" "$@"
       - python3
       - -u
@@ -42,25 +43,30 @@ implementation:
             def __init__(self, data_dict):
                 self.__dict__.update(data_dict)
 
-        # Define common sklearn model classes that might be pickled
-        # This helps with unpickling trained models from Trainer
+        print("STARTING UNIFIED BOOSTING EVALUATOR")
+
+        # Import common sklearn model classes that might be pickled
         from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
         
         # Import optional packages for their model classes
         try:
             from xgboost import XGBRegressor, XGBClassifier
+            print("XGBoost available")
         except ImportError:
             XGBRegressor, XGBClassifier = None, None
+            print("XGBoost not available")
         try:
             from catboost import CatBoostRegressor, CatBoostClassifier
+            print("CatBoost available")
         except ImportError:
             CatBoostRegressor, CatBoostClassifier = None, None
+            print("CatBoost not available")
         try:
             from lightgbm import LGBMRegressor, LGBMClassifier
+            print("LightGBM available")
         except ImportError:
             LGBMRegressor, LGBMClassifier = None, None
-
-        print("STARTING UNIFIED BOOSTING EVALUATOR")
+            print("LightGBM not available")
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--trained_model', type=str, required=True)
