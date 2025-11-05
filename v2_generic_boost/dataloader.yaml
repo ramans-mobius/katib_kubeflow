@@ -1,0 +1,164 @@
+name: Load Cluster Health Data
+description: Fetches cluster health data and creates proper features for boosting algorithms
+inputs:
+  - {name: api_url, type: String, description: 'API URL for cluster health data'}
+  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
+outputs:
+  - {name: train_data, type: Dataset}
+  - {name: test_data, type: Dataset}
+  - {name: target_data, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - |
+        python3 -m pip install --quiet requests pandas scikit-learn numpy || \
+        python3 -m pip install --quiet requests pandas scikit-learn numpy --user
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import os
+        import pickle
+        import pandas as pd
+        import numpy as np
+        import requests
+        from sklearn.model_selection import train_test_split
+        import json
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--api_url', type=str, required=True)
+        parser.add_argument('--access_token', type=str, required=True)
+        parser.add_argument('--train_data', type=str, required=True)
+        parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--target_data', type=str, required=True)
+        args = parser.parse_args()
+
+        with open(args.access_token, 'r') as f:
+            access_token = f.read().strip()
+
+        # Fetch data
+        headers = {"Authorization": f"Bearer {access_token}"}
+        resp = requests.get(args.api_url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        raw_data = resp.json()
+
+        # Process cluster health data with proper feature engineering
+        def create_features_from_cluster_health(raw_data):
+            features = []
+            targets = []
+            
+            for item in raw_data:
+                # Extract resource values
+                capacity = item['capacity']
+                used = item['used']
+                conditions = item['conditions']
+                
+                # Convert resource strings to numeric values
+                def convert_resource(val):
+                    if isinstance(val, str):
+                        if 'GB' in val: return float(val.replace('GB', ''))
+                        if 'TB' in val: return float(val.replace('TB', '')) * 1024
+                        if 'c' in val: return float(val.replace('c', ''))
+                        if 'B' in val and val != '0B': 
+                            # Extract numbers from strings like "31.34GB"
+                            num_str = ''.join([c for c in val if c.isdigit() or c == '.'])
+                            return float(num_str) if num_str else 0.0
+                    return float(val) if val else 0.0
+                
+                # Create features
+                feature_row = {}
+                
+                # Resource usage ratios (most important features)
+                cpu_cap = convert_resource(capacity['cpu'])
+                mem_cap = convert_resource(capacity['memory'])
+                storage_cap = convert_resource(capacity['storage'])
+                
+                cpu_used = convert_resource(used['cpu'])
+                mem_used = convert_resource(used['memory'])
+                storage_used = convert_resource(used['storage'])
+                
+                feature_row['cpu_usage_ratio'] = cpu_used / cpu_cap if cpu_cap > 0 else 0
+                feature_row['memory_usage_ratio'] = mem_used / mem_cap if mem_cap > 0 else 0
+                feature_row['storage_usage_ratio'] = storage_used / storage_cap if storage_cap > 0 else 0
+                feature_row['pods_usage_ratio'] = used['pods'] / float(capacity['pods']) if capacity['pods'] > 0 else 0
+                
+                # Absolute values
+                feature_row['cpu_capacity'] = cpu_cap
+                feature_row['memory_capacity'] = mem_cap
+                feature_row['pods_used'] = used['pods']
+                
+                # Node conditions (binary features)
+                feature_row['condition_ready'] = 1 if conditions.get('Ready') == 'True' else 0
+                feature_row['condition_memory_pressure'] = 1 if conditions.get('MemoryPressure') == 'True' else 0
+                feature_row['condition_disk_pressure'] = 1 if conditions.get('DiskPressure') == 'True' else 0
+                feature_row['condition_pid_pressure'] = 1 if conditions.get('PIDPressure') == 'True' else 0
+                feature_row['condition_network_available'] = 1 if conditions.get('NetworkUnavailable') == 'False' else 0
+                
+                # Temporal features
+                timestamp = pd.to_datetime(item['timestamp'])
+                feature_row['hour'] = timestamp.hour
+                feature_row['day_of_week'] = timestamp.dayofweek
+                feature_row['month'] = timestamp.month
+                
+                # Uptime
+                uptime_str = item.get('uptime', '0d')
+                feature_row['uptime_days'] = float(uptime_str.replace('d', '')) if 'd' in uptime_str else 0.0
+                
+                features.append(feature_row)
+                # Target: MemoryPressure (what we want to predict)
+                targets.append(1 if conditions.get('MemoryPressure') == 'True' else 0)
+            
+            return pd.DataFrame(features), np.array(targets)
+
+        # Create proper features and target
+        X, y = create_features_from_cluster_health(raw_data)
+        
+        # Train-test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        
+        # Save as dictionaries with feature names
+        train_dict = {
+            'X': X_train.values, 
+            'y': y_train, 
+            'feature_names': X.columns.tolist()
+        }
+        test_dict = {
+            'X': X_test.values, 
+            'y': y_test, 
+            'feature_names': X.columns.tolist()
+        }
+        
+        # Save datasets
+        os.makedirs(os.path.dirname(args.train_data) or ".", exist_ok=True)
+        with open(args.train_data, "wb") as f:
+            pickle.dump(train_dict, f)
+        
+        with open(args.test_data, "wb") as f:
+            pickle.dump(test_dict, f)
+        
+        with open(args.target_data, "wb") as f:
+            pickle.dump(y_test, f)
+        
+        print(f"Created {X.shape[1]} features for {len(X)} samples")
+        print(f"Features: {X.columns.tolist()}")
+        print(f"Target distribution - Class 0: {np.sum(y == 0)}, Class 1: {np.sum(y == 1)}")
+        print(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
+            
+    args:
+      - --api_url
+      - {inputValue: api_url}
+      - --access_token
+      - {inputPath: access_token}
+      - --train_data
+      - {outputPath: train_data}
+      - --test_data
+      - {outputPath: test_data}
+      - --target_data
+      - {outputPath: target_data}
