@@ -1,0 +1,246 @@
+name: Boosting Trainer
+description: Trains boosting algorithms for regression or classification based on task configuration
+inputs:
+  - name: data_path
+    type: Dataset
+    description: Preprocessed data from preprocessor
+  - name: preprocessing_pipeline
+    type: Model
+    description: Preprocessing pipeline from preprocessor
+  - name: config
+    type: String
+    description: Algorithm configuration as JSON string with task type
+outputs:
+  - name: trained_model
+    type: Model
+    description: Trained boosting model
+  - name: training_history
+    type: String
+    description: Training metrics and history
+  - name: model_coefficients
+    type: String
+    description: Feature importances and coefficients
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+        from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
+        import argparse
+        import subprocess
+
+        print("STARTING GENERIC BOOSTING TRAINER")
+
+        # Install required packages first
+        print("Installing required packages...")
+        packages = ['xgboost', 'catboost', 'lightgbm']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+        
+        # Now import the packages that were just installed
+        try:
+            from xgboost import XGBRegressor, XGBClassifier
+        except ImportError:
+            print("Warning: xgboost not available")
+            XGBRegressor, XGBClassifier = None, None
+        try:
+            from catboost import CatBoostRegressor, CatBoostClassifier
+        except ImportError:
+            print("Warning: catboost not available")
+            CatBoostRegressor, CatBoostClassifier = None, None
+        try:
+            from lightgbm import LGBMRegressor, LGBMClassifier
+        except ImportError:
+            print("Warning: lightgbm not available")
+            LGBMRegressor, LGBMClassifier = None, None
+
+        class DataWrapper:
+            def __init__(self, data_dict=None):
+                if data_dict:
+                    self.__dict__.update(data_dict)
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--data_path', type=str, required=True)
+        parser.add_argument('--preprocessing_pipeline', type=str, required=True)
+        parser.add_argument('--config', type=str, required=True)
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--training_history', type=str, required=True)
+        parser.add_argument('--model_coefficients', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Arguments loaded")
+
+        # Load data and config
+        with open(args.data_path, 'rb') as f:
+            data_wrapper = pickle.load(f)
+        with open(args.preprocessing_pipeline, 'rb') as f:
+            preprocessor = pickle.load(f)
+
+        config = json.loads(args.config)
+        algorithm = config.get('algorithm', 'GradientBoosting')
+        task = config.get('task', 'classification')  # 'regression' or 'classification'
+        parameters = config.get('parameters', {})
+        
+        print(f"Config: {algorithm} for {task} task")
+
+        # Extract data from wrapper
+        X_train = data_wrapper.X_train
+        y_train = data_wrapper.y_train
+        X_test = data_wrapper.X_test
+        y_test = data_wrapper.y_test
+        dataset_info = getattr(data_wrapper, 'dataset_info', {})
+
+        print(f'Training {algorithm} for {task} on {X_train.shape[0]} samples')
+
+        # Algorithm mapping for both regression and classification
+        algorithm_map = {
+            'regression': {
+                'GradientBoosting': GradientBoostingRegressor,
+                'AdaBoost': AdaBoostRegressor,
+                'XGBoost': XGBRegressor if XGBRegressor else None,
+                'CatBoost': CatBoostRegressor if CatBoostRegressor else None,
+                'LightGBM': LGBMRegressor if LGBMRegressor else None
+            },
+            'classification': {
+                'GradientBoosting': GradientBoostingClassifier,
+                'AdaBoost': AdaBoostClassifier,
+                'XGBoost': XGBClassifier if XGBClassifier else None,
+                'CatBoost': CatBoostClassifier if CatBoostClassifier else None,
+                'LightGBM': LGBMClassifier if LGBMClassifier else None
+            }
+        }
+
+        if task not in algorithm_map:
+            raise ValueError(f'Task {task} not supported. Use "regression" or "classification"')
+        if algorithm not in algorithm_map[task]:
+            available = list(algorithm_map[task].keys())
+            raise ValueError(f'Algorithm {algorithm} not supported for {task}. Available: {available}')
+
+        model_class = algorithm_map[task][algorithm]
+
+        # Set default parameters based on task
+        default_params = {
+            'regression': {
+                'GradientBoosting': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 3, 'random_state': 42},
+                'AdaBoost': {'n_estimators': 50, 'learning_rate': 1.0, 'random_state': 42},
+                'XGBoost': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 6, 'random_state': 42},
+                'CatBoost': {'iterations': 100, 'learning_rate': 0.1, 'depth': 6, 'random_state': 42, 'verbose': False},
+                'LightGBM': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': -1, 'random_state': 42}
+            },
+            'classification': {
+                'GradientBoosting': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 3, 'random_state': 42},
+                'AdaBoost': {'n_estimators': 50, 'learning_rate': 1.0, 'random_state': 42},
+                'XGBoost': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 6, 'random_state': 42},
+                'CatBoost': {'iterations': 100, 'learning_rate': 0.1, 'depth': 6, 'random_state': 42, 'verbose': False},
+                'LightGBM': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': -1, 'random_state': 42}
+            }
+        }
+
+        final_params = {**default_params[task].get(algorithm, {}), **parameters}
+        print(f'Using parameters: {final_params}')
+
+        # Train model
+        model = model_class(**final_params)
+        model.fit(X_train, y_train)
+        print("Model training completed successfully")
+
+        # Predictions
+        y_pred_train = model.predict(X_train)
+        y_pred_test = model.predict(X_test)
+
+        # Calculate metrics based on task
+        if task == 'regression':
+            train_metrics = {
+                'r2_score': float(r2_score(y_train, y_pred_train)),
+                'mae': float(mean_absolute_error(y_train, y_pred_train)),
+                'rmse': float(np.sqrt(mean_squared_error(y_train, y_pred_train)))
+            }
+            test_metrics = {
+                'r2_score': float(r2_score(y_test, y_pred_test)),
+                'mae': float(mean_absolute_error(y_test, y_pred_test)),
+                'rmse': float(np.sqrt(mean_squared_error(y_test, y_pred_test)))
+            }
+        else:  # classification
+            y_pred_proba_train = model.predict_proba(X_train)[:, 1] if hasattr(model, 'predict_proba') else None
+            y_pred_proba_test = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
+            
+            train_metrics = {
+                'accuracy': float(accuracy_score(y_train, y_pred_train)),
+                'precision': float(precision_score(y_train, y_pred_train, zero_division=0)),
+                'recall': float(recall_score(y_train, y_pred_train, zero_division=0)),
+                'f1_score': float(f1_score(y_train, y_pred_train, zero_division=0))
+            }
+            test_metrics = {
+                'accuracy': float(accuracy_score(y_test, y_pred_test)),
+                'precision': float(precision_score(y_test, y_pred_test, zero_division=0)),
+                'recall': float(recall_score(y_test, y_pred_test, zero_division=0)),
+                'f1_score': float(f1_score(y_test, y_pred_test, zero_division=0))
+            }
+            
+            # Add AUC if probability predictions available
+            if y_pred_proba_train is not None:
+                train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train))
+                test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test))
+
+        # Feature importances
+        feature_names = getattr(data_wrapper, 'feature_names', [f'feature_{i}' for i in range(X_train.shape[1])])
+        if hasattr(model, 'feature_importances_'):
+            importances = model.feature_importances_
+            coefficients_data = []
+            for name, importance in zip(feature_names, importances):
+                coefficients_data.append({
+                    'feature': name,
+                    'importance': float(importance),
+                    'importance_percent': float(importance * 100)
+                })
+        else:
+            coefficients_data = [{'feature': name, 'importance': 0, 'importance_percent': 0} for name in feature_names]
+
+        # Training history
+        history = {
+            'algorithm': algorithm,
+            'task': task,
+            'parameters': final_params,
+            'train_metrics': train_metrics,
+            'test_metrics': test_metrics,
+            'feature_importances': coefficients_data,
+            'training_samples': len(X_train),
+            'test_samples': len(X_test),
+            'dataset_name': dataset_info.get('dataset_name', 'Unknown')
+        }
+
+        # Save outputs
+        os.makedirs(os.path.dirname(args.trained_model), exist_ok=True)
+        with open(args.trained_model, 'wb') as f:
+            pickle.dump(model, f)
+        with open(args.training_history, 'w') as f:
+            json.dump(history, f, indent=2)
+        coefficients_df = pd.DataFrame(coefficients_data)
+        with open(args.model_coefficients, 'w') as f:
+            coefficients_df.to_csv(f, index=False)
+        
+        print(f"Training completed successfully for {task}")
+        print(f"Test metrics: {test_metrics}")
+    args:
+      - --data_path
+      - {inputPath: data_path}
+      - --preprocessing_pipeline
+      - {inputPath: preprocessing_pipeline}
+      - --config
+      - {inputValue: config}
+      - --trained_model
+      - {outputPath: trained_model}
+      - --training_history
+      - {outputPath: training_history}
+      - --model_coefficients
+      - {outputPath: model_coefficients}
