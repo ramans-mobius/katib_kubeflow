@@ -1,15 +1,25 @@
-name: Data Loader
-description: Fetches JSON data from API and prepares train/test splits with automatic feature detection
+name: Unified Data Loader
+description: Loads data from API using unified configuration
 inputs:
-  - {name: api_url, type: String, description: 'API URL to fetch JSON data'}
-  - {name: access_token, type: string, description: 'Bearer access token for API auth'}
-  - {name: target_column, type: String, description: 'Name of target column for supervised learning', default: ""}
-  - {name: task_type, type: String, description: 'Type of task: classification or regression', default: "auto"}
+  - name: api_url
+    type: String
+    description: 'API URL to fetch JSON data'
+  - name: access_token
+    type: string
+    description: 'Bearer access token for API auth'
+  - name: config_str
+    type: String
+    description: 'Unified configuration JSON string'
 outputs:
-  - {name: train_data, type: Dataset}
-  - {name: test_data, type: Dataset}
-  - {name: target_data, type: Dataset}
-  - {name: data_info, type: String}
+  - name: train_data
+    type: Dataset
+  - name: test_data
+    type: Dataset
+  - name: target_data
+    type: Dataset
+  - name: data_info
+    type: String
+
 implementation:
   container:
     image: python:3.9
@@ -24,36 +34,41 @@ implementation:
       - -u
       - -c
       - |
-        import argparse
-        import os
-        import pickle
-        import pandas as pd
-        import numpy as np
-        import requests
+        import argparse, os, pickle, pandas as pd, numpy as np, requests, json
         from sklearn.model_selection import train_test_split
-        import json
         from sklearn.preprocessing import LabelEncoder
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--api_url', type=str, required=True)
         parser.add_argument('--access_token', type=str, required=True)
-        parser.add_argument('--target_column', type=str, required=True)
-        parser.add_argument('--task_type', type=str, required=True)
+        parser.add_argument('--config_str', type=str, required=True)
         parser.add_argument('--train_data', type=str, required=True)
         parser.add_argument('--test_data', type=str, required=True)
         parser.add_argument('--target_data', type=str, required=True)
         parser.add_argument('--data_info', type=str, required=True)
         args = parser.parse_args()
 
+        # Load unified config
         with open(args.access_token, 'r') as f:
             access_token = f.read().strip()
+        
+        config = json.loads(args.config_str)
+        pipeline_config = config.get('pipeline', {})
+        training_config = config.get('training', {})
+
+        # Extract settings
+        target_column = pipeline_config.get('target_column', '')
+        task_type = pipeline_config.get('task', 'auto')
+        test_size = training_config.get('test_size', 0.2)
+        random_state = training_config.get('random_state', 42)
+
+        print(f"Loading data with config: task={task_type}, target={target_column}")
 
         # Fetch data
         headers = {"Authorization": f"Bearer {access_token}"}
         try:
-            # Try GET first, then POST if GET fails
             resp = requests.get(args.api_url, headers=headers, timeout=30)
-            if resp.status_code == 405:  # Method not allowed
+            if resp.status_code == 405:
                 payload = {"dbType": "TIDB", "filter": {}, "startTime": 0, "endTime": 0}
                 resp = requests.post(args.api_url, headers=headers, json=payload, timeout=30)
             resp.raise_for_status()
@@ -62,7 +77,7 @@ implementation:
             print(f"API request failed: {e}")
             raise
 
-        # Handle different response formats
+        # Handle response format
         if isinstance(raw_data, dict) and 'content' in raw_data:
             df_data = raw_data['content']
         else:
@@ -70,108 +85,75 @@ implementation:
 
         df = pd.DataFrame(df_data)
         print(f"Loaded {len(df)} records with {len(df.columns)} columns")
-        print(f"Columns: {list(df.columns)}")
 
-        # Automatic feature engineering for nested JSON structures
+        # Flatten nested structures
         def flatten_nested_columns(df):
-            """Flatten nested JSON structures into flat columns"""
             flattened_df = df.copy()
-            
             for col in df.columns:
                 if isinstance(df[col].iloc[0], dict):
-                    # Flatten dictionary columns
                     nested_df = pd.json_normalize(df[col])
                     nested_df.columns = [f"{col}_{subcol}" for subcol in nested_df.columns]
                     flattened_df = pd.concat([flattened_df.drop(columns=[col]), nested_df], axis=1)
-                elif isinstance(df[col].iloc[0], list):
-                    # Handle list columns (take length as feature)
-                    flattened_df[f"{col}_count"] = df[col].apply(len)
-                    flattened_df = flattened_df.drop(columns=[col])
-            
             return flattened_df
 
-        # Flatten nested structures
         df_flat = flatten_nested_columns(df)
         
-        # Convert all columns to numeric where possible
+        # Convert to numeric
         def auto_convert_to_numeric(df):
             converted_df = df.copy()
             for col in converted_df.columns:
-                # Skip if already numeric
                 if pd.api.types.is_numeric_dtype(converted_df[col]):
                     continue
-                
-                # Try to convert to numeric
                 converted_col = pd.to_numeric(converted_df[col], errors='coerce')
-                if not converted_col.isna().all():  # If conversion worked for some values
+                if not converted_col.isna().all():
                     converted_df[col] = converted_col
                 else:
-                    # Encode categorical variables
-                    if converted_df[col].nunique() < 50:  # Reasonable number of categories
+                    if converted_df[col].nunique() < 50:
                         le = LabelEncoder()
                         converted_df[col] = le.fit_transform(converted_df[col].astype(str))
                     else:
-                        # Drop high-cardinality categorical columns
                         converted_df = converted_df.drop(columns=[col])
-                        print(f"Dropped high-cardinality column: {col}")
-            
             return converted_df
 
         df_numeric = auto_convert_to_numeric(df_flat)
         
-        # Handle target column
-        target_col = args.target_column if args.target_column else None
-        if not target_col:
-            # Auto-detect target: look for common target names
-            common_targets = ['target', 'label', 'class', 'score', 'value', 'output', 
-                             'reachable', 'memory_pressure', 'anomaly', 'failure']
+        # Auto-detect target if not specified
+        if not target_column:
+            common_targets = ['target', 'label', 'class', 'score', 'value', 'output', 'reachable', 'memory_pressure', 'anomaly']
             for col in df_numeric.columns:
                 if any(target in col.lower() for target in common_targets):
-                    target_col = col
+                    target_column = col
                     break
-            
-            if not target_col and len(df_numeric.columns) > 0:
-                # Use last column as target if none found
-                target_col = df_numeric.columns[-1]
-                print(f"Auto-selected target column: {target_col}")
+            if not target_column and len(df_numeric.columns) > 0:
+                target_column = df_numeric.columns[-1]
+            print(f"Auto-selected target column: {target_column}")
 
-        if target_col not in df_numeric.columns:
-            raise ValueError(f"Target column '{target_col}' not found in data. Available columns: {list(df_numeric.columns)}")
+        if target_column not in df_numeric.columns:
+            raise ValueError(f"Target column '{target_column}' not found")
 
         # Separate features and target
-        X = df_numeric.drop(columns=[target_col])
-        y = df_numeric[target_col]
+        X = df_numeric.drop(columns=[target_column])
+        y = df_numeric[target_column]
         
-        # Auto-detect task type if not specified
-        task_type = args.task_type
+        # Auto-detect task type
         if task_type == "auto":
             unique_values = y.nunique()
             if unique_values == 2:
                 task_type = "classification"
-                print("Auto-detected: binary classification")
             elif unique_values < 20:
-                task_type = "classification" 
-                print(f"Auto-detected: multi-class classification ({unique_values} classes)")
+                task_type = "classification"
             else:
                 task_type = "regression"
-                print("Auto-detected: regression")
-        else:
-            task_type = task_type.lower()
-
-        # For classification, ensure target is integer
-        if task_type == "classification":
-            y = y.astype(int)
-            print(f"Classification classes: {sorted(y.unique())}")
+            print(f"Auto-detected task type: {task_type}")
 
         # Handle missing values
         X = X.fillna(0)
         y = y.fillna(0) if task_type == "regression" else y.fillna(y.mode()[0] if len(y.mode()) > 0 else 0)
 
         # Train-test split
-        test_size = 0.2
         stratify = y if task_type == "classification" and y.nunique() > 1 else None
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=stratify
+            X, y, test_size=test_size, random_state=random_state, stratify=stratify
         )
         
         # Prepare output data
@@ -179,15 +161,13 @@ implementation:
             'X': X_train.values, 
             'y': y_train, 
             'feature_names': X.columns.tolist(),
-            'task_type': task_type,
-            'target_name': target_col
+            'config': config
         }
         test_dict = {
             'X': X_test.values, 
             'y': y_test, 
             'feature_names': X.columns.tolist(),
-            'task_type': task_type,
-            'target_name': target_col
+            'config': config
         }
         
         # Data info
@@ -196,7 +176,7 @@ implementation:
             'final_samples': len(X),
             'features_count': len(X.columns),
             'task_type': task_type,
-            'target_column': target_col,
+            'target_column': target_column,
             'target_statistics': {
                 'min': float(y.min()),
                 'max': float(y.max()),
@@ -206,7 +186,6 @@ implementation:
                 'classes': int(y.nunique()),
                 'class_distribution': y.value_counts().to_dict()
             },
-            'feature_names': X.columns.tolist(),
             'train_samples': len(X_train),
             'test_samples': len(X_test)
         }
@@ -222,23 +201,15 @@ implementation:
         with open(args.data_info, "w") as f:
             json.dump(data_info, f, indent=2)
         
-        print(f"Data loading complete")
-        print(f"Task: {task_type}")
-        print(f"Target: {target_col}")
-        print(f"Features: {len(X.columns)}")
-        print(f"Train samples: {len(X_train)}, Test samples: {len(X_test)}")
-        if task_type == "classification":
-            print(f"Classes: {sorted(y.unique())}")
+        print(f"Data loading complete: {len(X_train)} train, {len(X_test)} test samples")
             
     args:
       - --api_url
       - {inputValue: api_url}
       - --access_token
       - {inputPath: access_token}
-      - --target_column
-      - {inputValue: target_column}
-      - --task_type
-      - {inputValue: task_type}
+      - --config_str
+      - {inputValue: config_str}
       - --train_data
       - {outputPath: train_data}
       - --test_data
