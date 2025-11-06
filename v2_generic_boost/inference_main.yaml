@@ -1,4 +1,4 @@
-name: Unified Inference Predictor
+name: 2 Unified Inference Predictor
 description: Makes predictions using trained model for both classification and regression
 inputs:
   - name: loaded_model
@@ -30,6 +30,20 @@ implementation:
         import argparse
         from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, mean_squared_error
 
+        # DEFINE CLASSES FIRST for unpickling compatibility
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
+
+        class InferenceDataWrapper:
+            def __init__(self, X_data, original_data, source, task_type):
+                self.X_inference = X_data
+                self.original_data = original_data
+                self.feature_columns = list(X_data.columns)
+                self.data_source = source
+                self.task_type = task_type
+                self.sample_count = len(X_data)
+
         print("STARTING UNIFIED INFERENCE PREDICTOR")
 
         parser = argparse.ArgumentParser()
@@ -40,7 +54,7 @@ implementation:
         parser.add_argument('--prediction_summary', type=str, required=True)
         args = parser.parse_args()
 
-        # Load model and data
+        # Load model and data - NOW WITH CLASSES DEFINED
         with open(args.loaded_model, 'rb') as f:
             model = pickle.load(f)
         
