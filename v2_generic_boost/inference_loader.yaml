@@ -1,0 +1,272 @@
+name: Inference Data & Model Loader
+description: Loads trained model and inference data for both classification and regression
+inputs:
+  - name: trained_model
+    type: Model
+    description: Trained model from training pipeline
+  - name: preprocessing_pipeline
+    type: Model
+    description: Preprocessing pipeline from training
+  - name: test_data
+    type: Dataset
+    description: Test data from training (fallback)
+  - name: inference_data_url
+    type: String
+    description: URL to new inference data (optional)
+  - name: config_str
+    type: String
+    description: Unified configuration for task type detection
+outputs:
+  - name: loaded_model
+    type: Model
+    description: Loaded trained model
+  - name: processed_inference_data
+    type: Dataset
+    description: Preprocessed data ready for inference
+  - name: data_source_info
+    type: String
+    description: Information about data source used
+  - name: task_type
+    type: String
+    description: Detected task type (classification/regression)
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np, requests
+        import argparse
+        import subprocess
+
+        print("STARTING INFERENCE DATA & MODEL LOADER")
+
+        # Install required packages for model loading
+        print("Installing required packages...")
+        packages = ['lightgbm', 'xgboost', 'catboost', 'scikit-learn']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--trained_model', type=str, required=True)
+        parser.add_argument('--preprocessing_pipeline', type=str, required=True)
+        parser.add_argument('--test_data', type=str, required=True)
+        parser.add_argument('--inference_data_url', type=str, required=True)
+        parser.add_argument('--config_str', type=str, required=True)
+        parser.add_argument('--loaded_model', type=str, required=True)
+        parser.add_argument('--processed_inference_data', type=str, required=True)
+        parser.add_argument('--data_source_info', type=str, required=True)
+        parser.add_argument('--task_type', type=str, required=True)
+        args = parser.parse_args()
+
+        print("Arguments loaded")
+
+        # Load unified config
+        config = json.loads(args.config_str)
+        pipeline_config = config.get('pipeline', {})
+        task_type = pipeline_config.get('task', 'auto')
+        target_column = pipeline_config.get('target_column', '')
+
+        # Load trained model
+        try:
+            with open(args.trained_model, 'rb') as f:
+                model = pickle.load(f)
+            print(f"Model loaded successfully: {type(model).__name__}")
+            
+            # Detect task type from model if not specified
+            if task_type == 'auto':
+                model_class_name = type(model).__name__.lower()
+                if 'classifier' in model_class_name or 'classif' in model_class_name:
+                    task_type = 'classification'
+                elif 'regressor' in model_class_name or 'regress' in model_class_name:
+                    task_type = 'regression'
+                else:
+                    # Default to classification for ensemble models
+                    task_type = 'classification'
+            print(f"Task type: {task_type}")
+                    
+        except Exception as e:
+            print("ERROR loading model: " + str(e))
+            sys.exit(1)
+
+        # Load preprocessing pipeline
+        try:
+            with open(args.preprocessing_pipeline, 'rb') as f:
+                preprocessor = pickle.load(f)
+            print("Preprocessing pipeline loaded successfully")
+        except Exception as e:
+            print("ERROR loading preprocessor: " + str(e))
+            sys.exit(1)
+
+        # Load inference data (new data or test data fallback)
+        inference_data = []
+        data_source = "test_data"
+
+        if args.inference_data_url and args.inference_data_url != "none":
+            try:
+                response = requests.get(args.inference_data_url)
+                response.raise_for_status()
+                content = response.text
+                print(f"Downloaded new inference data: {len(content)} characters")
+                
+                # Parse JSON data
+                lines = content.splitlines()
+                json_buffer = []
+                in_json_section = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if "GNN-STGNN Spatio-Temporal Data:" in line:
+                        in_json_section = True
+                        continue
+                    if in_json_section and line == '[':
+                        continue
+                    if in_json_section and line == ']':
+                        break
+                    if in_json_section and line:
+                        json_buffer.append(line)
+                
+                if json_buffer:
+                    json_str = '[' + ','.join(json_buffer) + ']'
+                    inference_data = json.loads(json_str)
+                    data_source = "new_data"
+                    print(f"Successfully loaded {len(inference_data)} new inference samples")
+                else:
+                    print("No new inference data found, falling back to test data")
+                    
+            except Exception as e:
+                print(f"Failed to load new data: {e}, falling back to test data")
+
+        # If no new data, use test data
+        if not inference_data:
+            try:
+                with open(args.test_data, 'rb') as f:
+                    test_dict = pickle.load(f)
+                # Convert test data to inference format
+                if hasattr(test_dict, 'X_test'):
+                    X_test = test_dict.X_test
+                    feature_names = test_dict.feature_names
+                    inference_data = []
+                    for i in range(len(X_test)):
+                        sample = {}
+                        for j, feature_name in enumerate(feature_names):
+                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') else X_test[i]
+                        inference_data.append(sample)
+                else:
+                    # Fallback to CSV reading
+                    test_df = pd.read_csv(args.test_data)
+                    inference_data = test_df.to_dict('records')
+                print(f"Using test data: {len(inference_data)} samples")
+            except Exception as e:
+                print("ERROR loading test data: " + str(e))
+                sys.exit(1)
+
+        # Process data
+        try:
+            df = pd.DataFrame(inference_data)
+            print(f"Raw inference data shape: {df.shape}")
+            
+            # Handle target column if present
+            feature_columns = df.columns.tolist()
+            if target_column and target_column in df.columns:
+                feature_columns = [col for col in df.columns if col != target_column]
+                print(f"Excluding target column '{target_column}' from features")
+            
+            X_inference = df[feature_columns].copy()
+            
+            # Apply preprocessing if available
+            if hasattr(preprocessor, 'transform'):
+                try:
+                    X_inference_processed = preprocessor.transform(X_inference.values)
+                    # Convert back to DataFrame with feature names
+                    if hasattr(X_inference_processed, 'shape'):
+                        if len(X_inference_processed.shape) == 1:
+                            X_inference_processed = X_inference_processed.reshape(-1, 1)
+                        # Try to preserve feature names
+                        if hasattr(preprocessor, 'get_feature_names_out'):
+                            feature_names_processed = preprocessor.get_feature_names_out(feature_columns)
+                        elif hasattr(preprocessor, 'feature_names_in_'):
+                            feature_names_processed = preprocessor.feature_names_in_
+                        else:
+                            feature_names_processed = [f'feature_{i}' for i in range(X_inference_processed.shape[1])]
+                        
+                        X_inference = pd.DataFrame(X_inference_processed, columns=feature_names_processed)
+                    print("Applied preprocessing transformation")
+                except Exception as e:
+                    print(f"Warning: Could not apply preprocessing: {e}")
+                    print("Using raw features")
+            
+            class InferenceDataWrapper:
+                def __init__(self, X_data, original_data, source, task_type):
+                    self.X_inference = X_data
+                    self.original_data = original_data
+                    self.feature_columns = list(X_data.columns)
+                    self.data_source = source
+                    self.task_type = task_type
+                    self.sample_count = len(X_data)
+            
+            data_wrapper = InferenceDataWrapper(X_inference, inference_data, data_source, task_type)
+            
+            # Save outputs
+            os.makedirs(os.path.dirname(args.loaded_model), exist_ok=True)
+            with open(args.loaded_model, 'wb') as f:
+                pickle.dump(model, f)
+            
+            os.makedirs(os.path.dirname(args.processed_inference_data), exist_ok=True)
+            with open(args.processed_inference_data, 'wb') as f:
+                pickle.dump(data_wrapper, f)
+            
+            os.makedirs(os.path.dirname(args.data_source_info), exist_ok=True)
+            with open(args.data_source_info, 'w') as f:
+                json.dump({
+                    "data_source": data_source,
+                    "samples": len(inference_data),
+                    "features": len(X_inference.columns),
+                    "model_type": type(model).__name__,
+                    "task_type": task_type,
+                    "feature_columns": list(X_inference.columns)
+                }, f, indent=2)
+            
+            # Save task type separately
+            os.makedirs(os.path.dirname(args.task_type), exist_ok=True)
+            with open(args.task_type, 'w') as f:
+                json.dump({"task_type": task_type}, f)
+                
+            print("Inference data & model loading completed successfully")
+            print(f"Data source: {data_source}")
+            print(f"Samples: {len(inference_data)}")
+            print(f"Features: {len(X_inference.columns)}")
+            print(f"Model: {type(model).__name__}")
+            print(f"Task type: {task_type}")
+            
+        except Exception as e:
+            print("ERROR processing inference data: " + str(e))
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --preprocessing_pipeline
+      - {inputPath: preprocessing_pipeline}
+      - --test_data
+      - {inputPath: test_data}
+      - --inference_data_url
+      - {inputValue: inference_data_url}
+      - --config_str
+      - {inputValue: config_str}
+      - --loaded_model
+      - {outputPath: loaded_model}
+      - --processed_inference_data
+      - {outputPath: processed_inference_data}
+      - --data_source_info
+      - {outputPath: data_source_info}
+      - --task_type
+      - {outputPath: task_type}
