@@ -1,4 +1,4 @@
-name: DQN RLAF Loop Boosting
+name: 2 DQN RLAF Loop Boosting
 description: Triggers the DQN RLAF pipeline in a loop to optimize boosting model hyperparameters
 inputs:
   - {name: trained_model, type: Model}
@@ -24,13 +24,12 @@ implementation:
       - sh
       - -c
       - |
-        python3 -m pip install --quiet requests scikit-learn xgboost lightgbm catboost || \
-        python3 -m pip install --quiet requests scikit-learn xgboost lightgbm catboost --user
         exec "$0" "$@"
       - python3
       - -u
       - -c
       - |
+        import sys
         import torch
         import os
         import json
