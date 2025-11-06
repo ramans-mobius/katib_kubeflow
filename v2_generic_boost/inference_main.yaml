@@ -1,4 +1,4 @@
-name: 2 Unified Inference Predictor
+name: Unified Inference Predictor
 description: Makes predictions using trained model for both classification and regression
 inputs:
   - name: loaded_model
@@ -28,6 +28,19 @@ implementation:
       - |
         import sys, os, pickle, json, pandas as pd, numpy as np
         import argparse
+        import subprocess
+
+        # Install required packages FIRST
+        print("Installing required packages for prediction...")
+        packages = ['xgboost', 'lightgbm', 'catboost', 'scikit-learn', 'pandas', 'numpy']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+
+        # Now import after installation
         from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, mean_squared_error
 
         # DEFINE CLASSES FIRST for unpickling compatibility
@@ -55,11 +68,21 @@ implementation:
         args = parser.parse_args()
 
         # Load model and data - NOW WITH CLASSES DEFINED
-        with open(args.loaded_model, 'rb') as f:
-            model = pickle.load(f)
+        try:
+            with open(args.loaded_model, 'rb') as f:
+                model = pickle.load(f)
+            print(f"Model loaded: {type(model).__name__}")
+        except Exception as e:
+            print(f"ERROR loading model: {e}")
+            sys.exit(1)
         
-        with open(args.processed_inference_data, 'rb') as f:
-            data_wrapper = pickle.load(f)
+        try:
+            with open(args.processed_inference_data, 'rb') as f:
+                data_wrapper = pickle.load(f)
+            print("Data wrapper loaded successfully")
+        except Exception as e:
+            print(f"ERROR loading data wrapper: {e}")
+            sys.exit(1)
         
         with open(args.task_type, 'r') as f:
             task_info = json.load(f)
