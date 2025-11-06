@@ -1,4 +1,4 @@
-name: Unified Inference Predictor
+name: 2 Unified Inference Predictor
 description: Makes predictions using trained model for both classification and regression
 inputs:
   - name: loaded_model
@@ -32,7 +32,7 @@ implementation:
 
         # Install required packages FIRST
         print("Installing required packages for prediction...")
-        packages = ['xgboost', 'lightgbm', 'catboost', 'scikit-learn', 'pandas', 'numpy']
+        packages = ['xgboost', 'lightgbm', 'catboost', 'pandas']
         for package in packages:
             try:
                 subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
