@@ -1,0 +1,166 @@
+name: Unified Inference Predictor
+description: Makes predictions using trained model for both classification and regression
+inputs:
+  - name: loaded_model
+    type: Model
+    description: Loaded trained model
+  - name: processed_inference_data
+    type: Dataset
+    description: Preprocessed data ready for inference
+  - name: task_type
+    type: String
+    description: Task type (classification/regression)
+outputs:
+  - name: prediction_results
+    type: String
+    description: Detailed prediction results with probabilities/confidence
+  - name: prediction_summary
+    type: String
+    description: Summary statistics of predictions
+
+implementation:
+  container:
+    image: nikhilv215/nesy-factory:v22
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import sys, os, pickle, json, pandas as pd, numpy as np
+        import argparse
+        from sklearn.metrics import accuracy_score, classification_report, mean_absolute_error, mean_squared_error
+
+        print("STARTING UNIFIED INFERENCE PREDICTOR")
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--loaded_model', type=str, required=True)
+        parser.add_argument('--processed_inference_data', type=str, required=True)
+        parser.add_argument('--task_type', type=str, required=True)
+        parser.add_argument('--prediction_results', type=str, required=True)
+        parser.add_argument('--prediction_summary', type=str, required=True)
+        args = parser.parse_args()
+
+        # Load model and data
+        with open(args.loaded_model, 'rb') as f:
+            model = pickle.load(f)
+        
+        with open(args.processed_inference_data, 'rb') as f:
+            data_wrapper = pickle.load(f)
+        
+        with open(args.task_type, 'r') as f:
+            task_info = json.load(f)
+        
+        task_type = task_info.get('task_type', 'classification')
+        
+        print(f"Making predictions for {task_type} task")
+        print(f"Data samples: {data_wrapper.sample_count}")
+        print(f"Features: {data_wrapper.feature_columns}")
+
+        # Prepare data for prediction
+        X_inference = data_wrapper.X_inference
+        
+        # Convert to numpy array if needed
+        if hasattr(X_inference, 'values'):
+            X_array = X_inference.values
+        else:
+            X_array = X_inference
+        
+        print(f"Input data shape: {X_array.shape}")
+
+        # Make predictions
+        try:
+            predictions = model.predict(X_array)
+            print("Predictions generated successfully")
+            
+            # Get confidence scores/probabilities
+            confidence_scores = []
+            if hasattr(model, 'predict_proba') and task_type == 'classification':
+                probabilities = model.predict_proba(X_array)
+                # Use maximum probability as confidence score
+                confidence_scores = np.max(probabilities, axis=1)
+            elif hasattr(model, 'predict_proba'):
+                probabilities = model.predict_proba(X_array)
+                confidence_scores = np.max(probabilities, axis=1)
+            else:
+                # For regression or models without probability, use dummy confidence
+                confidence_scores = [0.8] * len(predictions)
+            
+            # Prepare detailed results
+            results = []
+            for i, (pred, confidence) in enumerate(zip(predictions, confidence_scores)):
+                result = {
+                    'sample_id': i,
+                    'predicted_value': float(pred) if hasattr(pred, '__float__') else str(pred),
+                    'confidence_score': float(confidence),
+                    'features_used': len(data_wrapper.feature_columns),
+                    'model_type': type(model).__name__
+                }
+                
+                # Add additional info based on task type
+                if task_type == 'classification' and hasattr(model, 'predict_proba'):
+                    class_probabilities = {}
+                    if hasattr(model, 'classes_'):
+                        for j, class_name in enumerate(model.classes_):
+                            class_probabilities[str(class_name)] = float(probabilities[i][j])
+                    result['class_probabilities'] = class_probabilities
+                    result['predicted_class'] = str(pred)
+                
+                results.append(result)
+            
+            # Calculate summary statistics
+            pred_values = [r['predicted_value'] for r in results]
+            conf_scores = [r['confidence_score'] for r in results]
+            
+            summary = {
+                'task_type': task_type,
+                'total_predictions': len(results),
+                'model_type': type(model).__name__,
+                'mean_confidence': float(np.mean(conf_scores)),
+                'min_confidence': float(np.min(conf_scores)),
+                'max_confidence': float(np.max(conf_scores)),
+                'data_source': data_wrapper.data_source
+            }
+            
+            if task_type == 'classification':
+                # Count predictions per class
+                from collections import Counter
+                class_counts = Counter(pred_values)
+                summary['class_distribution'] = class_counts
+                summary['most_common_class'] = class_counts.most_common(1)[0][0] if class_counts else 'N/A'
+            else:
+                # Regression statistics
+                summary.update({
+                    'mean_prediction': float(np.mean(pred_values)),
+                    'min_prediction': float(np.min(pred_values)),
+                    'max_prediction': float(np.max(pred_values)),
+                    'std_prediction': float(np.std(pred_values))
+                })
+            
+            # Save outputs
+            os.makedirs(os.path.dirname(args.prediction_results), exist_ok=True)
+            with open(args.prediction_results, 'w') as f:
+                json.dump(results, f, indent=2)
+            
+            os.makedirs(os.path.dirname(args.prediction_summary), exist_ok=True)
+            with open(args.prediction_summary, 'w') as f:
+                json.dump(summary, f, indent=2)
+            
+            print("Prediction completed successfully")
+            print(f"Summary: {summary}")
+            
+        except Exception as e:
+            print(f"ERROR during prediction: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    args:
+      - --loaded_model
+      - {inputPath: loaded_model}
+      - --processed_inference_data
+      - {inputPath: processed_inference_data}
+      - --task_type
+      - {inputPath: task_type}
+      - --prediction_results
+      - {outputPath: prediction_results}
+      - --prediction_summary
+      - {outputPath: prediction_summary}
