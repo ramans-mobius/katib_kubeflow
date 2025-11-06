@@ -1,4 +1,4 @@
-name: Create Continual Learning Tasks
+name: 2 Create Continual Learning Tasks
 description: Splits processed data into multiple tasks for continual learning
 inputs:
   - {name: processed_data, type: Dataset}
@@ -7,7 +7,7 @@ outputs:
   - {name: tasks, type: Dataset}
 implementation:
   container:
-    image: nikhilv215/nesy-factory:v22
+    image: kushagra4761/nesy-factory-library
     command:
       - sh
       - -c
@@ -49,11 +49,15 @@ implementation:
               X_test = self.data['X_test']
               y_test = self.data['y_test']
 
+              print(f"Data shapes - X_train: {X_train.shape}, y_train: {y_train.shape}")
+              print(f"Data types - X_train: {type(X_train)}, y_train: {type(y_train)}")
+
               train_size = len(X_train)
               test_size = len(X_test)
               
-              train_splits = np.array_split(range(train_size), num_tasks)
-              test_splits = np.array_split(range(test_size), num_tasks)
+              # Use numpy array splitting instead of pandas indexing
+              train_splits = np.array_split(np.arange(train_size), num_tasks)
+              test_splits = np.array_split(np.arange(test_size), num_tasks)
               
               for i in range(num_tasks):
                   # Handle different data types based on task type
@@ -64,12 +68,18 @@ implementation:
                       y_train_dtype = torch.float32
                       y_test_dtype = torch.float32
                   
+                  # Use numpy indexing for arrays
+                  X_train_task = X_train[train_splits[i]]
+                  y_train_task = y_train[train_splits[i]]
+                  X_test_task = X_test[test_splits[i]]
+                  y_test_task = y_test[test_splits[i]]
+                  
                   task_data = {
                       'task_id': i,
-                      'X_train': X_train[train_splits[i]],
-                      'y_train': y_train[train_splits[i]],
-                      'X_test': X_test[test_splits[i]],
-                      'y_test': y_test[test_splits[i]],
+                      'X_train': X_train_task,
+                      'y_train': y_train_task,
+                      'X_test': X_test_task,
+                      'y_test': y_test_task,
                       'description': f'Temporal Period {i+1}/{num_tasks}',
                       'task_type': self.task_type
                   }
@@ -89,6 +99,7 @@ implementation:
                   task_data['test_loader'] = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
                   
                   tasks.append(task_data)
+                  print(f"Created task {i} - Train: {X_train_task.shape}, Test: {X_test_task.shape}")
               
               return tasks
 
@@ -106,29 +117,43 @@ implementation:
             with open(args.processed_data, 'rb') as f:
                 processed_data = pickle.load(f)
             
-            # Extract data from processed_data wrapper
-            # Based on your preprocessor output structure
+            print(f"Loaded processed_data type: {type(processed_data)}")
+            print(f"Processed data attributes: {[attr for attr in dir(processed_data) if not attr.startswith('_')]}")
+            
+            # Extract data from processed_data wrapper - HANDLE DIFFERENT FORMATS
             if hasattr(processed_data, 'X_train'):
                 X_train = processed_data.X_train
                 y_train = processed_data.y_train
                 X_test = processed_data.X_test
                 y_test = processed_data.y_test
-            else:
-                # Fallback for different data formats
+            elif hasattr(processed_data, '__dict__'):
+                # Try to access via __dict__
                 X_train = processed_data.__dict__.get('X_train')
                 y_train = processed_data.__dict__.get('y_train')
                 X_test = processed_data.__dict__.get('X_test')
                 y_test = processed_data.__dict__.get('y_test')
+            else:
+                # Last resort - assume it's a dictionary-like object
+                X_train = getattr(processed_data, 'X_train', None)
+                y_train = getattr(processed_data, 'y_train', None)
+                X_test = getattr(processed_data, 'X_test', None)
+                y_test = getattr(processed_data, 'y_test', None)
 
-            # Ensure data is in right format
-            if isinstance(X_train, list):
+            # Convert to numpy arrays if they aren't already
+            if X_train is not None and not isinstance(X_train, np.ndarray):
                 X_train = np.array(X_train)
-            if isinstance(y_train, list):
+            if y_train is not None and not isinstance(y_train, np.ndarray):
                 y_train = np.array(y_train)
-            if isinstance(X_test, list):
+            if X_test is not None and not isinstance(X_test, np.ndarray):
                 X_test = np.array(X_test)
-            if isinstance(y_test, list):
+            if y_test is not None and not isinstance(y_test, np.ndarray):
                 y_test = np.array(y_test)
+
+            # Validate data
+            if X_train is None or y_train is None:
+                raise ValueError("Could not extract training data from processed_data")
+            if X_test is None or y_test is None:
+                raise ValueError("Could not extract test data from processed_data")
 
             data = {
                 'X_train': X_train,
@@ -146,8 +171,10 @@ implementation:
             with open(args.tasks, "wb") as f:
                 pickle.dump(tasks, f)
 
-            print(f"Created {len(tasks)} continual learning tasks for {task_type}")
-            print(f"Task shapes - Train: {X_train.shape}, Test: {X_test.shape}")
+            print(f"Successfully created {len(tasks)} continual learning tasks for {task_type}")
+            print(f"Final task shapes:")
+            for i, task in enumerate(tasks):
+                print(f"  Task {i}: Train {task['X_train'].shape}, Test {task['X_test'].shape}")
             print(f"Saved tasks to {args.tasks}")
 
         if __name__ == '__main__':
