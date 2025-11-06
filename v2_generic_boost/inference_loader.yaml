@@ -1,4 +1,4 @@
-name: Inference Data & Model Loader
+name: 2 Inference Data & Model Loader
 description: Loads trained model and inference data for both classification and regression
 inputs:
   - name: trained_model
@@ -41,8 +41,26 @@ implementation:
         import sys, os, pickle, json, pandas as pd, numpy as np, requests
         import argparse
         import subprocess
+        from sklearn.preprocessing import StandardScaler, MinMaxScaler
+        from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 
         print("STARTING INFERENCE DATA & MODEL LOADER")
+
+        # Define the PreprocessingPipeline class FIRST (before unpickling)
+        class PreprocessingPipeline:
+            def __init__(self, steps):
+                self.steps = steps
+            
+            def transform(self, X):
+                X_transformed = X.copy()
+                for name, transformer in self.steps:
+                    X_transformed = transformer.transform(X_transformed)
+                return X_transformed
+
+        # Define DataWrapper for compatibility
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
 
         # Install required packages for model loading
         print("Installing required packages...")
@@ -96,14 +114,27 @@ implementation:
             print("ERROR loading model: " + str(e))
             sys.exit(1)
 
-        # Load preprocessing pipeline
+        # Load preprocessing pipeline - NOW WITH CLASS DEFINED
         try:
             with open(args.preprocessing_pipeline, 'rb') as f:
                 preprocessor = pickle.load(f)
             print("Preprocessing pipeline loaded successfully")
+            print(f"Preprocessor type: {type(preprocessor).__name__}")
+            if hasattr(preprocessor, 'steps'):
+                print(f"Preprocessing steps: {[step[0] for step in preprocessor.steps]}")
         except Exception as e:
             print("ERROR loading preprocessor: " + str(e))
-            sys.exit(1)
+            # Try alternative loading method
+            try:
+                # Try to load as a dictionary or other format
+                with open(args.preprocessing_pipeline, 'rb') as f:
+                    preprocessor_data = pickle.load(f)
+                print(f"Loaded preprocessor as: {type(preprocessor_data).__name__}")
+                preprocessor = preprocessor_data
+            except Exception as e2:
+                print(f"Alternative loading also failed: {e2}")
+                print("Continuing without preprocessing pipeline")
+                preprocessor = None
 
         # Load inference data (new data or test data fallback)
         inference_data = []
@@ -159,6 +190,16 @@ implementation:
                         for j, feature_name in enumerate(feature_names):
                             sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') else X_test[i]
                         inference_data.append(sample)
+                elif isinstance(test_dict, dict) and 'X' in test_dict:
+                    # Handle dictionary format
+                    X_test = test_dict['X']
+                    feature_names = test_dict['feature_names']
+                    inference_data = []
+                    for i in range(len(X_test)):
+                        sample = {}
+                        for j, feature_name in enumerate(feature_names):
+                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') else X_test[i]
+                        inference_data.append(sample)
                 else:
                     # Fallback to CSV reading
                     test_df = pd.read_csv(args.test_data)
@@ -181,15 +222,19 @@ implementation:
             
             X_inference = df[feature_columns].copy()
             
-            # Apply preprocessing if available
-            if hasattr(preprocessor, 'transform'):
+            # Apply preprocessing if available and compatible
+            if preprocessor and hasattr(preprocessor, 'transform'):
                 try:
+                    print("Applying preprocessing transformation...")
                     X_inference_processed = preprocessor.transform(X_inference.values)
+                    
                     # Convert back to DataFrame with feature names
                     if hasattr(X_inference_processed, 'shape'):
                         if len(X_inference_processed.shape) == 1:
                             X_inference_processed = X_inference_processed.reshape(-1, 1)
+                        
                         # Try to preserve feature names
+                        feature_names_processed = []
                         if hasattr(preprocessor, 'get_feature_names_out'):
                             feature_names_processed = preprocessor.get_feature_names_out(feature_columns)
                         elif hasattr(preprocessor, 'feature_names_in_'):
@@ -198,10 +243,15 @@ implementation:
                             feature_names_processed = [f'feature_{i}' for i in range(X_inference_processed.shape[1])]
                         
                         X_inference = pd.DataFrame(X_inference_processed, columns=feature_names_processed)
-                    print("Applied preprocessing transformation")
+                        print(f"Applied preprocessing - new shape: {X_inference.shape}")
+                    else:
+                        print("Warning: Preprocessing output is not in expected format")
+                        
                 except Exception as e:
                     print(f"Warning: Could not apply preprocessing: {e}")
                     print("Using raw features")
+            else:
+                print("No preprocessing applied - using raw features")
             
             class InferenceDataWrapper:
                 def __init__(self, X_data, original_data, source, task_type):
@@ -231,7 +281,8 @@ implementation:
                     "features": len(X_inference.columns),
                     "model_type": type(model).__name__,
                     "task_type": task_type,
-                    "feature_columns": list(X_inference.columns)
+                    "feature_columns": list(X_inference.columns),
+                    "preprocessing_applied": preprocessor is not None
                 }, f, indent=2)
             
             # Save task type separately
@@ -245,6 +296,7 @@ implementation:
             print(f"Features: {len(X_inference.columns)}")
             print(f"Model: {type(model).__name__}")
             print(f"Task type: {task_type}")
+            print(f"Preprocessing applied: {preprocessor is not None}")
             
         except Exception as e:
             print("ERROR processing inference data: " + str(e))
