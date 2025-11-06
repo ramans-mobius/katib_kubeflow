@@ -1,4 +1,4 @@
-name: 2 DQN RLAF Loop
+name: DQN RLAF Loop
 description: Triggers the DQN RLAF pipeline in a loop to optimize model hyperparameters for both classification and regression
 inputs:
   - {name: trained_model, type: Model}
@@ -88,7 +88,6 @@ implementation:
                 self.task_type = config.get('task_type', 'classification')
                 
             def train_boosting_model(self, tasks: list, model_params: dict) -> dict:
-                """Train boosting model on continual learning tasks"""
                 
                 algorithm = model_params.get('algorithm', 'GradientBoosting')
                 parameters = model_params.get('parameters', {})
