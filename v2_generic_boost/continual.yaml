@@ -1,8 +1,7 @@
 name: Create Continual Learning Tasks
-description: Splits data into multiple tasks for continual learning for both classification and regression
+description: Splits processed data into multiple tasks for continual learning
 inputs:
-  - {name: train_loader, type: Dataset}
-  - {name: test_loader, type: Dataset}
+  - {name: processed_data, type: Dataset}
   - {name: config, type: String}
 outputs:
   - {name: tasks, type: Dataset}
@@ -95,8 +94,7 @@ implementation:
 
         def main():
             parser = argparse.ArgumentParser()
-            parser.add_argument('--train_loader', type=str, required=True)
-            parser.add_argument('--test_loader', type=str, required=True)
+            parser.add_argument('--processed_data', type=str, required=True)
             parser.add_argument('--config', type=str, required=True)
             parser.add_argument('--tasks', type=str, required=True)
             args = parser.parse_args()
@@ -104,68 +102,33 @@ implementation:
             config = json.loads(args.config)
             task_type = config.get('pipeline', {}).get('task', 'classification')
 
-            # Load data with class definitions
-            try:
-                with open(args.train_loader, 'rb') as f:
-                    train_data = pickle.load(f)
-                
-                with open(args.test_loader, 'rb') as f:
-                    test_data = pickle.load(f)
-            except Exception as e:
-                print(f"Error loading data: {e}")
-                # Try alternative loading method
-                try:
-                    with open(args.train_loader, 'rb') as f:
-                        train_dict = pickle.load(f)
-                    with open(args.test_loader, 'rb') as f:
-                        test_dict = pickle.load(f)
-                    
-                    # Extract data from different possible formats
-                    if hasattr(train_dict, 'X_train'):
-                        X_train = train_dict.X_train
-                        y_train = train_dict.y_train
-                    elif isinstance(train_dict, dict):
-                        X_train = train_dict.get('X_train', train_dict.get('X', []))
-                        y_train = train_dict.get('y_train', train_dict.get('y', []))
-                    else:
-                        raise ValueError("Unsupported train data format")
-                    
-                    if hasattr(test_dict, 'X_test'):
-                        X_test = test_dict.X_test
-                        y_test = test_dict.y_test
-                    elif isinstance(test_dict, dict):
-                        X_test = test_dict.get('X_test', test_dict.get('X', []))
-                        y_test = test_dict.get('y_test', test_dict.get('y', []))
-                    else:
-                        raise ValueError("Unsupported test data format")
-                        
-                    train_data = DataWrapper({'X_train': X_train, 'y_train': y_train})
-                    test_data = DataWrapper({'X_test': X_test, 'y_test': y_test})
-                    
-                except Exception as e2:
-                    print(f"Alternative loading failed: {e2}")
-                    raise
-
-            # Extract data from wrappers
-            if hasattr(train_data, 'X_train'):
-                X_train = train_data.X_train
-                y_train = train_data.y_train
+            # Load processed data from preprocessor
+            with open(args.processed_data, 'rb') as f:
+                processed_data = pickle.load(f)
+            
+            # Extract data from processed_data wrapper
+            # Based on your preprocessor output structure
+            if hasattr(processed_data, 'X_train'):
+                X_train = processed_data.X_train
+                y_train = processed_data.y_train
+                X_test = processed_data.X_test
+                y_test = processed_data.y_test
             else:
-                X_train = train_data.dataset.tensors[0].numpy()
-                y_train = train_data.dataset.tensors[1].numpy()
-                
-            if hasattr(test_data, 'X_test'):
-                X_test = test_data.X_test
-                y_test = test_data.y_test
-            else:
-                X_test = test_data.dataset.tensors[0].numpy()
-                y_test = test_data.dataset.tensors[1].numpy()
+                # Fallback for different data formats
+                X_train = processed_data.__dict__.get('X_train')
+                y_train = processed_data.__dict__.get('y_train')
+                X_test = processed_data.__dict__.get('X_test')
+                y_test = processed_data.__dict__.get('y_test')
 
-            # Squeeze targets if needed
-            if len(y_train.shape) > 1 and y_train.shape[1] == 1:
-                y_train = y_train.squeeze()
-            if len(y_test.shape) > 1 and y_test.shape[1] == 1:
-                y_test = y_test.squeeze()
+            # Ensure data is in right format
+            if isinstance(X_train, list):
+                X_train = np.array(X_train)
+            if isinstance(y_train, list):
+                y_train = np.array(y_train)
+            if isinstance(X_test, list):
+                X_test = np.array(X_test)
+            if isinstance(y_test, list):
+                y_test = np.array(y_test)
 
             data = {
                 'X_train': X_train,
@@ -190,10 +153,8 @@ implementation:
         if __name__ == '__main__':
             main()
     args:
-      - --train_loader
-      - {inputPath: train_loader}
-      - --test_loader
-      - {inputPath: test_loader}
+      - --processed_data
+      - {inputPath: processed_data}
       - --config
       - {inputValue: config}
       - --tasks
