@@ -1,0 +1,200 @@
+name: Create Continual Learning Tasks
+description: Splits data into multiple tasks for continual learning for both classification and regression
+inputs:
+  - {name: train_loader, type: Dataset}
+  - {name: test_loader, type: Dataset}
+  - {name: config, type: String}
+outputs:
+  - {name: tasks, type: Dataset}
+implementation:
+  container:
+    image: kushagra4761/nesy-factory-library
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        import pickle
+        import numpy as np
+        import torch
+        from torch.utils.data import TensorDataset, DataLoader
+
+        # Define classes for unpickling compatibility
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
+
+        class TemporalDataSplitter:
+          
+          def __init__(self, data, config, strategy='temporal_split'):
+              self.data = data
+              self.config = config
+              self.strategy = strategy
+              self.task_type = config.get('task_type', 'classification')
+              
+          def create_continual_tasks(self, num_tasks: int = 3) -> list:
+              return self._temporal_split(num_tasks)
+          
+          def _temporal_split(self, num_tasks: int) -> list:
+              tasks = []
+              
+              X_train = self.data['X_train']
+              y_train = self.data['y_train']
+              X_test = self.data['X_test']
+              y_test = self.data['y_test']
+
+              train_size = len(X_train)
+              test_size = len(X_test)
+              
+              train_splits = np.array_split(range(train_size), num_tasks)
+              test_splits = np.array_split(range(test_size), num_tasks)
+              
+              for i in range(num_tasks):
+                  # Handle different data types based on task type
+                  if self.task_type == 'classification':
+                      y_train_dtype = torch.long
+                      y_test_dtype = torch.long
+                  else:
+                      y_train_dtype = torch.float32
+                      y_test_dtype = torch.float32
+                  
+                  task_data = {
+                      'task_id': i,
+                      'X_train': X_train[train_splits[i]],
+                      'y_train': y_train[train_splits[i]],
+                      'X_test': X_test[test_splits[i]],
+                      'y_test': y_test[test_splits[i]],
+                      'description': f'Temporal Period {i+1}/{num_tasks}',
+                      'task_type': self.task_type
+                  }
+                  
+                  # Create datasets with appropriate data types
+                  train_dataset = TensorDataset(
+                      torch.tensor(task_data['X_train'], dtype=torch.float32), 
+                      torch.tensor(task_data['y_train'], dtype=y_train_dtype)
+                  )
+                  test_dataset = TensorDataset(
+                      torch.tensor(task_data['X_test'], dtype=torch.float32), 
+                      torch.tensor(task_data['y_test'], dtype=y_test_dtype)
+                  )
+
+                  batch_size = self.config.get('batch_size', 32)
+                  task_data['train_loader'] = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+                  task_data['test_loader'] = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+                  
+                  tasks.append(task_data)
+              
+              return tasks
+
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--train_loader', type=str, required=True)
+            parser.add_argument('--test_loader', type=str, required=True)
+            parser.add_argument('--config', type=str, required=True)
+            parser.add_argument('--tasks', type=str, required=True)
+            args = parser.parse_args()
+
+            config = json.loads(args.config)
+            task_type = config.get('pipeline', {}).get('task', 'classification')
+
+            # Load data with class definitions
+            try:
+                with open(args.train_loader, 'rb') as f:
+                    train_data = pickle.load(f)
+                
+                with open(args.test_loader, 'rb') as f:
+                    test_data = pickle.load(f)
+            except Exception as e:
+                print(f"Error loading data: {e}")
+                # Try alternative loading method
+                try:
+                    with open(args.train_loader, 'rb') as f:
+                        train_dict = pickle.load(f)
+                    with open(args.test_loader, 'rb') as f:
+                        test_dict = pickle.load(f)
+                    
+                    # Extract data from different possible formats
+                    if hasattr(train_dict, 'X_train'):
+                        X_train = train_dict.X_train
+                        y_train = train_dict.y_train
+                    elif isinstance(train_dict, dict):
+                        X_train = train_dict.get('X_train', train_dict.get('X', []))
+                        y_train = train_dict.get('y_train', train_dict.get('y', []))
+                    else:
+                        raise ValueError("Unsupported train data format")
+                    
+                    if hasattr(test_dict, 'X_test'):
+                        X_test = test_dict.X_test
+                        y_test = test_dict.y_test
+                    elif isinstance(test_dict, dict):
+                        X_test = test_dict.get('X_test', test_dict.get('X', []))
+                        y_test = test_dict.get('y_test', test_dict.get('y', []))
+                    else:
+                        raise ValueError("Unsupported test data format")
+                        
+                    train_data = DataWrapper({'X_train': X_train, 'y_train': y_train})
+                    test_data = DataWrapper({'X_test': X_test, 'y_test': y_test})
+                    
+                except Exception as e2:
+                    print(f"Alternative loading failed: {e2}")
+                    raise
+
+            # Extract data from wrappers
+            if hasattr(train_data, 'X_train'):
+                X_train = train_data.X_train
+                y_train = train_data.y_train
+            else:
+                X_train = train_data.dataset.tensors[0].numpy()
+                y_train = train_data.dataset.tensors[1].numpy()
+                
+            if hasattr(test_data, 'X_test'):
+                X_test = test_data.X_test
+                y_test = test_data.y_test
+            else:
+                X_test = test_data.dataset.tensors[0].numpy()
+                y_test = test_data.dataset.tensors[1].numpy()
+
+            # Squeeze targets if needed
+            if len(y_train.shape) > 1 and y_train.shape[1] == 1:
+                y_train = y_train.squeeze()
+            if len(y_test.shape) > 1 and y_test.shape[1] == 1:
+                y_test = y_test.squeeze()
+
+            data = {
+                'X_train': X_train,
+                'y_train': y_train,
+                'X_test': X_test,
+                'y_test': y_test
+            }
+            
+            config['task_type'] = task_type
+            splitter = TemporalDataSplitter(data, config, strategy=config.get('cl_strategy', 'temporal_split'))
+            num_tasks = config.get('num_tasks', 3)
+            tasks = splitter.create_continual_tasks(num_tasks=num_tasks)
+
+            os.makedirs(os.path.dirname(args.tasks), exist_ok=True)
+            with open(args.tasks, "wb") as f:
+                pickle.dump(tasks, f)
+
+            print(f"Created {len(tasks)} continual learning tasks for {task_type}")
+            print(f"Task shapes - Train: {X_train.shape}, Test: {X_test.shape}")
+            print(f"Saved tasks to {args.tasks}")
+
+        if __name__ == '__main__':
+            main()
+    args:
+      - --train_loader
+      - {inputPath: train_loader}
+      - --test_loader
+      - {inputPath: test_loader}
+      - --config
+      - {inputValue: config}
+      - --tasks
+      - {outputPath: tasks}
