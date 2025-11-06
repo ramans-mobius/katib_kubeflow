@@ -1,4 +1,4 @@
-name: DQN RLAF Loop
+name: 2 DQN RLAF Loop
 description: Triggers the DQN RLAF pipeline in a loop to optimize model hyperparameters for both classification and regression
 inputs:
   - {name: trained_model, type: Model}
@@ -18,7 +18,7 @@ outputs:
   - {name: retrained_model, type: Model}
 implementation:
   container:
-    image: nikhilv215/nesy-factory:v22
+    image: kushagra4761/nesy-factory-library
     command:
       - sh
       - -c
@@ -28,6 +28,7 @@ implementation:
       - -u
       - -c
       - |
+        import sys
         import torch
         import os
         import json
@@ -87,6 +88,7 @@ implementation:
                 self.task_type = config.get('task_type', 'classification')
                 
             def train_boosting_model(self, tasks: list, model_params: dict) -> dict:
+                """Train boosting model on continual learning tasks"""
                 
                 algorithm = model_params.get('algorithm', 'GradientBoosting')
                 parameters = model_params.get('parameters', {})
@@ -188,7 +190,7 @@ implementation:
                     'parameters': final_params
                 }
 
-        # API Helper Functions (same as before)
+        # API Helper Functions
         def get_retry_session():
             retry_strategy = Retry(
                 total=5,
