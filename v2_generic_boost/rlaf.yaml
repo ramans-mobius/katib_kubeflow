@@ -18,7 +18,7 @@ outputs:
   - {name: retrained_model, type: Model}
 implementation:
   container:
-    image: kushagra4761/nesy-factory-library
+    image: nikhilv215/nesy-factory:v22
     command:
       - sh
       - -c
