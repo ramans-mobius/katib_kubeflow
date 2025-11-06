@@ -1,4 +1,4 @@
-name: 2 Inference Data & Model Loader
+name: Inference Data & Model Loader
 description: Loads trained model and inference data for both classification and regression
 inputs:
   - name: trained_model
@@ -41,12 +41,10 @@ implementation:
         import sys, os, pickle, json, pandas as pd, numpy as np, requests
         import argparse
         import subprocess
-        from sklearn.preprocessing import StandardScaler, MinMaxScaler
-        from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 
         print("STARTING INFERENCE DATA & MODEL LOADER")
 
-        # Define the PreprocessingPipeline class FIRST (before unpickling)
+        # Define classes for unpickling compatibility
         class PreprocessingPipeline:
             def __init__(self, steps):
                 self.steps = steps
@@ -57,12 +55,11 @@ implementation:
                     X_transformed = transformer.transform(X_transformed)
                 return X_transformed
 
-        # Define DataWrapper for compatibility
         class DataWrapper:
             def __init__(self, data_dict):
                 self.__dict__.update(data_dict)
 
-        # Install required packages for model loading
+        # Install required packages dynamically
         print("Installing required packages...")
         packages = ['lightgbm', 'xgboost', 'catboost', 'scikit-learn']
         for package in packages:
@@ -98,15 +95,14 @@ implementation:
                 model = pickle.load(f)
             print(f"Model loaded successfully: {type(model).__name__}")
             
-            # Detect task type from model if not specified
+            # Detect task type dynamically
             if task_type == 'auto':
                 model_class_name = type(model).__name__.lower()
-                if 'classifier' in model_class_name or 'classif' in model_class_name:
+                if any(keyword in model_class_name for keyword in ['classifier', 'classif']):
                     task_type = 'classification'
-                elif 'regressor' in model_class_name or 'regress' in model_class_name:
+                elif any(keyword in model_class_name for keyword in ['regressor', 'regress']):
                     task_type = 'regression'
                 else:
-                    # Default to classification for ensemble models
                     task_type = 'classification'
             print(f"Task type: {task_type}")
                     
@@ -114,29 +110,18 @@ implementation:
             print("ERROR loading model: " + str(e))
             sys.exit(1)
 
-        # Load preprocessing pipeline - NOW WITH CLASS DEFINED
+        # Load preprocessing pipeline
         try:
             with open(args.preprocessing_pipeline, 'rb') as f:
                 preprocessor = pickle.load(f)
             print("Preprocessing pipeline loaded successfully")
-            print(f"Preprocessor type: {type(preprocessor).__name__}")
             if hasattr(preprocessor, 'steps'):
                 print(f"Preprocessing steps: {[step[0] for step in preprocessor.steps]}")
         except Exception as e:
-            print("ERROR loading preprocessor: " + str(e))
-            # Try alternative loading method
-            try:
-                # Try to load as a dictionary or other format
-                with open(args.preprocessing_pipeline, 'rb') as f:
-                    preprocessor_data = pickle.load(f)
-                print(f"Loaded preprocessor as: {type(preprocessor_data).__name__}")
-                preprocessor = preprocessor_data
-            except Exception as e2:
-                print(f"Alternative loading also failed: {e2}")
-                print("Continuing without preprocessing pipeline")
-                preprocessor = None
+            print(f"ERROR loading preprocessor: {e}")
+            preprocessor = None
 
-        # Load inference data (new data or test data fallback)
+        # Load inference data
         inference_data = []
         data_source = "test_data"
 
@@ -147,21 +132,18 @@ implementation:
                 content = response.text
                 print(f"Downloaded new inference data: {len(content)} characters")
                 
-                # Parse JSON data
+                # Parse JSON data dynamically
                 lines = content.splitlines()
                 json_buffer = []
                 in_json_section = False
                 
                 for line in lines:
                     line = line.strip()
-                    if "GNN-STGNN Spatio-Temporal Data:" in line:
+                    if any(keyword in line for keyword in ['Data:', 'JSON:', '[']):
                         in_json_section = True
-                        continue
-                    if in_json_section and line == '[':
-                        continue
                     if in_json_section and line == ']':
                         break
-                    if in_json_section and line:
+                    if in_json_section and line and not line.endswith(':'):
                         json_buffer.append(line)
                 
                 if json_buffer:
@@ -180,36 +162,34 @@ implementation:
             try:
                 with open(args.test_data, 'rb') as f:
                     test_dict = pickle.load(f)
-                # Convert test data to inference format
+                
+                # Handle different data formats dynamically
                 if hasattr(test_dict, 'X_test'):
                     X_test = test_dict.X_test
-                    feature_names = test_dict.feature_names
+                    feature_names = getattr(test_dict, 'feature_names', [])
                     inference_data = []
                     for i in range(len(X_test)):
                         sample = {}
                         for j, feature_name in enumerate(feature_names):
-                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') else X_test[i]
+                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') and j < len(X_test[i]) else X_test[i]
                         inference_data.append(sample)
-                elif isinstance(test_dict, dict) and 'X' in test_dict:
-                    # Handle dictionary format
-                    X_test = test_dict['X']
-                    feature_names = test_dict['feature_names']
+                elif isinstance(test_dict, dict):
+                    X_test = test_dict.get('X', test_dict.get('X_test', []))
+                    feature_names = test_dict.get('feature_names', [])
                     inference_data = []
                     for i in range(len(X_test)):
                         sample = {}
                         for j, feature_name in enumerate(feature_names):
-                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') else X_test[i]
+                            sample[feature_name] = X_test[i][j] if hasattr(X_test[i], '__len__') and j < len(X_test[i]) else X_test[i]
                         inference_data.append(sample)
                 else:
-                    # Fallback to CSV reading
-                    test_df = pd.read_csv(args.test_data)
-                    inference_data = test_df.to_dict('records')
+                    inference_data = []
                 print(f"Using test data: {len(inference_data)} samples")
             except Exception as e:
                 print("ERROR loading test data: " + str(e))
                 sys.exit(1)
 
-        # Process data
+        # Process data with feature names preservation
         try:
             df = pd.DataFrame(inference_data)
             print(f"Raw inference data shape: {df.shape}")
@@ -221,8 +201,10 @@ implementation:
                 print(f"Excluding target column '{target_column}' from features")
             
             X_inference = df[feature_columns].copy()
+            original_feature_names = list(X_inference.columns)
+            print(f"Original feature names: {original_feature_names}")
             
-            # Apply preprocessing if available and compatible
+            # Apply preprocessing if available
             if preprocessor and hasattr(preprocessor, 'transform'):
                 try:
                     print("Applying preprocessing transformation...")
@@ -233,25 +215,38 @@ implementation:
                         if len(X_inference_processed.shape) == 1:
                             X_inference_processed = X_inference_processed.reshape(-1, 1)
                         
-                        # Try to preserve feature names
-                        feature_names_processed = []
-                        if hasattr(preprocessor, 'get_feature_names_out'):
-                            feature_names_processed = preprocessor.get_feature_names_out(feature_columns)
-                        elif hasattr(preprocessor, 'feature_names_in_'):
-                            feature_names_processed = preprocessor.feature_names_in_
-                        else:
-                            feature_names_processed = [f'feature_{i}' for i in range(X_inference_processed.shape[1])]
+                        # Dynamically determine feature names
+                        final_feature_names = original_feature_names
                         
-                        X_inference = pd.DataFrame(X_inference_processed, columns=feature_names_processed)
+                        # Try different methods to get feature names from preprocessor
+                        if hasattr(preprocessor, 'get_feature_names_out'):
+                            try:
+                                final_feature_names = preprocessor.get_feature_names_out(original_feature_names)
+                            except:
+                                try:
+                                    final_feature_names = preprocessor.get_feature_names_out()
+                                except:
+                                    pass
+                        elif hasattr(preprocessor, 'feature_names_in_'):
+                            final_feature_names = preprocessor.feature_names_in_
+                        
+                        # Ensure feature names match data shape
+                        if len(final_feature_names) != X_inference_processed.shape[1]:
+                            final_feature_names = [f'feature_{i}' for i in range(X_inference_processed.shape[1])]
+                        
+                        X_inference = pd.DataFrame(X_inference_processed, columns=final_feature_names)
                         print(f"Applied preprocessing - new shape: {X_inference.shape}")
                     else:
-                        print("Warning: Preprocessing output is not in expected format")
+                        X_inference = pd.DataFrame(X_inference.values, columns=original_feature_names)
                         
                 except Exception as e:
                     print(f"Warning: Could not apply preprocessing: {e}")
-                    print("Using raw features")
+                    X_inference = pd.DataFrame(X_inference.values, columns=original_feature_names)
             else:
-                print("No preprocessing applied - using raw features")
+                X_inference = pd.DataFrame(X_inference.values, columns=original_feature_names)
+                print("No preprocessing applied")
+            
+            print(f"Final feature columns: {list(X_inference.columns)}")
             
             class InferenceDataWrapper:
                 def __init__(self, X_data, original_data, source, task_type):
@@ -281,22 +276,15 @@ implementation:
                     "features": len(X_inference.columns),
                     "model_type": type(model).__name__,
                     "task_type": task_type,
-                    "feature_columns": list(X_inference.columns),
-                    "preprocessing_applied": preprocessor is not None
+                    "feature_columns": list(X_inference.columns)
                 }, f, indent=2)
             
-            # Save task type separately
             os.makedirs(os.path.dirname(args.task_type), exist_ok=True)
             with open(args.task_type, 'w') as f:
                 json.dump({"task_type": task_type}, f)
                 
             print("Inference data & model loading completed successfully")
-            print(f"Data source: {data_source}")
-            print(f"Samples: {len(inference_data)}")
-            print(f"Features: {len(X_inference.columns)}")
-            print(f"Model: {type(model).__name__}")
-            print(f"Task type: {task_type}")
-            print(f"Preprocessing applied: {preprocessor is not None}")
+            print(f"Data source: {data_source}, Samples: {len(inference_data)}, Features: {len(X_inference.columns)}")
             
         except Exception as e:
             print("ERROR processing inference data: " + str(e))
