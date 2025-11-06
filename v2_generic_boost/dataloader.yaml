@@ -1,5 +1,5 @@
-name: 2 Unified Data Loader
-description: Loads data from API using unified configuration
+name: Unified Data Loader
+description: Loads data from API using unified configuration with proper train/test separation
 inputs:
   - name: api_url
     type: String
@@ -37,6 +37,7 @@ implementation:
         import argparse, os, pickle, pandas as pd, numpy as np, requests, json
         from sklearn.model_selection import train_test_split
         from sklearn.preprocessing import LabelEncoder
+        from sklearn.impute import SimpleImputer
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--api_url', type=str, required=True)
@@ -165,15 +166,55 @@ implementation:
                 task_type = "regression"
             print(f"DEBUG: Auto-detected task type: {task_type}")
 
-        # Handle missing values
-        X = X.fillna(0)
-        y = y.fillna(0) if task_type == "regression" else y.fillna(y.mode()[0] if len(y.mode()) > 0 else 0)
-
-        # Train-test split
+        # FIXED: Handle missing values AFTER train-test split to prevent data leakage
+        # First split the data
         stratify = y if task_type == "classification" and y.nunique() > 1 else None
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state, stratify=stratify
         )
+        
+        print(f"DEBUG: After split - Train: {X_train.shape}, Test: {X_test.shape}")
+        
+        # Handle missing values SEPARATELY for train and test to prevent leakage
+        # For numerical features - use mean imputation fitted on training data only
+        numerical_cols = X_train.select_dtypes(include=[np.number]).columns
+        
+        if len(numerical_cols) > 0:
+            # Create imputer fitted on training data only
+            numerical_imputer = SimpleImputer(strategy='mean')
+            X_train[numerical_cols] = numerical_imputer.fit_transform(X_train[numerical_cols])
+            # Transform test data using parameters learned from training data
+            X_test[numerical_cols] = numerical_imputer.transform(X_test[numerical_cols])
+            print(f"DEBUG: Applied numerical imputation on {len(numerical_cols)} columns")
+        
+        # For categorical features - use mode imputation fitted on training data only  
+        categorical_cols = X_train.select_dtypes(include=['object', 'category']).columns
+        
+        if len(categorical_cols) > 0:
+            for col in categorical_cols:
+                train_mode = X_train[col].mode()
+                if len(train_mode) > 0:
+                    mode_value = train_mode[0]
+                    X_train[col] = X_train[col].fillna(mode_value)
+                    X_test[col] = X_test[col].fillna(mode_value)  # Use train mode for test data
+            print(f"DEBUG: Applied categorical imputation on {len(categorical_cols)} columns")
+        
+        # Handle target variable missing values
+        if task_type == 'regression':
+            train_target_mean = y_train.mean()
+            y_train = y_train.fillna(train_target_mean)
+            y_test = y_test.fillna(train_target_mean)  # Use train mean for test data
+        else:
+            train_target_mode = y_train.mode()
+            if len(train_target_mode) > 0:
+                mode_value = train_target_mode[0]
+                y_train = y_train.fillna(mode_value)
+                y_test = y_test.fillna(mode_value)  # Use train mode for test data
+            else:
+                y_train = y_train.fillna(0)
+                y_test = y_test.fillna(0)
+        
+        print(f"DEBUG: After missing value handling - Train NaN: {X_train.isna().sum().sum()}, Test NaN: {X_test.isna().sum().sum()}")
         
         # Prepare output data
         train_dict = {
@@ -208,7 +249,9 @@ implementation:
             'train_samples': len(X_train),
             'test_samples': len(X_test),
             'all_columns_original': list(df.columns),
-            'all_columns_final': list(df_numeric.columns)
+            'all_columns_final': list(df_numeric.columns),
+            'data_leakage_prevention': 'enabled',  # Track that we fixed leakage
+            'missing_value_strategy': 'train_based_imputation'
         }
 
         # Save datasets
@@ -228,6 +271,7 @@ implementation:
         
         print(f"Data loading complete: {len(X_train)} train, {len(X_test)} test samples")
         print(f"Target: {target_column}, Task: {task_type}, Features: {len(X.columns)}")
+        print("DATA LEAKAGE PREVENTION: Applied proper train/test separation for missing value handling")
             
     args:
       - --api_url
