@@ -1,0 +1,438 @@
+name: DQN RLAF Loop
+description: Triggers the DQN RLAF pipeline in a loop to optimize model hyperparameters for both classification and regression
+inputs:
+  - {name: trained_model, type: Model}
+  - {name: init_metrics, type: Metrics}
+  - {name: data_path, type: Dataset}
+  - {name: config, type: String}
+  - {name: domain, type: String}
+  - {name: schema_id, type: String}
+  - {name: model_id, type: String}
+  - {name: dqn_pipeline_id, type: String}
+  - {name: pipeline_domain, type: String}
+  - {name: dqn_experiment_id, type: String}
+  - {name: access_token, type: string}
+  - {name: tasks, type: Dataset}
+outputs:
+  - {name: rlaf_output, type: Dataset}
+  - {name: retrained_model, type: Model}
+implementation:
+  container:
+    image: kushagra4761/nesy-factory-library
+    command:
+      - sh
+      - -c
+      - |
+        exec "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import torch
+        import os
+        import json
+        import argparse
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        import time
+        import pickle
+        import numpy as np
+        import subprocess
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+        from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
+
+        # Install required packages
+        print("Installing required packages...")
+        packages = ['xgboost', 'lightgbm', 'catboost', 'scikit-learn']
+        for package in packages:
+            try:
+                subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--quiet', package])
+                print(f"Installed {package}")
+            except subprocess.CalledProcessError:
+                print(f"Warning: Failed to install {package}")
+
+        # Import optional packages
+        try:
+            from xgboost import XGBRegressor, XGBClassifier
+        except ImportError:
+            XGBRegressor, XGBClassifier = None, None
+        try:
+            from catboost import CatBoostRegressor, CatBoostClassifier
+        except ImportError:
+            CatBoostRegressor, CatBoostClassifier = None, None
+        try:
+            from lightgbm import LGBMRegressor, LGBMClassifier
+        except ImportError:
+            LGBMRegressor, LGBMClassifier = None, None
+
+        # Define classes for unpickling compatibility
+        class DataWrapper:
+            def __init__(self, data_dict):
+                self.__dict__.update(data_dict)
+
+        class BoostingModel:
+            def __init__(self, algorithm, task, parameters):
+                self.algorithm = algorithm
+                self.task = task
+                self.parameters = parameters
+                self.is_fitted = False
+                self.model_type = f"{algorithm} for {task}"
+
+        class GenericBoostingTrainer:
+            
+            def __init__(self, config: dict):
+                self.config = config
+                self.task_type = config.get('task_type', 'classification')
+                
+            def train_boosting_model(self, tasks: list, model_params: dict) -> dict:
+                
+                algorithm = model_params.get('algorithm', 'GradientBoosting')
+                parameters = model_params.get('parameters', {})
+                
+                # Algorithm mapping for both classification and regression
+                algorithm_map = {
+                    'regression': {
+                        'GradientBoosting': GradientBoostingRegressor,
+                        'AdaBoost': AdaBoostRegressor,
+                        'XGBoost': XGBRegressor if XGBRegressor else None,
+                        'CatBoost': CatBoostRegressor if CatBoostRegressor else None,
+                        'LightGBM': LGBMRegressor if LGBMRegressor else None
+                    },
+                    'classification': {
+                        'GradientBoosting': GradientBoostingClassifier,
+                        'AdaBoost': AdaBoostClassifier,
+                        'XGBoost': XGBClassifier if XGBClassifier else None,
+                        'CatBoost': CatBoostClassifier if CatBoostClassifier else None,
+                        'LightGBM': LGBMClassifier if LGBMClassifier else None
+                    }
+                }
+                
+                if algorithm not in algorithm_map[self.task_type] or algorithm_map[self.task_type][algorithm] is None:
+                    available = list(algorithm_map[self.task_type].keys())
+                    raise ValueError(f'Algorithm {algorithm} not available for {self.task_type}. Available: {available}')
+
+                model_class = algorithm_map[self.task_type][algorithm]
+                
+                # Set default parameters
+                default_params = {
+                    'GradientBoosting': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 3, 'random_state': 42},
+                    'AdaBoost': {'n_estimators': 50, 'learning_rate': 1.0, 'random_state': 42},
+                    'XGBoost': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': 6, 'random_state': 42},
+                    'CatBoost': {'iterations': 100, 'learning_rate': 0.1, 'depth': 6, 'random_state': 42, 'verbose': False},
+                    'LightGBM': {'n_estimators': 100, 'learning_rate': 0.1, 'max_depth': -1, 'random_state': 42}
+                }
+                
+                final_params = {**default_params.get(algorithm, {}), **parameters}
+                model = model_class(**final_params)
+                
+                # Train on all tasks sequentially (continual learning simulation)
+                all_metrics = []
+                
+                for task_idx, task_data in enumerate(tasks):
+                    print(f"Training on task {task_idx + 1}")
+                    
+                    X_train = task_data['X_train']
+                    y_train = task_data['y_train']
+                    X_test = task_data['X_test']
+                    y_test = task_data['y_test']
+                    
+                    # Fit model (incremental learning for some algorithms)
+                    if hasattr(model, 'warm_start') and algorithm in ['GradientBoosting']:
+                        model.set_params(warm_start=True)
+                        if task_idx > 0:
+                            # Incremental training
+                            n_estimators = model.get_params().get('n_estimators', 100)
+                            model.set_params(n_estimators=n_estimators + 50)
+                    
+                    model.fit(X_train, y_train)
+                    
+                    # Evaluate on current task
+                    y_pred = model.predict(X_test)
+                    
+                    if self.task_type == 'regression':
+                        task_metrics = {
+                            'mse': mean_squared_error(y_test, y_pred),
+                            'mae': mean_absolute_error(y_test, y_pred),
+                            'r2': r2_score(y_test, y_pred)
+                        }
+                    else:
+                        task_metrics = {
+                            'accuracy': accuracy_score(y_test, y_pred),
+                            'precision': precision_score(y_test, y_pred, average='weighted', zero_division=0),
+                            'recall': recall_score(y_test, y_pred, average='weighted', zero_division=0),
+                            'f1': f1_score(y_test, y_pred, average='weighted', zero_division=0)
+                        }
+                        if hasattr(model, 'predict_proba'):
+                            y_proba = model.predict_proba(X_test)
+                            if len(np.unique(y_test)) == 2:
+                                task_metrics['roc_auc'] = roc_auc_score(y_test, y_proba[:, 1])
+                            else:
+                                task_metrics['roc_auc'] = roc_auc_score(y_test, y_proba, multi_class='ovr')
+                    
+                    all_metrics.append(task_metrics)
+                    print(f"Task {task_idx + 1} metrics: {task_metrics}")
+                
+                # Calculate average metrics
+                avg_metrics = {}
+                if all_metrics:
+                    for key in all_metrics[0]:
+                        avg_metrics[key] = np.mean([m[key] for m in all_metrics])
+                
+                return {
+                    'model': model,
+                    'task_metrics': all_metrics,
+                    'average_metrics': avg_metrics,
+                    'algorithm': algorithm,
+                    'parameters': final_params
+                }
+
+        # API Helper Functions (same as before)
+        def get_retry_session():
+            retry_strategy = Retry(
+                total=5,
+                status_forcelist=[500, 502, 503, 504],
+                backoff_factor=1
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session = requests.Session()
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            return session
+
+        def trigger_pipeline(config, pipeline_domain, model_id, dqn_params=None):
+            http = get_retry_session()
+            url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/trigger/ml?pipelineId={config['pipeline_id']}"
+            pipeline_params = {"param_json": json.dumps(dqn_params), "model_id": model_id} if dqn_params else {"model_id": model_id}
+            payload = json.dumps({
+                "pipelineType": "ML", "containerResources": {}, "experimentId": config['experiment_id'],
+                "enableCaching": True, "parameters": pipeline_params, "version": 1
+            })
+            headers = {
+                'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}",
+                'Content-Type': 'application/json'
+            }
+            response = http.post(url, headers=headers, data=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()['runId']
+
+        def get_pipeline_status(config, pipeline_domain):
+            http = get_retry_session()
+            url = f"{pipeline_domain}/bob-service-test/v1.0/pipeline/{config['pipeline_id']}/status/ml/{config['run_id']}"
+            headers = {'accept': 'application/json', 'Authorization': f"Bearer {config['access_token']}"}
+            response = http.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            pipeline_status = response.json()
+            latest_state = pipeline_status['run_details']['state_history'][-1]
+            return latest_state['state']
+
+        def get_instance(access_token, domain, schema_id, model_id):
+            http = get_retry_session()
+            url = f"{domain}/pi-entity-instances-service/v3.0/schemas/{schema_id}/instances/list"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            payload = {"dbType": "TIDB", "ownedOnly": True, "filter": {"model_id": model_id}}
+            response = http.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()['content'][0]
+
+        def update_instance_field(access_token, domain, schema_id, model_id, field, value):
+            http = get_retry_session()
+            url = f"{domain}/pi-entity-instances-service/v2.0/schemas/{schema_id}/instances"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            payload = {
+                "dbType": "TIDB",
+                "conditionalFilter": {"conditions": [{"field": "model_id", "operator": "EQUAL", "value": model_id}]},
+                "partialUpdateRequests": [{"patch": [{"operation": "REPLACE", "path": f"{field}", "value": value}]}]
+            }
+            response = http.patch(url, headers=headers, data=json.dumps(payload), timeout=30)
+            response.raise_for_status()
+
+        def trigger_and_wait_for_dqn_pipeline(config, pipeline_domain, model_id, dqn_params):
+            run_id = trigger_pipeline(config, pipeline_domain, model_id, dqn_params)
+            config["run_id"] = run_id
+            while True:
+                status = get_pipeline_status(config, pipeline_domain)
+                print(f"Current DQN pipeline status: {status}")
+                if status == 'SUCCEEDED':
+                    print("DQN Pipeline execution completed.")
+                    break
+                elif status in ['FAILED', 'ERROR']:
+                    raise RuntimeError(f"DQN Pipeline failed with status {status}")
+                time.sleep(60)
+
+        def model_retraining(action, model_path, data_path, config, tasks_path, output_model_path, previous_metrics, dqn_params):
+            with open(data_path, "rb") as f: 
+                data_wrapper = pickle.load(f)
+            with open(tasks_path, "rb") as f: 
+                tasks = pickle.load(f)
+            
+            # Update config with action parameters
+            config.update(action.get('params', {}))
+            task_type = config.get('pipeline', {}).get('task', 'classification')
+            
+            # Create trainer
+            trainer = GenericBoostingTrainer({'task_type': task_type})
+            
+            # Train model
+            training_results = trainer.train_boosting_model(tasks, action.get('params', {}))
+            
+            current_metrics = training_results['average_metrics']
+            
+            # Calculate improvement score
+            improvement_score = 0
+            for param in dqn_params:
+                key = param['key']
+                sign = 1 if param['sign'] == '+' else -1
+                if key in current_metrics and key in previous_metrics:
+                    improvement = (current_metrics[key] - previous_metrics[key]) * sign
+                    improvement_score += improvement
+
+            if improvement_score > 0:
+                print(f"Metrics improved (score: {improvement_score:.4f}). Saving model.")
+                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+                with open(output_model_path, 'wb') as f:
+                    pickle.dump(training_results['model'], f)
+                print(f"Saved retrained model to {output_model_path}")
+            else:
+                print(f"No improvement in metrics (score: {improvement_score:.4f}). Model not saved.")
+                os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+                # Load original model as fallback
+                with open(model_path, 'rb') as f:
+                    original_model = pickle.load(f)
+                with open(output_model_path, 'wb') as f:
+                    pickle.dump(original_model, f)
+                print("Kept original model due to lack of improvement")
+
+            return {"metrics": current_metrics, "model_path": output_model_path}
+
+        # Main Execution
+        def main():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--trained_model', type=str, required=True)
+            parser.add_argument('--init_metrics', type=str, required=True)
+            parser.add_argument('--rlaf_output', type=str, required=True)
+            parser.add_argument('--data_path', type=str, required=True)
+            parser.add_argument('--config', type=str, required=True)
+            parser.add_argument('--domain', type=str, required=True)
+            parser.add_argument('--schema_id', type=str, required=True)
+            parser.add_argument('--model_id', type=str, required=True)
+            parser.add_argument('--dqn_pipeline_id', type=str, required=True)
+            parser.add_argument('--dqn_experiment_id', type=str, required=True)
+            parser.add_argument('--access_token', type=str, required=True)
+            parser.add_argument('--tasks', type=str, required=True)
+            parser.add_argument('--pipeline_domain', type=str, required=True)
+            parser.add_argument('--retrained_model', type=str, required=True)
+            args = parser.parse_args()
+
+            with open(args.access_token, 'r') as f:
+                access_token = f.read().strip()
+            with open(args.init_metrics, 'r') as f:
+                current_metrics = json.load(f)
+ 
+            action_id_for_next_pierce = -1
+            config = json.loads(args.config)
+            task_type = config.get('pipeline', {}).get('task', 'classification')
+ 
+            for i in range(2):
+                print(f" RLAF Loop Iteration {i+1} for {task_type}")
+                
+                # Generate DQN parameters dynamically based on task type
+                cleaned_metrics = {}
+                dqn_params = []
+                for key, value in current_metrics.items():
+                    try:
+                        cleaned_metrics[key] = float(value)
+                        # Determine sign based on metric type and task type
+                        if task_type == 'classification':
+                            sign = "+" if any(positive in key.lower() for positive in ['accuracy', 'precision', 'recall', 'f1', 'roc_auc']) else "-"
+                        else:
+                            sign = "+" if any(positive in key.lower() for positive in ['r2', 'accuracy']) else "-"
+                        dqn_params.append({"key": key, "sign": sign, "mul": 1.0})
+                    except (ValueError, TypeError):
+                        print(f"Warning: Could not convert metric '{key}' with value '{value}' to float. Skipping.")
+                
+                print(f"Dynamically generated param_json for DQN: {json.dumps(dqn_params)}")
+
+                instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
+                
+                if instance.get('pierce2rlaf'):
+                    latest_pierce2rlaf = instance['pierce2rlaf'][-1]
+                    previous_state = latest_pierce2rlaf['current_state']
+                    episode = latest_pierce2rlaf['episode']
+                else:
+                    previous_state = {key: 0.0 for key in cleaned_metrics.keys()}
+                    episode = 0
+ 
+                new_pierce2rlaf_entry = {
+                    "action_id": action_id_for_next_pierce, "previous_state": previous_state,
+                    "current_state": cleaned_metrics, "episode": episode, "timestamp": int(time.time())
+                }
+                pierce2rlaf_history = instance.get("pierce2rlaf", [])
+                pierce2rlaf_history.append(new_pierce2rlaf_entry)
+                update_instance_field(access_token, args.domain, args.schema_id, args.model_id, "pierce2rlaf", pierce2rlaf_history)
+
+                dqn_config = {
+                    "pipeline_id": args.dqn_pipeline_id, 
+                    "experiment_id": args.dqn_experiment_id, 
+                    "access_token": access_token
+                }
+                
+                trigger_and_wait_for_dqn_pipeline(dqn_config, args.pipeline_domain, args.model_id, dqn_params)
+
+                updated_instance = get_instance(access_token, args.domain, args.schema_id, args.model_id)
+                latest_rlaf2pierce = updated_instance['rlaf2pierce'][-1]
+                
+                if not latest_rlaf2pierce.get("pierce_or_not", True):
+                    print("pierce_or_not is false. Exiting loop.")
+                    break
+                    
+                rlaf_actions = updated_instance.get('rlaf_actions', {}).get('actions', [])
+                action_id_for_next_pierce = latest_rlaf2pierce['action_id']
+                action_details = next((a for a in rlaf_actions if a["id"] == action_id_for_next_pierce), None)
+                if not action_details:
+                    raise ValueError(f"Action with ID {action_id_for_next_pierce} not found in rlaf_actions")
+ 
+                print(f"DQN pipeline recommended action: {action_details}. Retraining model.")
+                retraining_results = model_retraining(
+                    action_details, args.trained_model, args.data_path, config, args.tasks,
+                    args.retrained_model, previous_state, dqn_params
+                )
+                current_metrics = retraining_results["metrics"]
+
+            os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
+            with open(args.rlaf_output, 'w') as f:
+                json.dump({"final_metrics": current_metrics, "task_type": task_type}, f, indent=4)
+            print(f"RLAF loop finished. Final parameters written to {args.rlaf_output}")
+
+        if __name__ == '__main__':
+            main()
+    args:
+      - --trained_model
+      - {inputPath: trained_model}
+      - --init_metrics
+      - {inputPath: init_metrics}
+      - --rlaf_output
+      - {outputPath: rlaf_output}
+      - --data_path
+      - {inputPath: data_path}
+      - --config
+      - {inputValue: config}
+      - --domain
+      - {inputValue: domain}
+      - --schema_id
+      - {inputValue: schema_id}
+      - --model_id
+      - {inputValue: model_id}
+      - --dqn_pipeline_id
+      - {inputValue: dqn_pipeline_id}
+      - --dqn_experiment_id
+      - {inputValue: dqn_experiment_id}
+      - --access_token
+      - {inputPath: access_token}
+      - --tasks
+      - {inputPath: tasks}
+      - --pipeline_domain
+      - {inputValue: pipeline_domain}
+      - --retrained_model
+      - {outputPath: retrained_model}
