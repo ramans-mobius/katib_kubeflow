@@ -1,4 +1,4 @@
-name: 2 Inference Results Storage
+name: Boosting Inference Results Storage
 description: Stores inference prediction results in database
 inputs:
   - name: prediction_results
@@ -45,6 +45,7 @@ implementation:
         import argparse
         import requests
         import numpy as np
+        import os  # ADD THIS IMPORT
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--prediction_results', type=str, required=True)
@@ -129,7 +130,7 @@ implementation:
             response.raise_for_status()
             
             # Save confirmation
-            os.makedirs(os.path.dirname(args.storage_confirmation), exist_ok=True)
+            os.makedirs(os.path.dirname(args.storage_confirmation) or ".", exist_ok=True)  # FIXED THIS LINE
             with open(args.storage_confirmation, 'w') as f:
                 json.dump({
                     "status": "success",
@@ -145,7 +146,7 @@ implementation:
             error_msg = f"Error storing results: {e}"
             print(error_msg)
             # Save error confirmation
-            os.makedirs(os.path.dirname(args.storage_confirmation), exist_ok=True)
+            os.makedirs(os.path.dirname(args.storage_confirmation) or ".", exist_ok=True)  # FIXED THIS LINE
             with open(args.storage_confirmation, 'w') as f:
                 json.dump({
                     "status": "error",
