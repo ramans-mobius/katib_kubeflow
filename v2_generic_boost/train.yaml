@@ -19,6 +19,9 @@ outputs:
     type: String
   - name: epoch_loss
     type: String
+  - name: schema_training_metrics
+    type: String
+    description: 'Training metrics formatted specifically for schema updates'
 
 implementation:
   container:
@@ -82,6 +85,7 @@ implementation:
         parser.add_argument('--training_history', type=str, required=True)
         parser.add_argument('--model_coefficients', type=str, required=True)
         parser.add_argument('--epoch_loss', type=str, required=True)
+        parser.add_argument('--schema_training_metrics', type=str, required=True)
         args = parser.parse_args()
 
         # Load data, model, and config
@@ -276,11 +280,27 @@ implementation:
             'custom_metrics': test_metrics
         }
 
+        # NEW: Create schema-specific metrics without custom_metrics
+        schema_metrics = {
+            'epoch': n_estimators,
+            'loss': train_loss,
+            'accuracy': train_accuracy,
+            'validation_loss': test_loss,
+            'validation_accuracy': test_accuracy,
+            # Include individual metrics instead of custom_metrics object
+            'test_accuracy': test_metrics['accuracy'],
+            'test_precision': test_metrics.get('precision', 0),
+            'test_recall': test_metrics.get('recall', 0),
+            'test_f1_score': test_metrics.get('f1_score', 0),
+            'test_roc_auc': test_metrics.get('roc_auc', 0)
+        }
+
         # Save outputs
         os.makedirs(os.path.dirname(args.trained_model) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.training_history) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.model_coefficients) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.epoch_loss) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.schema_training_metrics) or ".", exist_ok=True)
         
         with open(args.trained_model, 'wb') as f:
             pickle.dump(model, f)
@@ -288,6 +308,8 @@ implementation:
             json.dump(history, f, indent=2)
         with open(args.epoch_loss, 'w') as f:
             json.dump(epoch_data, f, indent=2)
+        with open(args.schema_training_metrics, 'w') as f:
+            json.dump(schema_metrics, f, indent=2)
         coefficients_df = pd.DataFrame(coefficients_data)
         with open(args.model_coefficients, 'w') as f:
             coefficients_df.to_csv(f, index=False)
@@ -297,6 +319,7 @@ implementation:
         print(f"Final training loss: {train_loss:.4f}, accuracy: {train_accuracy:.4f}")
         print(f"Final validation loss: {test_loss:.4f}, accuracy: {test_accuracy:.4f}")
         print(f"Test metrics: {test_metrics}")
+        print(f"Schema metrics saved: {schema_metrics}")
     args:
       - --processed_data
       - {inputPath: processed_data}
@@ -312,3 +335,5 @@ implementation:
       - {outputPath: model_coefficients}
       - --epoch_loss
       - {outputPath: epoch_loss}
+      - --schema_training_metrics
+      - {outputPath: schema_training_metrics}
