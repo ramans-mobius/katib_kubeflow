@@ -1,4 +1,4 @@
-name: Inference Results Storage
+name: 2 Inference Results Storage
 description: Stores inference prediction results in database
 inputs:
   - name: prediction_results
@@ -14,13 +14,13 @@ inputs:
   - name: execution_id
     type: String
   - name: tenant_id
-    type: String
+    type: string
   - name: project_id
     type: String
   - name: algorithm_type
     type: String
   - name: bearer_auth_token
-    type: String
+    type: string
   - name: domain
     type: String
 outputs:
