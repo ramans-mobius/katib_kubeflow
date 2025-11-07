@@ -1,4 +1,4 @@
-name: Boosting Inference Results Storage
+name: 2 Boosting Inference Results Storage
 description: Stores inference prediction results in database
 inputs:
   - name: prediction_results
@@ -45,7 +45,7 @@ implementation:
         import argparse
         import requests
         import numpy as np
-        import os  # ADD THIS IMPORT
+        import os
 
         parser = argparse.ArgumentParser()
         parser.add_argument('--prediction_results', type=str, required=True)
@@ -79,40 +79,54 @@ implementation:
         predictions = [result['predicted_value'] for result in prediction_results]
         confidence_scores = [result['confidence_score'] for result in prediction_results]
         
-        # Get node distribution
-        node_types = {}
-        for result in prediction_results:
-            node_type = result.get('node_type', 'unknown')
-            node_types[node_type] = node_types.get(node_type, 0) + 1
+        # Get most common prediction for predicted_class
+        if predictions:
+            # For binary classification, convert to class labels
+            predicted_classes = ['class_1' if pred > 0.5 else 'class_0' for pred in predictions]
+            most_common_class = max(set(predicted_classes), key=predicted_classes.count)
+        else:
+            most_common_class = "unknown"
 
-        # Prepare schema data
+        # Prepare schema data - ONLY FIELDS THAT EXIST IN SCHEMA
         schema_data = {
-            # Required SLM schema fields
+            # REQUIRED FIELDS (must be present)
             "tenant_id": tenant_id,
-            "projectId": args.project_id,
             "execution_id": args.execution_id,
             "infernce_input": "spatio_temporal_forecasting",
-            "infernce_output": f"predictions_completed",
-            "infernce_score_blue": 0.0,
             "inference_score_rouge": 0.0,
             
-            # Inference-specific data
+            # OPTIONAL FIELDS (that exist in schema)
+            "projectId": args.project_id,
+            "infernce_output": "predictions_completed",
+            "infernce_score_blue": 0.0,
             "model_id": args.model_id,
-            "algorithm_type": args.algorithm_type,
-            "data_source": data_source_info.get('data_source', 'unknown'),
-            "total_predictions": len(predictions),
-            "mean_prediction": float(np.mean(predictions)),
-            "mean_confidence": float(np.mean(confidence_scores)),
-            "prediction_min": float(min(predictions)),
-            "prediction_max": float(max(predictions)),
-            "node_type_distribution": node_types,
-            "model_type": data_source_info.get('model_type', 'unknown'),
-            "features_used": prediction_results[0].get('features_used', 0) if prediction_results else 0,
-            "storage_status": "success"
+            "architecture_type": args.algorithm_type,  # Map algorithm_type to architecture_type
+            "inference_confidence": float(np.mean(confidence_scores)) if confidence_scores else 0.0,
+            "predicted_class": most_common_class,
+            "total_samples": len(predictions),
+            "ModelName": data_source_info.get('model_type', 'XGBoost_Model')
         }
 
         print("=== Prepared Schema Data ===")
         print(json.dumps(schema_data, indent=2))
+
+        # Validate required fields
+        required_fields = ["tenant_id", "execution_id", "infernce_input", "inference_score_rouge"]
+        missing_fields = [field for field in required_fields if field not in schema_data or schema_data[field] is None]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {missing_fields}"
+            print(f"ERROR: {error_msg}")
+            output_dir = os.path.dirname(args.storage_confirmation)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            with open(args.storage_confirmation, 'w') as f:
+                json.dump({
+                    "status": "error",
+                    "message": error_msg,
+                    "execution_id": args.execution_id
+                }, f, indent=2)
+            exit(1)
 
         # API call to store data
         headers = {
@@ -125,12 +139,18 @@ implementation:
             "data": [schema_data]
         }
 
+        print("=== Sending Request ===")
+        print(f"URL: {create_url}")
+        print(f"Schema ID: {args.schema_id}")
+
         try:
             response = requests.post(create_url, headers=headers, json=create_payload, timeout=60)
             response.raise_for_status()
             
             # Save confirmation
-            os.makedirs(os.path.dirname(args.storage_confirmation) or ".", exist_ok=True)  # FIXED THIS LINE
+            output_dir = os.path.dirname(args.storage_confirmation)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             with open(args.storage_confirmation, 'w') as f:
                 json.dump({
                     "status": "success",
@@ -144,14 +164,27 @@ implementation:
             
         except requests.exceptions.RequestException as e:
             error_msg = f"Error storing results: {e}"
+            if hasattr(e, 'response') and e.response is not None:
+                error_msg += f"\nResponse status: {e.response.status_code}"
+                error_msg += f"\nResponse text: {e.response.text}"
+                try:
+                    error_details = e.response.json()
+                    error_msg += f"\nError details: {json.dumps(error_details, indent=2)}"
+                except:
+                    error_msg += f"\nResponse content: {e.response.content}"
+            
             print(error_msg)
+            
             # Save error confirmation
-            os.makedirs(os.path.dirname(args.storage_confirmation) or ".", exist_ok=True)  # FIXED THIS LINE
+            output_dir = os.path.dirname(args.storage_confirmation)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
             with open(args.storage_confirmation, 'w') as f:
                 json.dump({
                     "status": "error",
                     "message": error_msg,
-                    "execution_id": args.execution_id
+                    "execution_id": args.execution_id,
+                    "url": create_url
                 }, f, indent=2)
             exit(1)
     args:
