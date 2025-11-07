@@ -1,5 +1,5 @@
-name: Unified Boosting Trainer
-description: Trains boosting model using unified configuration
+name: 2 Unified Boosting Trainer
+description: Trains boosting model using unified configuration with enhanced schema outputs
 inputs:
   - name: processed_data
     type: Dataset
@@ -17,6 +17,8 @@ outputs:
     type: String
   - name: model_coefficients
     type: String
+  - name: epoch_loss
+    type: String
 
 implementation:
   container:
@@ -32,7 +34,7 @@ implementation:
       - -c
       - |
         import sys, os, pickle, json, pandas as pd, numpy as np
-        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, log_loss
         from sklearn.ensemble import GradientBoostingRegressor, AdaBoostRegressor, GradientBoostingClassifier, AdaBoostClassifier
         import argparse
 
@@ -49,15 +51,6 @@ implementation:
                 self.parameters = parameters
                 self.is_fitted = False
                 self.model_type = f"{algorithm} for {task}"
-                
-            def get_info(self):
-                return {
-                    'algorithm': self.algorithm,
-                    'task': self.task,
-                    'parameters': self.parameters,
-                    'is_fitted': self.is_fitted,
-                    'model_type': self.model_type
-                }
 
         print("STARTING UNIFIED BOOSTING TRAINER")
 
@@ -88,21 +81,12 @@ implementation:
         parser.add_argument('--trained_model', type=str, required=True)
         parser.add_argument('--training_history', type=str, required=True)
         parser.add_argument('--model_coefficients', type=str, required=True)
+        parser.add_argument('--epoch_loss', type=str, required=True)
         args = parser.parse_args()
 
         # Load data, model, and config
         with open(args.processed_data, 'rb') as f:
             data_wrapper = pickle.load(f)
-        
-        # We don't actually need the model from model builder for training
-        # Since we're creating the real model below
-        # Just load it to get the config if needed, but ignore the object
-        try:
-            with open(args.model_in, 'rb') as f:
-                model_obj = pickle.load(f)
-            print(f"Loaded model config: {model_obj.algorithm} for {model_obj.task}")
-        except:
-            print("Could not load model object, using config directly")
         
         config = json.loads(args.config_str)
 
@@ -155,14 +139,56 @@ implementation:
         }
 
         final_params = {**default_params.get(algorithm, {}), **parameters}
+        
+        # Enable training history collection for supported algorithms
+        if algorithm in ['GradientBoosting', 'XGBoost', 'LightGBM']:
+            if algorithm == 'GradientBoosting':
+                final_params['subsample'] = 0.8  # For stochastic training curves
+            elif algorithm == 'XGBoost':
+                final_params['eval_metric'] = 'logloss' if task == 'classification' else 'rmse'
+            elif algorithm == 'LightGBM':
+                final_params['verbose'] = -1  # Disable logging
+
         print(f'Training with parameters: {final_params}')
 
         # Train model
         model = model_class(**final_params)
-        model.fit(X_train, y_train)
-        print("Model training completed successfully")
+        
+        # For algorithms that support staged prediction, collect training history
+        epoch_data = []
+        n_estimators = final_params.get('n_estimators', final_params.get('iterations', 100))
+        
+        if algorithm == 'GradientBoosting' and hasattr(model, 'staged_predict'):
+            print("Collecting staged training history...")
+            model.fit(X_train, y_train)
+            
+            # Collect training metrics at different stages
+            for i, y_pred in enumerate(model.staged_predict(X_train)):
+                if task == 'regression':
+                    train_loss = mean_squared_error(y_train, y_pred)
+                    val_pred = model.staged_predict(X_test)
+                    val_loss = mean_squared_error(y_test, next(val_pred))
+                else:
+                    train_loss = log_loss(y_train, y_pred)
+                    val_pred = model.staged_predict(X_test)
+                    val_loss = log_loss(y_test, next(val_pred))
+                
+                epoch_data.append({
+                    'epoch': i + 1,
+                    'loss': float(train_loss),
+                    'accuracy': float(accuracy_score(y_train, np.round(y_pred))) if task == 'classification' else float(r2_score(y_train, y_pred)),
+                    'validation_loss': float(val_loss),
+                    'validation_accuracy': float(accuracy_score(y_test, np.round(next(iter(model.staged_predict(X_test)))))) if task == 'classification' else float(r2_score(y_test, next(iter(model.staged_predict(X_test)))))
+                })
+                
+                if i >= n_estimators - 1:
+                    break
+        else:
+            # Standard training for other algorithms
+            model.fit(X_train, y_train)
+            print("Model training completed successfully")
 
-        # Predictions
+        # Final predictions
         y_pred_train = model.predict(X_train)
         y_pred_test = model.predict(X_test)
 
@@ -171,32 +197,54 @@ implementation:
             train_metrics = {
                 'r2_score': float(r2_score(y_train, y_pred_train)),
                 'mae': float(mean_absolute_error(y_train, y_pred_train)),
-                'rmse': float(np.sqrt(mean_squared_error(y_train, y_pred_train)))
+                'rmse': float(np.sqrt(mean_squared_error(y_train, y_pred_train))),
+                'mse': float(mean_squared_error(y_train, y_pred_train))
             }
             test_metrics = {
                 'r2_score': float(r2_score(y_test, y_pred_test)),
                 'mae': float(mean_absolute_error(y_test, y_pred_test)),
-                'rmse': float(np.sqrt(mean_squared_error(y_test, y_pred_test)))
+                'rmse': float(np.sqrt(mean_squared_error(y_test, y_pred_test))),
+                'mse': float(mean_squared_error(y_test, y_pred_test))
             }
+            # Calculate loss values for schema
+            train_loss = train_metrics['mse']
+            test_loss = test_metrics['mse']
+            train_accuracy = train_metrics['r2_score']
+            test_accuracy = test_metrics['r2_score']
         else:
             train_metrics = {
                 'accuracy': float(accuracy_score(y_train, y_pred_train)),
-                'precision': float(precision_score(y_train, y_pred_train, zero_division=0)),
-                'recall': float(recall_score(y_train, y_pred_train, zero_division=0)),
-                'f1_score': float(f1_score(y_train, y_pred_train, zero_division=0))
+                'precision': float(precision_score(y_train, y_pred_train, average='weighted', zero_division=0)),
+                'recall': float(recall_score(y_train, y_pred_train, average='weighted', zero_division=0)),
+                'f1_score': float(f1_score(y_train, y_pred_train, average='weighted', zero_division=0))
             }
             test_metrics = {
                 'accuracy': float(accuracy_score(y_test, y_pred_test)),
-                'precision': float(precision_score(y_test, y_pred_test, zero_division=0)),
-                'recall': float(recall_score(y_test, y_pred_test, zero_division=0)),
-                'f1_score': float(f1_score(y_test, y_pred_test, zero_division=0))
+                'precision': float(precision_score(y_test, y_pred_test, average='weighted', zero_division=0)),
+                'recall': float(recall_score(y_test, y_pred_test, average='weighted', zero_division=0)),
+                'f1_score': float(f1_score(y_test, y_pred_test, average='weighted', zero_division=0))
             }
+            # Calculate loss values for schema
+            train_loss = float(log_loss(y_train, model.predict_proba(X_train)))
+            test_loss = float(log_loss(y_test, model.predict_proba(X_test)))
+            train_accuracy = train_metrics['accuracy']
+            test_accuracy = test_metrics['accuracy']
             
             if hasattr(model, 'predict_proba'):
-                y_pred_proba_train = model.predict_proba(X_train)[:, 1]
-                y_pred_proba_test = model.predict_proba(X_test)[:, 1]
-                train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train))
-                test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test))
+                y_pred_proba_train = model.predict_proba(X_train)
+                y_pred_proba_test = model.predict_proba(X_test)
+                train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train, multi_class='ovr'))
+                test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test, multi_class='ovr'))
+
+        # If no epoch data was collected (for non-staged algorithms), create final epoch entry
+        if not epoch_data:
+            epoch_data = [{
+                'epoch': n_estimators,
+                'loss': train_loss,
+                'accuracy': train_accuracy,
+                'validation_loss': test_loss,
+                'validation_accuracy': test_accuracy
+            }]
 
         # Feature importances
         if hasattr(model, 'feature_importances_'):
@@ -211,7 +259,7 @@ implementation:
         else:
             coefficients_data = [{'feature': name, 'importance': 0, 'importance_percent': 0} for name in feature_names]
 
-        # Training history
+        # Enhanced training history for schema compatibility
         history = {
             'algorithm': algorithm,
             'task': task,
@@ -222,24 +270,36 @@ implementation:
             'training_samples': len(X_train),
             'test_samples': len(X_test),
             'dataset_name': dataset_info.get('dataset_name', 'Unknown'),
-            'feature_names': feature_names
+            'feature_names': feature_names,
+            # Schema-compatible fields
+            'epoch': n_estimators,
+            'loss': train_loss,
+            'accuracy': train_accuracy,
+            'validation_loss': test_loss,
+            'validation_accuracy': test_accuracy,
+            'custom_metrics': test_metrics
         }
 
         # Save outputs
         os.makedirs(os.path.dirname(args.trained_model) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.training_history) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.model_coefficients) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.epoch_loss) or ".", exist_ok=True)
         
         with open(args.trained_model, 'wb') as f:
             pickle.dump(model, f)
         with open(args.training_history, 'w') as f:
             json.dump(history, f, indent=2)
+        with open(args.epoch_loss, 'w') as f:
+            json.dump(epoch_data, f, indent=2)
         coefficients_df = pd.DataFrame(coefficients_data)
         with open(args.model_coefficients, 'w') as f:
             coefficients_df.to_csv(f, index=False)
         
         print(f"Training completed for {task}")
-        print(f"Test metrics: {test_metrics}")
+        print(f"Final epoch: {n_estimators}")
+        print(f"Final training loss: {train_loss:.4f}, accuracy: {train_accuracy:.4f}")
+        print(f"Final validation loss: {test_loss:.4f}, accuracy: {test_accuracy:.4f}")
     args:
       - --processed_data
       - {inputPath: processed_data}
@@ -253,3 +313,5 @@ implementation:
       - {outputPath: training_history}
       - --model_coefficients
       - {outputPath: model_coefficients}
+      - --epoch_loss
+      - {outputPath: epoch_loss}
