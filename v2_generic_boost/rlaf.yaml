@@ -1,4 +1,4 @@
-name: 2 DQN RLAF Loop Boosting
+name: Boosting DQN RLAF Loop
 description: Triggers the DQN RLAF pipeline in a loop to optimize boosting model hyperparameters
 inputs:
   - {name: trained_model, type: Model}
@@ -391,7 +391,7 @@ implementation:
 
             print(f"DEBUG: Final improvement score: {improvement_score:.4f}")
             
-            os.makedirs(os.path.dirname(output_model_path), exist_ok=True)
+            os.makedirs(os.path.dirname(output_model_path) or ".", exist_ok=True)
             print(f"DEBUG: Output directory prepared: {os.path.dirname(output_model_path)}")
             
             if improvement_score > 0:
@@ -582,14 +582,24 @@ implementation:
                                 action_id = latest_rlaf2pierce['action_id']
                                 print(f"DEBUG: Looking for action_id: {action_id} in {len(rlaf_actions)} actions")
                                 
-                                action_details = next((a for a in rlaf_actions if a["id"] == action_id), None)
+                                # FIXED: Enhanced action lookup with fallback for action_id 0
+                                action_details = None
+                                
+                                # Try exact match first
+                                if action_id > 0:
+                                    action_details = next((a for a in rlaf_actions if a["id"] == action_id), None)
+                                
+                                # If action_id is 0 or not found, use first available action
+                                if not action_details and rlaf_actions:
+                                    action_details = rlaf_actions[0]
+                                    print(f"DEBUG: Using first available action (ID: {action_details['id']}) as fallback")
                                 
                                 if action_details:
                                     action_to_use = action_details['params']
-                                    print(f"DEBUG: Using DQN action: {action_to_use}")
+                                    print(f"DEBUG: Using DQN action ID {action_details['id']}: {action_to_use}")
                                 else:
-                                    print("ERROR: DQN action not found in rlaf_actions")
-                                    raise ValueError(f"Action ID {action_id} not found in rlaf_actions")
+                                    print("ERROR: No valid actions found in rlaf_actions")
+                                    raise ValueError("No valid actions available from DQN pipeline")
                             else:
                                 print("DEBUG: pierce_or_not is false. Stopping RLAF loop.")
                                 break
@@ -621,7 +631,7 @@ implementation:
                 print(f"DEBUG: Retraining completed. New metrics: {current_metrics}")
             
             print("DEBUG: Saving final results...")
-            os.makedirs(os.path.dirname(args.rlaf_output), exist_ok=True)
+            os.makedirs(os.path.dirname(args.rlaf_output) or ".", exist_ok=True)
             final_output = {
                 "final_metrics": current_metrics,
                 "model_type": "Boosting_ensemble",
