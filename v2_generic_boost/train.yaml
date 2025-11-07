@@ -1,4 +1,4 @@
-name: 2 Unified Boosting Trainer
+name: Unified Boosting Trainer
 description: Trains boosting model using unified configuration with enhanced schema outputs
 inputs:
   - name: processed_data
@@ -104,6 +104,9 @@ implementation:
         parameters = model_config.get('parameters', {})
 
         print(f'Training {algorithm} for {task} on {X_train.shape[0]} samples')
+        print(f'Training data shape: {X_train.shape}')
+        print(f'Unique classes in y_train: {np.unique(y_train)}')
+        print(f'Number of classes: {len(np.unique(y_train))}')
 
         # Algorithm mapping
         algorithm_map = {
@@ -140,53 +143,22 @@ implementation:
 
         final_params = {**default_params.get(algorithm, {}), **parameters}
         
-        # Enable training history collection for supported algorithms
-        if algorithm in ['GradientBoosting', 'XGBoost', 'LightGBM']:
-            if algorithm == 'GradientBoosting':
-                final_params['subsample'] = 0.8  # For stochastic training curves
-            elif algorithm == 'XGBoost':
-                final_params['eval_metric'] = 'logloss' if task == 'classification' else 'rmse'
-            elif algorithm == 'LightGBM':
-                final_params['verbose'] = -1  # Disable logging
+        # For XGBoost classification, handle multi-class properly
+        if algorithm == 'XGBoost' and task == 'classification':
+            n_classes = len(np.unique(y_train))
+            if n_classes > 2:
+                final_params['objective'] = 'multi:softprob'
+                final_params['eval_metric'] = 'mlogloss'
+            else:
+                final_params['objective'] = 'binary:logistic'
+                final_params['eval_metric'] = 'logloss'
 
         print(f'Training with parameters: {final_params}')
 
         # Train model
         model = model_class(**final_params)
-        
-        # For algorithms that support staged prediction, collect training history
-        epoch_data = []
-        n_estimators = final_params.get('n_estimators', final_params.get('iterations', 100))
-        
-        if algorithm == 'GradientBoosting' and hasattr(model, 'staged_predict'):
-            print("Collecting staged training history...")
-            model.fit(X_train, y_train)
-            
-            # Collect training metrics at different stages
-            for i, y_pred in enumerate(model.staged_predict(X_train)):
-                if task == 'regression':
-                    train_loss = mean_squared_error(y_train, y_pred)
-                    val_pred = model.staged_predict(X_test)
-                    val_loss = mean_squared_error(y_test, next(val_pred))
-                else:
-                    train_loss = log_loss(y_train, y_pred)
-                    val_pred = model.staged_predict(X_test)
-                    val_loss = log_loss(y_test, next(val_pred))
-                
-                epoch_data.append({
-                    'epoch': i + 1,
-                    'loss': float(train_loss),
-                    'accuracy': float(accuracy_score(y_train, np.round(y_pred))) if task == 'classification' else float(r2_score(y_train, y_pred)),
-                    'validation_loss': float(val_loss),
-                    'validation_accuracy': float(accuracy_score(y_test, np.round(next(iter(model.staged_predict(X_test)))))) if task == 'classification' else float(r2_score(y_test, next(iter(model.staged_predict(X_test)))))
-                })
-                
-                if i >= n_estimators - 1:
-                    break
-        else:
-            # Standard training for other algorithms
-            model.fit(X_train, y_train)
-            print("Model training completed successfully")
+        model.fit(X_train, y_train)
+        print("Model training completed successfully")
 
         # Final predictions
         y_pred_train = model.predict(X_train)
@@ -212,6 +184,9 @@ implementation:
             train_accuracy = train_metrics['r2_score']
             test_accuracy = test_metrics['r2_score']
         else:
+            # Classification metrics
+            n_classes = len(np.unique(y_train))
+            
             train_metrics = {
                 'accuracy': float(accuracy_score(y_train, y_pred_train)),
                 'precision': float(precision_score(y_train, y_pred_train, average='weighted', zero_division=0)),
@@ -224,27 +199,47 @@ implementation:
                 'recall': float(recall_score(y_test, y_pred_test, average='weighted', zero_division=0)),
                 'f1_score': float(f1_score(y_test, y_pred_test, average='weighted', zero_division=0))
             }
-            # Calculate loss values for schema
-            train_loss = float(log_loss(y_train, model.predict_proba(X_train)))
-            test_loss = float(log_loss(y_test, model.predict_proba(X_test)))
-            train_accuracy = train_metrics['accuracy']
-            test_accuracy = test_metrics['accuracy']
             
+            # Calculate loss values for schema
             if hasattr(model, 'predict_proba'):
                 y_pred_proba_train = model.predict_proba(X_train)
                 y_pred_proba_test = model.predict_proba(X_test)
-                train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train, multi_class='ovr'))
-                test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test, multi_class='ovr'))
+                train_loss = float(log_loss(y_train, y_pred_proba_train))
+                test_loss = float(log_loss(y_test, y_pred_proba_test))
+                
+                # Handle ROC AUC for multi-class classification
+                try:
+                    if n_classes == 2:
+                        # Binary classification
+                        train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train[:, 1]))
+                        test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test[:, 1]))
+                    else:
+                        # Multi-class classification
+                        train_metrics['roc_auc'] = float(roc_auc_score(y_train, y_pred_proba_train, multi_class='ovr', average='weighted'))
+                        test_metrics['roc_auc'] = float(roc_auc_score(y_test, y_pred_proba_test, multi_class='ovr', average='weighted'))
+                except Exception as e:
+                    print(f"ROC AUC calculation failed: {e}")
+                    train_metrics['roc_auc'] = 0.0
+                    test_metrics['roc_auc'] = 0.0
+            else:
+                # If model doesn't have predict_proba, use simple accuracy-based loss
+                train_loss = 1 - train_metrics['accuracy']
+                test_loss = 1 - test_metrics['accuracy']
+                train_metrics['roc_auc'] = 0.0
+                test_metrics['roc_auc'] = 0.0
+            
+            train_accuracy = train_metrics['accuracy']
+            test_accuracy = test_metrics['accuracy']
 
-        # If no epoch data was collected (for non-staged algorithms), create final epoch entry
-        if not epoch_data:
-            epoch_data = [{
-                'epoch': n_estimators,
-                'loss': train_loss,
-                'accuracy': train_accuracy,
-                'validation_loss': test_loss,
-                'validation_accuracy': test_accuracy
-            }]
+        # Create epoch data (simplified for now)
+        n_estimators = final_params.get('n_estimators', final_params.get('iterations', 100))
+        epoch_data = [{
+            'epoch': n_estimators,
+            'loss': train_loss,
+            'accuracy': train_accuracy,
+            'validation_loss': test_loss,
+            'validation_accuracy': test_accuracy
+        }]
 
         # Feature importances
         if hasattr(model, 'feature_importances_'):
@@ -271,6 +266,7 @@ implementation:
             'test_samples': len(X_test),
             'dataset_name': dataset_info.get('dataset_name', 'Unknown'),
             'feature_names': feature_names,
+            'n_classes': n_classes if task == 'classification' else None,
             # Schema-compatible fields
             'epoch': n_estimators,
             'loss': train_loss,
@@ -297,9 +293,10 @@ implementation:
             coefficients_df.to_csv(f, index=False)
         
         print(f"Training completed for {task}")
-        print(f"Final epoch: {n_estimators}")
+        print(f"Number of classes: {n_classes if task == 'classification' else 'N/A'}")
         print(f"Final training loss: {train_loss:.4f}, accuracy: {train_accuracy:.4f}")
         print(f"Final validation loss: {test_loss:.4f}, accuracy: {test_accuracy:.4f}")
+        print(f"Test metrics: {test_metrics}")
     args:
       - --processed_data
       - {inputPath: processed_data}
