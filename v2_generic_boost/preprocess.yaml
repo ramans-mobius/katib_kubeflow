@@ -1,4 +1,4 @@
-name: 2 Unified Preprocessor
+name: Unified Preprocessor
 description: Preprocesses data using unified configuration
 inputs:
   - name: train_data
@@ -17,6 +17,9 @@ outputs:
     type: Model
   - name: feature_info
     type: String
+  - name: weight_out
+    type: String
+    description: "Preprocessing configuration and feature weights as JSON string"
 
 implementation:
   container:
@@ -42,6 +45,7 @@ implementation:
         parser.add_argument('--processed_data', type=str, required=True)
         parser.add_argument('--preprocessing_pipeline', type=str, required=True)
         parser.add_argument('--feature_info', type=str, required=True)
+        parser.add_argument('--weight_out', type=str, required=True)
         args = parser.parse_args()
 
         # Load data and config
@@ -73,6 +77,8 @@ implementation:
         X_train_processed = X_train.copy()
         X_test_processed = X_test.copy()
         current_feature_names = feature_names.copy()
+        feature_scores = None
+        feature_weights = None
 
         # Handle missing values
         if np.isnan(X_train_processed).any():
@@ -109,6 +115,18 @@ implementation:
                 if hasattr(selector, 'get_support'):
                     selected_mask = selector.get_support()
                     current_feature_names = [name for i, name in enumerate(current_feature_names) if selected_mask[i]]
+                    
+                    # Get feature scores for weight output
+                    if hasattr(selector, 'scores_'):
+                        feature_scores = selector.scores_
+                        # Normalize scores to get weights
+                        if feature_scores is not None and len(feature_scores) > 0:
+                            # Handle infinite or NaN scores
+                            valid_scores = np.nan_to_num(feature_scores, nan=0.0, posinf=1.0, neginf=0.0)
+                            if np.max(valid_scores) > 0:
+                                feature_weights = (valid_scores - np.min(valid_scores)) / (np.max(valid_scores) - np.min(valid_scores))
+                            else:
+                                feature_weights = np.ones_like(valid_scores)
                 
                 preprocessing_steps.append(('feature_selector', selector))
                 print(f'Applied feature selection: {X_train_processed.shape[1]} features')
@@ -159,10 +177,36 @@ implementation:
             'test_shape': X_test_processed.shape
         }
 
-        # Save outputs - FIXED: Use args.output_path directly
+        # Create weight output configuration
+        weight_config = {
+            'preprocessing_complete': True,
+            'preprocessing_config': {
+                'scaling': scaling,
+                'feature_selection': feature_selection,
+                'k_features': k_features,
+                'task_type': task_type
+            },
+            'feature_info': {
+                'original_feature_count': len(feature_names),
+                'final_feature_count': len(current_feature_names),
+                'selected_features': current_feature_names,
+                'feature_scores': feature_scores.tolist() if feature_scores is not None else None,
+                'feature_weights': feature_weights.tolist() if feature_weights is not None else None
+            },
+            'dataset_stats': {
+                'train_samples': X_train_processed.shape[0],
+                'test_samples': X_test_processed.shape[0],
+                'feature_dimension': X_train_processed.shape[1]
+            },
+            'preprocessing_steps': [step[0] for step in preprocessing_steps],
+            'original_config': config
+        }
+
+        # Save outputs
         os.makedirs(os.path.dirname(args.processed_data) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.preprocessing_pipeline) or ".", exist_ok=True)
         os.makedirs(os.path.dirname(args.feature_info) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(args.weight_out) or ".", exist_ok=True)
         
         with open(args.processed_data, 'wb') as f:
             pickle.dump(data_wrapper, f)
@@ -170,9 +214,12 @@ implementation:
             pickle.dump(preprocessing_pipeline, f)
         with open(args.feature_info, 'w') as f:
             json.dump(feature_info, f, indent=2)
+        with open(args.weight_out, 'w') as f:
+            json.dump(weight_config, f, indent=2)
         
         print('Preprocessing complete')
         print(f'Final features: {len(current_feature_names)}')
+        print(f'Weight config saved with {len(current_feature_names)} features')
     args:
       - --train_data
       - {inputPath: train_data}
@@ -188,3 +235,5 @@ implementation:
       - {outputPath: preprocessing_pipeline}
       - --feature_info
       - {outputPath: feature_info}
+      - --weight_out
+      - {outputPath: weight_out}
